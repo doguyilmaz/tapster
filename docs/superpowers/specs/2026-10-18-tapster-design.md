@@ -11,8 +11,8 @@ hold no secrets. Phase 1 covers command-line tools written in Go and in Bun/Type
 ### What the user asked for
 
 - Every repository releases in its own way today. Signing secrets and tap tokens are copied repo by repo under
-  different names, and keeping them in line is hard.
-- One tool should hold that information, entered once and securely, and do the work the same way for every project.
+  different names and keeping them in line is hard.
+- One tool should hold that information, entered once and securely and do the work the same way for every project.
 - It should be generic, so others can set up their own hub with a config and their own repositories.
 - It should guide the person through setup.
 - It should cover Go, Bun/JS/TS and SwiftUI apps as far as possible, in phases.
@@ -22,12 +22,12 @@ hold no secrets. Phase 1 covers command-line tools written in Go and in Bun/Type
   The user owns their Developer ID and their repositories.
 - The hub keeps the name `homebrew-tap` and becomes the shared distribution area: Homebrew, Scoop, later appcasts and
   Linux repositories.
-- ebb and lockstep, private today, become public, and they migrate when they are.
+- ebb and lockstep, private today, become public and they migrate when they are.
 
 ### Success criteria for phase 1
 
 1. **Release without secrets.**
-   - A Go or Bun CLI releases by pushing a tag, and its repository holds no secrets.
+   - A Go or Bun CLI releases by pushing a tag and its repository holds no secrets.
    - Typically within 15 minutes, the release is published with Developer ID–signed, notarized macOS binaries.
    - The hub holds the cask, plus a Scoop manifest when there are Windows builds.
    - GitHub may delay scheduled runs, so the time is a target, not a guarantee.
@@ -63,7 +63,7 @@ hold no secrets. Phase 1 covers command-line tools written in Go and in Bun/Type
 
 | Decision | Choice | Why |
 | --- | --- | --- |
-| Model | Pull: projects open drafts, the hub signs and publishes | Secrets live in one place, and the signing job never runs project code. |
+| Model | Pull: projects open drafts, the hub signs and publishes | Secrets live in one place and the signing job never runs project code. |
 | Hub name | Keep `homebrew-tap` | `brew install user/tap/pkg` needs the `homebrew-` prefix. Scoop reads `bucket/` from any repository. |
 | Access | The user's own GitHub App, created through the manifest flow | One token per work item, limited to one repository, revoked when done. No personal access tokens. |
 | Language | TypeScript, developed and tested with Bun, shipped as a Node 24 JavaScript action and an npm CLI (`@doguyilmaz/tapster`). Runtime dependencies: `@actions/core`, `yaml` and `zod` only; GitHub is called with plain `fetch`. | GitHub Actions' native runtime. The user's main language. Fewest dependencies in the job that holds the keys. |
@@ -123,7 +123,7 @@ A project hands a release to the hub as a **draft** for a tag matching `^v\d+\.\
 tag is ignored and reported. The draft must:
 - attach the build archives;
 - attach `checksums.txt` in GoReleaser format, `<sha256>  <file name>` per line, covering every other asset;
-- be the only release for that tag, and the tag must exist.
+- be the only release for that tag and the tag must exist.
 
 **Ready** means:
 - every asset has `state: "uploaded"`;
@@ -197,7 +197,7 @@ Casks follow the newest stable release; prereleases are signed and published but
 
 1. Mint a JWT and list installations.
 2. For each package, mint an installation token limited to that repository with `contents: write` and
-   `attestations: read`, and mask it.
+   `attestations: read` and mask it.
 3. List the package's releases and find ready drafts (§5). Note drafts that tapster started earlier (§9 resume).
 4. Revoke the token.
 5. Output the work list: package name, tag and release ID, re-validated by the next job. The App ID is a Variable,
@@ -218,7 +218,7 @@ Each work item is isolated: one failing never stops the others.
 **sign** (step env: Apple keys only):
 5. Set up the keychain (§8).
 6. Sign every collected Mach-O file and verify it: the authority is "Developer ID Application", the Team ID matches
-   the certificate's, and the runtime flag is set.
+   the certificate's and the runtime flag is set.
 7. Zip each archive's signed files under that archive's own directory and submit them in one `notarytool` call per
    release. Wait, with a 30-minute timeout. Only `Accepted` passes. Otherwise fetch the notarization log and summarize
    its issues.
@@ -242,11 +242,11 @@ Each work item is isolated: one failing never stops the others.
 16. Attest the repacked archives in the hub (`actions/attest-build-provenance`), so the signed outputs have provenance
     of their own.
 
-### render (macOS, no environment; runs only when check reports work, a `publishing` entry, or a cask behind the state)
+### render (macOS, no environment; runs only when check reports work, a `publishing` entry or a cask behind the state)
 
 17. For each package, take the newest stable release recorded in the state as `published`. Releases published any other way are
     never rendered; the summary reports them.
-18. Read the published `checksums.txt`, check its digest against the state, and render the cask and the Scoop
+18. Read the published `checksums.txt`, check its digest against the state and render the cask and the Scoop
     manifest (§10). When the rendered files equal the committed ones, stop here.
 19. Run `brew style` and `brew audit --cask --online`. Run them on a local commit of the hub, because
     `brew tap <path>` clones only committed content.
@@ -265,7 +265,7 @@ Each work item is isolated: one failing never stops the others.
   - A temporary keychain in `$RUNNER_TEMP` with a random one-time password.
   - No auto-lock (`set-keychain-settings` without `-t`).
   - `set-key-partition-list -S apple-tool:,apple:,codesign:`, so `codesign` never prompts.
-  - Added to the search list, and the original list is restored in teardown.
+  - Added to the search list and the original list is restored in teardown.
   - Teardown deletes the keychain in `finally` and again in an `if: always()` step.
 - **Certificate:**
   - The `.p12` is first re-wrapped with `/usr/bin/openssl pkcs12`. The real password comes in through `-passin env:`
@@ -290,7 +290,7 @@ Each work item is isolated: one failing never stops the others.
 
 ## 9. Publishing and resume
 
-- **Resume.** A draft is resumed rather than rejected when it has staging assets, or when its darwin binaries are
+- **Resume.** A draft is resumed rather than rejected when it has staging assets or when its darwin binaries are
   already signed with the configured Team ID. The next run finishes the staging renames and the publish.
 - **Assets.** Replaced only through the staging-and-rename sequence in §7.12.
 - **Immutable releases.** Nothing changes after publish, which is why every check runs before it.
@@ -301,17 +301,17 @@ Each work item is isolated: one failing never stops the others.
   - versions come only from tags matching §5;
   - names match the `name` pattern;
   - URLs are built from the repository and the asset name; asset names allow only `[A-Za-z0-9._-]`;
-  - free text (description, caveats) goes through a Ruby string literal escaper, and JSON through `JSON.stringify`.
+  - free text (description, caveats) goes through a Ruby string literal escaper and JSON through `JSON.stringify`.
 - **Cask:** `version` and `on_macos`/`on_linux` with `on_arm`/`on_intel` blocks from `assets`, each holding `url`
   and `sha256`. Plus `name`, `desc`, `homepage`, `livecheck { skip "tapster" }`, `binary` stanzas, completions, and
   `uninstall`/`zap`/`caveats` from the config. Linux blocks depend on the spike in plan task 1.
 - **Scoop:** `bucket/<name>.json` with `version`, `description`, `homepage`, `license`, an `architecture` block
-  (`64bit`, `arm64`) holding `url` and `hash`, and `bin`.
+  (`64bit`, `arm64`) holding `url` and `hash` and `bin`.
 - **Archives:** repacked with:
   - `COPYFILE_DISABLE=1` and `/usr/bin/tar --no-mac-metadata --no-xattrs`;
   - owner and group 0, sorted entries, mtime from the release's tag date, `gzip -n`;
   - for zip, `zip -X -y`.
-- **Golden files.** The same input produces the same bytes, and golden-file tests hold that.
+- **Golden files.** The same input produces the same bytes and golden-file tests hold that.
 
 ## 11. Hub repository
 
@@ -345,11 +345,11 @@ token.
 
 ### 12.2 Keeping credentials out of logs
 
-- **Only secrets.** Credentials are GitHub Secrets, never Variables, and never action `inputs`. They reach the action
+- **Only secrets.** Credentials are GitHub Secrets, never Variables and never action `inputs`. They reach the action
   through the step's `env:` only.
 - **Read once.** On start, the action reads each credential from `process.env`, registers it and every derived value
-  with `core.setSecret`, and deletes it from `process.env`. Derived values include decoded key bytes, the JWT, each
-  installation token, the one-time passwords, key and issuer IDs, and base64 and hex forms.
+  with `core.setSecret` and deletes it from `process.env`. Derived values include decoded key bytes, the JWT, each
+  installation token, the one-time passwords, key and issuer IDs and base64 and hex forms.
 - **Mask-aware token minting.** Tokens are minted by tapster's own code (Node `crypto` for the JWT, a REST call for the
   token). Each token is masked before use and revoked with `DELETE /installation/token` in `finally`. There is no
   `@octokit/auth-app`, whose automatic re-minting bypasses masking.
@@ -362,14 +362,14 @@ token.
     registered value, before a short excerpt is logged.
   - Errors carry only the tool name and the exit code, never argv. `@actions/exec` and `execFile` error messages are
     not used.
-- **Values on command lines.** These are the only ones, and each is a one-time value or an identifier, masked
+- **Values on command lines.** These are the only ones and each is a one-time value or an identifier, masked
   beforehand: the keychain password (`create-keychain`, `unlock-keychain`, `set-key-partition-list`), the one-time
-  `.p12` password (`security import -P`), and the notary key ID and issuer ID.
+  `.p12` password (`security import -P`) and the notary key ID and issuer ID.
 - **Error handling.** HTTP errors are reduced to method, path and status. Request and response bodies are never
   logged.
 - **Nothing persists.** Nothing is printed with `console.*`: all logging goes through `report`, which applies the
   filter.
-  - Step outputs carry only package names, tags and release IDs, and are re-validated by the receiving job.
+  - Step outputs carry only package names, tags and release IDs and are re-validated by the receiving job.
   - No artifacts, caches or job summaries contain credentials.
 - **No tracing.** `set -x` is never used. `ACTIONS_STEP_DEBUG` adds no output from tapster.
 - **Self-hosted runners** are refused: the action checks `runner.environment === "github-hosted"`.
@@ -382,9 +382,9 @@ therefore has two parts:
 1. **Canary run.** The whole pipeline runs with the canaries as plain environment values, not secrets, so nothing
    masks them.
    - The fixtures are a self-signed `.p12` (`codesign` works with it; notarization then fails as expected), a
-     generated `.p8`, and a test App on a fixture repository.
+     generated `.p8` and a test App on a fixture repository.
    - A later job (`needs:`, `if: always()`) downloads each job's log through `GET /actions/jobs/{id}/logs`. It fails
-     if any line contains a canary as plain text, base64 (three offsets), hex, URL encoding, or any 10-character
+     if any line contains a canary as plain text, base64 (three offsets), hex, URL encoding or any 10-character
      window of one.
    - Variants force each failure path: wrong `.p12` password, notary 401, GitHub 404, 422 and 5xx, a dropped
      connection, a malformed `checksums.txt`, a malicious archive.
@@ -392,7 +392,7 @@ therefore has two parts:
    the step-header `env:` block, because a `***` means something printed a secret and masking caught it.
 
 Both run on every pull request and on every push to `main`, including the macOS stages. Until tapster is public,
-these cost paid macOS minutes, and that is accepted.
+these cost paid macOS minutes and that is accepted.
 
 ### 12.4 Trust boundaries in the hub
 
@@ -401,7 +401,7 @@ these cost paid macOS minutes, and that is accepted.
   - Workflow-level `permissions: {}`, with each job granting only what it needs.
   - `persist-credentials: false` on checkout.
   - Dispatch inputs reach code only through `with:`, never `${{ inputs.* }}` inside `run:`.
-- **Environment use.** No other hub workflow may reference the environment. `doctor` fails if one does, or if
+- **Environment use.** No other hub workflow may reference the environment. `doctor` fails if one does or if
   `tapster.yml` has another trigger: `pull_request_target`, `issue_comment` and `workflow_run` run with the default
   branch's ref and would pass the branch rule.
 - **Default token.** The repository's default workflow token is set to read-only.
@@ -412,8 +412,8 @@ these cost paid macOS minutes, and that is accepted.
 
 ### 12.5 Rendering runs Ruby, so it holds no credential
 
-Homebrew loads a cask as Ruby, and `brew audit --online` fetches URLs. The render job therefore runs without the
-environment. It has only its job token with `contents: write` on the hub, and it renders only validated and escaped
+Homebrew loads a cask as Ruby and `brew audit --online` fetches URLs. The render job therefore runs without the
+environment. It has only its job token with `contents: write` on the hub and it renders only validated and escaped
 values (§10).
 
 ### 12.6 Attestation
@@ -426,10 +426,10 @@ values (§10).
 ### 12.7 Archive safety
 
 Before extracting, tapster rejects any entry that is:
-- an absolute path, or a path with `..` after normalization;
+- an absolute path or a path with `..` after normalization;
 - a symlink or hardlink whose target, resolved from the entry's own directory, leaves the archive;
 - a device file or FIFO;
-- over 1 GiB uncompressed, or pushing the total past 4 GiB;
+- over 1 GiB uncompressed or pushing the total past 4 GiB;
 - a duplicate path.
 
 Archives are parsed in the fetch step, which holds no Apple key.
@@ -439,12 +439,12 @@ Archives are parsed in the fetch step, which holds no Apple key.
 | Threat | Handling |
 | --- | --- |
 | Logs expose a credential | §12.2, proven on success and failure paths by §12.3. |
-| A tag name injects code into a cask | Strict tag pattern, escaping, and render without credentials (§10, §12.5). |
+| A tag name injects code into a cask | Strict tag pattern, escaping and render without credentials (§10, §12.5). |
 | A compromised project build gets signed | Attestation required for public projects (§12.6). Otherwise the user's responsibility, as agreed. |
 | A release published outside tapster gets a cask | Render uses only releases recorded in the state as `published` (§7.17). |
 | A project changes a draft during processing | Re-list and compare before mutating (§7.10). |
 | A malicious package inside tapster | Three runtime dependencies (`@actions/core`, `yaml`, `zod`), exact versions, lockfile, `--ignore-scripts`, reproducible `dist/` checked in CI, pinned actions. |
-| A workflow change to the hub gets the credentials | Branch-only environment, trigger allowlist and `doctor` checks (§12.4), and the `main` ruleset. |
+| A workflow change to the hub gets the credentials | Branch-only environment, trigger allowlist and `doctor` checks (§12.4) and the `main` ruleset. |
 | A leaked App key | It can write to the installed repositories until revoked. `tapster init --rotate app` makes a new key and deletes the old one. |
 | A leaked Apple key | Revoke it in App Store Connect or with Apple; `init --rotate notary` or `init --rotate certificate`. |
 
@@ -461,22 +461,22 @@ Archives are parsed in the fetch step, which holds no Apple key.
 
 ### `tapster init` (once, in a clone of the hub)
 
-1. **Create the App.** Start a local server, open the GitHub App manifest form, and check the returned `state`.
-   Exchange the code for the App's ID and key. The key goes straight into the environment secret over stdin to `gh`,
+1. **Create the App.** Start a local server, open the GitHub App manifest form and check the returned `state`.
+   Exchange the code for the App's ID and key. The key goes straight into the environment secret over stdin to `gh`
    and `client_secret` and `webhook_secret` are discarded unprinted.
 2. **Install the App.** Open the App's install page so the person picks the project repositories.
-3. **Create the environment.** Create `tapster` with the branch policy, and set the repository's default workflow
+3. **Create the environment.** Create `tapster` with the branch policy and set the repository's default workflow
    token to read-only.
 4. **Store credentials.** Ask for the `.p12` path and password and the `.p8` path, key ID and issuer ID, with hidden
    input. Store them over stdin. Read the Team ID from the certificate and save it as a Variable.
-5. **Write files.** Write `tapster.yml`, the workflow, `README.md` and `.tapster/state.json`, and add the `main`
+5. **Write files.** Write `tapster.yml`, the workflow, `README.md` and `.tapster/state.json` and add the `main`
    ruleset. The person commits.
 
 `init --rotate <app|certificate|notary>` replaces one credential and, for the App, deletes the old key.
 
 ### `tapster add` (inside a project clone)
 
-1. **Detect the project type**: `go.mod` with `.goreleaser.y*ml`, or `package.json` with a Bun lockfile.
+1. **Detect the project type**: `go.mod` with `.goreleaser.y*ml` or `package.json` with a Bun lockfile.
 2. **Write the changes** from §5 to local files and explain each one.
 3. **Print the `tapster.yml` entry** to paste into the hub, with assets inferred from the latest release.
 4. **Check access.** If the App is not installed on the repository, print its install link.
@@ -484,12 +484,12 @@ Archives are parsed in the fetch step, which holds no Apple key.
 ### `tapster doctor` (in the hub clone)
 
 Each check reports ok or a plain-language fix:
-- the config parses, and every repository has the same owner as the hub and is public;
+- the config parses and every repository has the same owner as the hub and is public;
 - the environment exists with the branch policy;
 - all secrets in §12.1 exist (names only), along with the Variables;
 - the App is installed on every listed repository and not on the hub;
 - the default token is read-only and the ruleset is present;
-- `tapster.yml` triggers are only `schedule` and `workflow_dispatch`, and no other workflow references the
+- `tapster.yml` triggers are only `schedule` and `workflow_dispatch` and no other workflow references the
   environment;
 - the schedule is enabled;
 - no project still holds `HOMEBREW_TAP_*` or `MACOS_*` secrets.
@@ -511,7 +511,7 @@ Each check reports ok or a plain-language fix:
   - a private test hub (`doguyilmaz/homebrew-tapster-test`) and fixture projects with one Go and one Bun CLI, using
     the real credentials, triggered by hand;
   - checks: the downloaded binary passes `codesign -R=notarized --check-notarization` and
-    `spctl -a -t install` ("Notarized Developer ID"), and `brew install --cask` from the test hub works on a macOS
+    `spctl -a -t install` ("Notarized Developer ID") and `brew install --cask` from the test hub works on a macOS
     runner.
 
 ## 16. Migration
@@ -523,14 +523,14 @@ For each project:
 3. Release a patch version and check the cask and the binary.
 4. Delete the project's `MACOS_*` and `HOMEBREW_TAP_*` secrets.
 
-**Hub cleanup:** remove the root `ebb.rb` and `lockstep.rb` formulae, and add the `tap_migrations.json` entries.
+**Hub cleanup:** remove the root `ebb.rb` and `lockstep.rb` formulae and add the `tap_migrations.json` entries.
 
 ## 17. Phases
 
 | Phase | Scope |
 | --- | --- |
 | 1 (this spec) | Go and Bun CLIs, casks, Scoop, `init`/`add`/`doctor`, leak test. tapster becomes public (the public hub can only use a public action), then the five CLIs migrate. |
-| 2 | SwiftUI apps (battistics, hafifpix, recesso): Release build ad-hoc signed in the project; in the hub, Sparkle-order re-signing with `codesign`, DMG, notarize and staple, Sparkle EdDSA signature, and the appcast attached to the project's own release (§20). |
+| 2 | SwiftUI apps (battistics, hafifpix, recesso): Release build ad-hoc signed in the project; in the hub, Sparkle-order re-signing with `codesign`, DMG, notarize and staple, Sparkle EdDSA signature and the appcast attached to the project's own release (§20). |
 | 3 | A Cloudflare Worker that takes verified release webhooks and OIDC calls from project CI and starts the hub run at once. Marketplace listing and a docs site for others. apt and rpm repositories from the hub. |
 
 **Out of scope for phase 1:**
@@ -546,10 +546,10 @@ For each project:
 
 These assumptions decide details of the design and are verified before building:
 - **Bun entitlements:** the minimal set for a signed Bun binary that runs and notarizes.
-- **Drafts and an App token:** staging upload, delete and rename of assets on a draft, and the asset `digest` field.
+- **Drafts and an App token:** staging upload, delete and rename of assets on a draft and the asset `digest` field.
 - **Deployments:** whether `deployment: false` on environment jobs keeps the branch policy enforced (it avoids
   thousands of deployment records).
-- **Homebrew:** casks with `on_linux` blocks in current Homebrew, and `tap_migrations.json` from formula to cask in the
+- **Homebrew:** casks with `on_linux` blocks in current Homebrew and `tap_migrations.json` from formula to cask in the
   same tap.
 - **Validation:** `brew audit --cask --online` against a tap made from a local commit.
 - **Notarization:** the fields of `notarytool --output-format json`.
@@ -562,9 +562,9 @@ These assumptions decide details of the design and are verified before building:
   - an off-hour cron offset;
   - manual dispatch;
   - the phase 3 webhook trigger.
-- **Development cost.** Until tapster is public, the public hub cannot use it, and macOS CI minutes are paid. It goes
+- **Development cost.** Until tapster is public, the public hub cannot use it and macOS CI minutes are paid. It goes
   public once the leak test and the end-to-end test pass.
-- **Bun signing regressed once (1.3.12).** Bun is pinned in the template, and every signature is verified.
+- **Bun signing regressed once (1.3.12).** Bun is pinned in the template and every signature is verified.
 - **No fixes after publishing.** Immutable releases leave nothing to repair after publish, so every check runs before
   it.
 
