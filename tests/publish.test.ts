@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { makeLatest, resumeSwap, sameAssets, stageAndSwap, waitDownloadable } from "../src/publish";
+import { assertRecorded, makeLatest, resumeSwap, sameAssets, stageAndSwap, waitDownloadable } from "../src/publish";
 import type { Asset, GitHub, Release } from "../src/github";
 import { TapsterError } from "../src/errors";
 import { sha256 } from "../src/checksums";
@@ -102,4 +102,23 @@ test("waits until every asset downloads", async () => {
   await waitDownloadable(["https://dl/a"], fetchImpl, async () => {}, 60_000);
   expect(calls).toBe(3);
   await expect(waitDownloadable(["https://dl/a"], async () => new Response(null, { status: 404 }), async () => {}, -1)).rejects.toBeInstanceOf(TapsterError);
+});
+
+test("resume of a fully swapped draft changes nothing when it matches the record", async () => {
+  const done = rel([a(100, "x.tar.gz", `sha256:${hx}`), a(101, "checksums.txt", `sha256:${sha256(Buffer.from(signedSums))}`)]);
+  const f = fakeGh(done, signedSums);
+  await resumeSwap(f.gh, "o/r", done, sha256(Buffer.from(signedSums)));
+  expect(f.log).toEqual([]);
+});
+
+test("resume of a fully swapped draft that no longer matches fails without touching it", async () => {
+  const changed = rel([a(100, "x.tar.gz", `sha256:${"9".repeat(64)}`), a(101, "checksums.txt")]);
+  const f = fakeGh(changed, signedSums);
+  await expect(resumeSwap(f.gh, "o/r", changed, sha256(Buffer.from(signedSums)))).rejects.toBeInstanceOf(TapsterError);
+  expect(f.log).toEqual([]);
+});
+
+test("a published checksums.txt must be the one tapster recorded", () => {
+  expect(() => assertRecorded(Buffer.from(signedSums), sha256(Buffer.from(signedSums)))).not.toThrow();
+  expect(() => assertRecorded(Buffer.from("other"), sha256(Buffer.from(signedSums)))).toThrow(TapsterError);
 });

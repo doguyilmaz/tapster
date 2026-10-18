@@ -71,3 +71,15 @@ test("an unreadable checksums.txt marks only its own draft", async () => {
   expect(plan.items.map((i) => i.tag)).toEqual(["v1.0.0"]);
   expect(plan.notes).toEqual(["v0.0.2: checksums.txt line 1 is malformed"]);
 });
+
+test("a fully swapped draft that tapster recorded resumes", () => {
+  const swapped = [asset(1, "aims_1.0.0_darwin_arm64.tar.gz", d), asset(2, "aims_1.0.0_linux_amd64.tar.gz", e), asset(3, "checksums.txt", "f".repeat(64))];
+  expect(draftStatus(release(swapped), cfg, sums, "f".repeat(64))).toEqual({ kind: "resume" });
+  expect(draftStatus(release(swapped), cfg, sums, "0".repeat(64)).kind).not.toBe("resume");
+});
+
+test("planPackage passes the recorded digest per release", async () => {
+  const swapped = [asset(1, "aims_1.0.0_darwin_arm64.tar.gz", d), asset(2, "aims_1.0.0_linux_amd64.tar.gz", e), asset(3, "checksums.txt", "f".repeat(64))];
+  const plan = await planPackage(cfg, [release(swapped)], async () => sums, (id) => (id === 1 ? "f".repeat(64) : undefined));
+  expect(plan.items).toEqual([{ package: "aims", tag: "v1.0.0", releaseId: 1, resume: true }]);
+});

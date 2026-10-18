@@ -45,6 +45,7 @@ export async function resumeSwap(gh: GitHub, repo: string, release: Release, rec
   };
   const stagedSums = stagedAssets.find((x) => x.name === `${STAGING}checksums.txt`);
   if (!recorded) return discard("the draft holds staging files that tapster has no record of uploading");
+  if (stagedAssets.length === 0) return confirmSwapped(gh, repo, release, recorded);
   if (!stagedSums || stagedAssets.some((x) => x.state !== "uploaded")) return discard("an earlier run stopped while uploading the signed files");
   const sums = await gh.downloadAsset(repo, stagedSums.id);
   if (sha256(sums) !== recorded) return discard("the staged checksums.txt is not the one tapster recorded");
@@ -56,6 +57,23 @@ export async function resumeSwap(gh: GitHub, repo: string, release: Release, rec
     return discard("the staged files do not match the checksums tapster recorded");
   }
   await swap(gh, repo, release.assets.filter((x) => !x.name.startsWith(STAGING)), staged);
+}
+
+async function confirmSwapped(gh: GitHub, repo: string, release: Release, recorded: string): Promise<void> {
+  const changed = new TapsterError("the draft no longer matches what tapster recorded before publishing it", "Check who edited the draft; delete it and release again.");
+  const sumsAsset = release.assets.find((x) => x.name === "checksums.txt");
+  if (!sumsAsset) throw changed;
+  const sums = await gh.downloadAsset(repo, sumsAsset.id);
+  if (sha256(sums) !== recorded) throw changed;
+  const lines = parseChecksums(sums.toString("utf8"));
+  const others = release.assets.filter((x) => x.name !== "checksums.txt");
+  if (lines.length !== others.length || !lines.every((l) => others.some((x) => x.name === l.name && x.digest === `sha256:${l.sha256}`))) throw changed;
+}
+
+export function assertRecorded(published: Buffer, recorded: string): void {
+  if (sha256(published) !== recorded) {
+    throw new TapsterError("the published checksums.txt is not the one tapster recorded", "Check who edited the release; tapster did not update the cask.");
+  }
 }
 
 export function makeLatest(tag: string, releases: Release[]): "true" | "false" {

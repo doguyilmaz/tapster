@@ -8,9 +8,10 @@ export const STAGING = "tapster-staging--";
 export type DraftStatus = { kind: "ready" } | { kind: "resume" } | { kind: "waiting"; reason: string } | { kind: "invalid"; reason: string };
 export type WorkItem = { package: string; tag: string; releaseId: number; resume: boolean };
 
-export function draftStatus(r: Release, pkg: PackageConfig, checksums: ChecksumLine[] | null): DraftStatus {
+export function draftStatus(r: Release, pkg: PackageConfig, checksums: ChecksumLine[] | null, recorded?: string): DraftStatus {
   if (!parseTag(r.tag_name)) return { kind: "invalid", reason: `tag ${r.tag_name} is not like v1.2.3` };
   if (r.assets.some((a) => a.name.startsWith(STAGING))) return { kind: "resume" };
+  if (recorded && r.assets.some((a) => a.name === "checksums.txt" && a.digest === `sha256:${recorded}`)) return { kind: "resume" };
   if (r.assets.some((a) => a.state !== "uploaded")) return { kind: "waiting", reason: "assets are still uploading" };
   if (!r.assets.some((a) => a.name === "checksums.txt")) return { kind: "waiting", reason: "checksums.txt is not attached yet" };
   const version = versionOf(r.tag_name);
@@ -35,6 +36,7 @@ export async function planPackage(
   pkg: PackageConfig,
   releases: Release[],
   checksumsOf: (r: Release) => Promise<ChecksumLine[] | null>,
+  recorded: (releaseId: number) => string | undefined = () => undefined,
 ): Promise<{ items: WorkItem[]; notes: string[] }> {
   const items: WorkItem[] = [];
   const notes: string[] = [];
@@ -56,7 +58,7 @@ export async function planPackage(
       notes.push(`${tag}: ${e.reason}`);
       continue;
     }
-    const status = draftStatus(r, pkg, checksums);
+    const status = draftStatus(r, pkg, checksums, recorded(r.id));
     if (status.kind === "ready" || status.kind === "resume") items.push({ package: pkg.name, tag, releaseId: r.id, resume: status.kind === "resume" });
     else notes.push(`${tag}: ${status.reason}`);
   }

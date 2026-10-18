@@ -6,7 +6,7 @@ import { sha256, writeChecksums } from "../checksums";
 import { GitHub } from "../github";
 import { commitToHub, readHubFile } from "../hubcommit";
 import { readSecret, requireVar } from "../mask";
-import { type Outgoing, makeLatest, resumeSwap, stageAndSwap, waitDownloadable } from "../publish";
+import { type Outgoing, assertRecorded, makeLatest, resumeSwap, stageAndSwap, waitDownloadable } from "../publish";
 import { failure, record, warn } from "../report";
 import { STATE_PATH, type StateEntry, parseState, recordedChecksums, serializeState, upsert } from "../state";
 import { type InstallationToken, installationToken } from "../token";
@@ -35,9 +35,12 @@ export async function publishMode(ctx: Context): Promise<void> {
       tok = await installationToken(appId, pem, pkg.repo, { contents: "write" });
       const gh = new GitHub(tok.token);
       const release = await gh.getRelease(pkg.repo, item.releaseId);
+      let expected: string | undefined;
+      const signed: Outgoing[] = [];
       if (item.resume) {
         const state = parseState(await readHubFile(hubGh, ctx.hub, STATE_PATH, "main"));
-        await resumeSwap(gh, pkg.repo, release, recordedChecksums(state, pkg.name, item.releaseId));
+        expected = recordedChecksums(state, pkg.name, item.releaseId);
+        await resumeSwap(gh, pkg.repo, release, expected);
       } else {
         const dir = join(workdir(), pkg.name, item.tag);
         const mtime = Math.floor(Date.parse(release.created_at) / 1000);
@@ -48,13 +51,13 @@ export async function publishMode(ctx: Context): Promise<void> {
           for (const e of entries) if (a.binaries.includes(e.name)) e.data = await readFile(join(a.dir, e.name));
           const data = writeTarGz(entries, mtime);
           files.push({ name: a.asset, data });
+          signed.push({ name: a.asset, data });
           lines.find((l) => l.name === a.asset)!.sha256 = sha256(data);
-          await writeFile(join(out, a.asset), data);
-          attest = true;
         }
         const sums = Buffer.from(writeChecksums(lines));
         files.push({ name: "checksums.txt", data: sums });
-        await recordState(hubGh, ctx.hub, pkg.name, { tag: item.tag, releaseId: item.releaseId, checksums: sha256(sums), status: "publishing" });
+        expected = sha256(sums);
+        await recordState(hubGh, ctx.hub, pkg.name, { tag: item.tag, releaseId: item.releaseId, checksums: expected, status: "publishing" });
         await stageAndSwap(gh, pkg.repo, item.releaseId, files, item.before);
       }
       await gh.updateRelease(pkg.repo, item.releaseId, { draft: false, make_latest: makeLatest(item.tag, await gh.listReleases(pkg.repo)) });
@@ -62,8 +65,11 @@ export async function publishMode(ctx: Context): Promise<void> {
       if ((await gh.getRepo(pkg.repo)).private) warn(`${pkg.name}: ${pkg.repo} is private, so its files cannot be downloaded by Homebrew users`);
       else await waitDownloadable(published.assets.map((a) => a.browser_download_url));
       const sumsAsset = published.assets.find((a) => a.name === "checksums.txt")!;
-      const digest = sha256(await gh.downloadAsset(pkg.repo, sumsAsset.id));
-      await recordState(hubGh, ctx.hub, pkg.name, { tag: item.tag, releaseId: item.releaseId, checksums: digest, status: "published" });
+      const publishedSums = await gh.downloadAsset(pkg.repo, sumsAsset.id);
+      assertRecorded(publishedSums, expected!);
+      await recordState(hubGh, ctx.hub, pkg.name, { tag: item.tag, releaseId: item.releaseId, checksums: expected!, status: "published" });
+      for (const f of signed) await writeFile(join(out, f.name), f.data);
+      attest ||= signed.length > 0;
       record({ item: `${pkg.name} ${item.tag}`, result: "published", detail: "" });
     } catch (e) {
       failure(`${item.package} ${item.tag}`, e);
