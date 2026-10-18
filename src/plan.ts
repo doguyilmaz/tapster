@@ -43,7 +43,12 @@ export async function planPackage(
   const drafts = releases.filter((r) => r.draft);
   const byTag = new Map<string, Release[]>();
   for (const r of drafts) byTag.set(r.tag_name, [...(byTag.get(r.tag_name) ?? []), r]);
+  const published = new Set(releases.filter((r) => !r.draft).map((r) => r.tag_name));
   for (const [tag, list] of byTag) {
+    if (published.has(tag)) {
+      notes.push(`${tag}: a release for this tag is already published; delete the draft`);
+      continue;
+    }
     if (list.length > 1) {
       notes.push(`${tag}: two drafts exist for this tag; delete one`);
       continue;

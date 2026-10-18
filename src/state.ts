@@ -39,7 +39,9 @@ const byNewest = (a: StateEntry, b: StateEntry) => compareSemver(parseTag(b.tag)
 
 export function upsert(s: State, pkg: string, e: StateEntry): State {
   const list = (s.packages[pkg] ?? []).filter((x) => x.releaseId !== e.releaseId && x.tag !== e.tag);
-  return { ...s, packages: { ...s.packages, [pkg]: [...list, e].sort(byNewest).slice(0, KEEP) } };
+  const all = [...list, e].sort(byNewest);
+  const kept = new Set(all.filter((x) => x.status === "published").slice(0, KEEP));
+  return { ...s, packages: { ...s.packages, [pkg]: all.filter((x) => x.status === "publishing" || kept.has(x)) } };
 }
 
 export function latestPublished(s: State, pkg: string): StateEntry | undefined {

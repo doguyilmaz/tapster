@@ -33,3 +33,11 @@ test("the recorded checksums of a publishing release", () => {
   expect(recordedChecksums(s, "aims", 1)).toBeUndefined();
   expect(recordedChecksums(s, "other", 2)).toBeUndefined();
 });
+
+test("publishing entries are never trimmed away", () => {
+  let s = parseState(null);
+  s = upsert(s, "aims", { tag: "v0.0.1", releaseId: 1000, checksums: sum, status: "publishing" });
+  for (let i = 1; i <= 25; i++) s = upsert(s, "aims", { tag: `v1.0.${i}`, releaseId: i, checksums: sum, status: "published" });
+  expect(s.packages.aims!.some((e) => e.releaseId === 1000)).toBe(true);
+  expect(s.packages.aims!.filter((e) => e.status === "published").length).toBe(20);
+});

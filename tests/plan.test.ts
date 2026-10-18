@@ -83,3 +83,9 @@ test("planPackage passes the recorded digest per release", async () => {
   const plan = await planPackage(cfg, [release(swapped)], async () => sums, (id) => (id === 1 ? "f".repeat(64) : undefined));
   expect(plan.items).toEqual([{ package: "aims", tag: "v1.0.0", releaseId: 1, resume: true }]);
 });
+
+test("a draft for a tag that is already published is never work", async () => {
+  const plan = await planPackage(cfg, [release(full, "v1.0.0", false), { ...release(full), id: 2 }], async () => sums);
+  expect(plan.items).toEqual([]);
+  expect(plan.notes[0]).toContain("already published");
+});
