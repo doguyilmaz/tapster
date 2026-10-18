@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { attestArgs, decide, hasAttestations } from "../src/attest";
+import { attestArgs, decide, hasAttestations, missingAttestations } from "../src/attest";
 import { GitHubError } from "../src/errors";
 
 test("verification pins repository, workflow, tag and hosted runners", () => {
@@ -27,4 +27,14 @@ test("attestation lookup: 404 or an empty list means none, other errors fail clo
   expect(await hasAttestations("o/r", "a".repeat(64), "t", reply(200, { attestations: [] }))).toBe(false);
   expect(await hasAttestations("o/r", "a".repeat(64), "t", reply(200, { attestations: [{}] }))).toBe(true);
   await expect(hasAttestations("o/r", "a".repeat(64), "t", reply(403))).rejects.toBeInstanceOf(GitHubError);
+});
+
+test("drafts wait until every asset has an attestation", async () => {
+  const fetchImpl = async (url: string) => new Response(url.endsWith("a".repeat(64)) ? JSON.stringify({ attestations: [{}] }) : null, { status: url.endsWith("a".repeat(64)) ? 200 : 404 });
+  const assets = [
+    { name: "x.tar.gz", digest: `sha256:${"a".repeat(64)}` },
+    { name: "y.zip", digest: `sha256:${"b".repeat(64)}` },
+    { name: "checksums.txt", digest: `sha256:${"c".repeat(64)}` },
+  ];
+  expect(await missingAttestations("o/r", assets, "t", fetchImpl)).toEqual(["y.zip"]);
 });

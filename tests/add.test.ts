@@ -45,6 +45,7 @@ jobs:
   expect(Object.keys(steps[0].env)).toEqual(["GITHUB_TOKEN"]);
   expect(steps[1].uses).toBe(`actions/attest-build-provenance@${pins["actions/attest-build-provenance"].sha}`);
   expect(steps[1].with).toEqual({ "subject-checksums": "dist/checksums.txt" });
+  expect(text).toContain(`actions/attest-build-provenance@${pins["actions/attest-build-provenance"].sha} # v3`);
   expect(y.jobs.release.permissions).toEqual({ contents: "write", "id-token": "write", attestations: "write" });
 });
 

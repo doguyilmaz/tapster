@@ -1,4 +1,5 @@
 import * as core from "@actions/core";
+import { missingAttestations } from "../attest";
 import { parseChecksums } from "../checksums";
 import { GitHub } from "../github";
 import { readSecret, requireVar } from "../mask";
@@ -27,7 +28,13 @@ export async function check(ctx: Context): Promise<void> {
         const asset = r.assets.find((a) => a.name === "checksums.txt");
         return asset ? parseChecksums((await gh.downloadAsset(pkg.repo, asset.id)).toString("utf8")) : null;
       });
-      items.push(...plan.items);
+      const repo = pkg.attestation === "auto" ? await gh.getRepo(pkg.repo) : null;
+      for (const item of plan.items) {
+        const release = repo && !repo.private && !item.resume ? await gh.getRelease(pkg.repo, item.releaseId) : null;
+        const missing = release ? await missingAttestations(pkg.repo, release.assets, tok.token) : [];
+        if (missing.length) record({ item: pkg.name, result: "waiting", detail: `${item.tag}: no attestation yet for ${missing.join(", ")}` });
+        else items.push(item);
+      }
       for (const note of plan.notes) record({ item: pkg.name, result: "waiting", detail: note });
     } catch (e) {
       failure(pkg.name, e);

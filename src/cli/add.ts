@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { isMap, isSeq, parseDocument, YAMLMap } from "yaml";
+import { isMap, isSeq, parseDocument, type Scalar, YAMLMap } from "yaml";
 import { TapsterError } from "../errors";
 import pinsJson from "../../templates/pins.json";
 import { currentRepo, userGitHub } from "./gh";
@@ -45,7 +45,9 @@ export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag:
         }
       }
     }
-    steps.items.splice(index + 1, 0, doc.createNode({ name: "Attest the archives for tapster", uses: `actions/attest-build-provenance@${attestSha}`, with: { "subject-checksums": "dist/checksums.txt" } }) as never);
+    const attest = doc.createNode({ name: "Attest the archives for tapster", uses: `actions/attest-build-provenance@${attestSha}`, with: { "subject-checksums": "dist/checksums.txt" } });
+    (attest.get("uses", true) as Scalar).comment = ` ${attestTag}`;
+    steps.items.splice(index + 1, 0, attest as never);
     (job.value as YAMLMap).set("permissions", doc.createNode({ contents: "write", "id-token": "write", attestations: "write" }));
     notes.push(`added the attestation step (actions/attest-build-provenance ${attestTag}) and its permissions`);
     return { text: doc.toString(), notes };

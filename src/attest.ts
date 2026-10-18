@@ -34,6 +34,16 @@ export async function hasAttestations(repo: string, digest: string, token: strin
   }
 }
 
+export async function missingAttestations(repo: string, assets: { name: string; digest: string | null }[], token: string, fetchImpl?: FetchLike): Promise<string[]> {
+  const missing: string[] = [];
+  for (const a of assets) {
+    if (a.name === "checksums.txt") continue;
+    const digest = a.digest?.replace(/^sha256:/, "");
+    if (!digest || !(await hasAttestations(repo, digest, token, fetchImpl))) missing.push(a.name);
+  }
+  return missing;
+}
+
 export async function verifyAttestation(file: string, pkg: PackageConfig, tag: string, isPrivate: boolean, token: string): Promise<AttestOutcome> {
   if (pkg.attestation === "off") return "off";
   const res = await runPath(ghPath(), "gh", attestArgs(file, pkg.repo, pkg.workflow, tag), {
