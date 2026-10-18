@@ -50,3 +50,13 @@ test("semver order", () => {
   expect(compareSemver(s("v1.0.0"), s("v1.0.0-rc.1"))).toBeGreaterThan(0);
   expect(compareSemver(s("v1.0.0-rc.2"), s("v1.0.0-rc.10"))).toBeLessThan(0);
 });
+
+test("two packages cannot ship a binary with the same name", () => {
+  const twice = `${good}  - name: other
+    repo: doguyilmaz/other
+    binaries: [aims]
+    assets:
+      linux-amd64: "o_{version}.tar.gz"
+`;
+  expect(() => parseConfig(twice, "doguyilmaz")).toThrow(TapsterError);
+});

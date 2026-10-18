@@ -1,5 +1,5 @@
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { openKeychain } from "../keychain";
 import { readSecret, register, requireVar } from "../mask";
 import { failure, info } from "../report";
@@ -32,8 +32,8 @@ export async function signMode(ctx: Context): Promise<void> {
           if (ent) await writeFile(ent, entitlementsPlist(keys));
           for (const a of item.archives) {
             for (const b of a.binaries) {
-              await signFile(kc, join(a.dir, b), ent);
-              await verifySigned(join(a.dir, b), team);
+              await signFile(kc, join(a.dir, b), ent, basename(b));
+              await verifySigned(join(a.dir, b), team, basename(b));
             }
           }
           const root = join(workdir(), pkg.name, item.tag, "notary");

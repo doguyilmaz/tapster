@@ -72,9 +72,16 @@ export function parseConfig(text: string, hubOwner: string): HubConfig {
     throw new TapsterError(`tapster.yml is invalid: ${issues}`, "Fix the listed fields.");
   }
   const names = new Set<string>();
+  const binaryOwners = new Map<string, string>();
   for (const p of result.data.packages) {
     if (names.has(p.name)) throw new TapsterError(`package ${p.name} is listed twice`, "Keep one entry per package.");
     names.add(p.name);
+    for (const b of p.binaries) {
+      const id = b.split("/").pop()!;
+      const owner = binaryOwners.get(id);
+      if (owner && owner !== p.name) throw new TapsterError(`${p.name} and ${owner} both ship a binary named ${id}`, "Signed tools are identified by name, so each name may belong to one package.");
+      binaryOwners.set(id, p.name);
+    }
     if (p.repo.split("/")[0]!.toLowerCase() !== hubOwner.toLowerCase()) {
       throw new TapsterError(`${p.name}: ${p.repo} is not owned by ${hubOwner}`, "tapster publishes only repositories of the hub's owner.");
     }

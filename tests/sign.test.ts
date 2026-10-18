@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { entitlementsPlist, parseNotary, parseSignature, PRESETS } from "../src/sign";
+import { codesignArgs, entitlementsPlist, parseNotary, parseSignature, PRESETS } from "../src/sign";
 import { TapsterError } from "../src/errors";
 
 test("presets", () => {
@@ -15,6 +15,7 @@ test("entitlements plist lists the keys", () => {
 
 test("parses codesign -dvv output", () => {
   const info = parseSignature(`Executable=/x/ebb
+Identifier=ebb
 CodeDirectory v=20500 size=96335 flags=0x10000(runtime) hashes=3005+2 location=embedded
 Authority=Developer ID Application: Dogu Kaan Yilmaz (5MYT4VYJFC)
 Authority=Developer ID Certification Authority
@@ -24,6 +25,7 @@ TeamIdentifier=5MYT4VYJFC`);
     authority: ["Developer ID Application: Dogu Kaan Yilmaz (5MYT4VYJFC)", "Developer ID Certification Authority", "Apple Root CA"],
     teamId: "5MYT4VYJFC",
     runtime: true,
+    identifier: "ebb",
   });
 });
 
@@ -44,4 +46,12 @@ test("unreadable notarytool output never echoes it", () => {
   }
   expect(err).toBeInstanceOf(TapsterError);
   expect(JSON.stringify(err)).not.toContain("secret-ish");
+});
+
+test("the identifier is tapster's choice, never the build's", () => {
+  const kc = { path: "/k/t.keychain-db", identity: "A".repeat(40), teamId: "TEAM000001", close: async () => {} };
+  expect(codesignArgs(kc, "/w/bin/aims", null, "aims")).toEqual([
+    "--force", "--options", "runtime", "--timestamp", "--keychain", "/k/t.keychain-db", "--sign", "A".repeat(40), "--identifier", "aims", "/w/bin/aims",
+  ]);
+  expect(codesignArgs(kc, "/w/bin/x", "/w/e.plist", "x")).toContain("--entitlements");
 });

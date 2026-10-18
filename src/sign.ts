@@ -19,8 +19,8 @@ ${body}
 `;
 }
 
-export async function signFile(kc: Keychain, file: string, entitlements: string | null): Promise<void> {
-  await run("codesign", [
+export function codesignArgs(kc: Keychain, file: string, entitlements: string | null, identifier: string): string[] {
+  return [
     "--force",
     "--options",
     "runtime",
@@ -29,12 +29,18 @@ export async function signFile(kc: Keychain, file: string, entitlements: string 
     kc.path,
     "--sign",
     kc.identity,
+    "--identifier",
+    identifier,
     ...(entitlements ? ["--entitlements", entitlements] : []),
     file,
-  ]);
+  ];
 }
 
-export type SignatureInfo = { authority: string[]; teamId: string | null; runtime: boolean };
+export async function signFile(kc: Keychain, file: string, entitlements: string | null, identifier: string): Promise<void> {
+  await run("codesign", codesignArgs(kc, file, entitlements, identifier));
+}
+
+export type SignatureInfo = { authority: string[]; teamId: string | null; runtime: boolean; identifier: string | null };
 
 export function parseSignature(text: string): SignatureInfo {
   const lines = text.split("\n");
@@ -42,13 +48,14 @@ export function parseSignature(text: string): SignatureInfo {
     authority: lines.filter((l) => l.startsWith("Authority=")).map((l) => l.slice("Authority=".length)),
     teamId: lines.find((l) => l.startsWith("TeamIdentifier="))?.slice("TeamIdentifier=".length) ?? null,
     runtime: lines.some((l) => /flags=0x[0-9a-f]+\([^)]*\bruntime\b/.test(l)),
+    identifier: lines.find((l) => l.startsWith("Identifier="))?.slice("Identifier=".length) ?? null,
   };
 }
 
-export async function verifySigned(file: string, teamId: string): Promise<void> {
+export async function verifySigned(file: string, teamId: string, identifier?: string): Promise<void> {
   await run("codesign", ["--verify", "--strict", "--verbose=2", file]);
   const info = parseSignature((await run("codesign", ["-dvv", file])).stderr);
-  if (!info.authority[0]?.startsWith("Developer ID Application:") || info.teamId !== teamId || !info.runtime) {
+  if (!info.authority[0]?.startsWith("Developer ID Application:") || info.teamId !== teamId || !info.runtime || (identifier !== undefined && info.identifier !== identifier)) {
     throw new TapsterError(`${basename(file)} is not signed as expected`, "It needs a Developer ID Application signature of the configured team with the hardened runtime.");
   }
 }
