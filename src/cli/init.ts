@@ -1,10 +1,11 @@
-import { randomBytes } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { TapsterError } from "../errors";
-import type { GitHub } from "../github";
+import { GitHub } from "../github";
+import { appJwt } from "../token";
 import { run, runPath } from "../run";
 import hubReadme from "../../templates/hub/README.md" with { type: "text" };
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
@@ -45,7 +46,7 @@ function openUrl(url: string): void {
   void runPath(process.platform === "darwin" ? "/usr/bin/open" : "/usr/bin/xdg-open", "open", [url], { allowFail: true }).catch(() => undefined);
 }
 
-async function createApp(owner: string, hub: string, rotating: boolean): Promise<void> {
+async function createApp(owner: string, hub: string): Promise<void> {
   const state = randomBytes(16).toString("hex");
   const code = await new Promise<string>((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -80,7 +81,36 @@ async function createApp(owner: string, hub: string, rotating: boolean): Promise
   await setEnvVariable(hub, "TAPSTER_APP_SLUG", created.slug);
   console.log(`Install the App on the projects tapster should publish (not on ${hub}):`);
   openUrl(`https://github.com/apps/${created.slug}/installations/new`);
-  if (rotating) console.log("Then delete the old App in https://github.com/settings/apps so its key stops working.");
+}
+
+export function appKeyFingerprint(pem: string): string {
+  let key;
+  try {
+    key = createPrivateKey(pem);
+  } catch {
+    throw new TapsterError("that file is not a private key", "Use the .pem file GitHub downloaded when you generated the key.");
+  }
+  if (key.asymmetricKeyType !== "rsa") throw new TapsterError("that file is not a GitHub App key", "Use the .pem file GitHub downloaded when you generated the key.");
+  const der = createPublicKey(key).export({ type: "spki", format: "der" });
+  return `SHA256:${createHash("sha256").update(der).digest("base64")}`;
+}
+
+async function rotateAppKey(gh: GitHub, hub: string): Promise<void> {
+  const vars = await gh.json<{ variables: { name: string; value: string }[] }>("GET", `/repos/${hub}/environments/tapster/variables`);
+  const appId = vars.variables.find((v) => v.name === "TAPSTER_APP_ID")?.value;
+  const slug = vars.variables.find((v) => v.name === "TAPSTER_APP_SLUG")?.value;
+  if (!appId || !slug) throw new TapsterError("the hub has no App yet", "Run tapster init first.");
+  console.log(`Open the App's settings, scroll to "Private keys" and click "Generate a private key":`);
+  openUrl(`https://github.com/settings/apps/${slug}`);
+  const path = (await ask("Path of the downloaded .pem file: ")).replace(/^~(?=\/)/, process.env.HOME ?? "~");
+  const pem = await readFile(path, "utf8");
+  const fingerprint = appKeyFingerprint(pem);
+  await new GitHub(appJwt(appId, pem)).json("GET", "/app").catch(() => {
+    throw new TapsterError("that key does not belong to the hub's App", `Generate the key on https://github.com/settings/apps/${slug}.`);
+  });
+  await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", pem);
+  console.log(`Stored the new key (${fingerprint}).`);
+  console.log(`Now delete every other key on that page, so the old one stops working, and delete ${path}.`);
 }
 
 async function storeCertificate(hub: string): Promise<void> {
@@ -158,12 +188,12 @@ export async function init(args: string[]): Promise<void> {
   const hub = await currentRepo(dir);
   const gh = await userGitHub();
   const rotate = args[0] === "--rotate" ? args[1] : null;
-  if (rotate === "app") return createApp(hub.split("/")[0]!, hub, true);
+  if (rotate === "app") return rotateAppKey(gh, hub);
   if (rotate === "certificate") return storeCertificate(hub);
   if (rotate === "notary") return storeNotary(hub);
   if (args.length) throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init or tapster init --rotate app|certificate|notary.");
   await protectHub(gh, hub);
-  await createApp(hub.split("/")[0]!, hub, false);
+  await createApp(hub.split("/")[0]!, hub);
   await storeCertificate(hub);
   await storeNotary(hub);
   await writeFiles(gh, dir, hub);

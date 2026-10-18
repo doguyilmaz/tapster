@@ -24,7 +24,7 @@ export function register(value: string): void {
   for (const v of variants(value)) {
     if (registered.has(v)) continue;
     registered.add(v);
-    core.setSecret(v);
+    if (process.env.GITHUB_ACTIONS === "true") core.setSecret(v);
   }
 }
 

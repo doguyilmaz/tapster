@@ -32,3 +32,22 @@ test("a missing secret explains how to add it", () => {
   delete process.env.TAPSTER_MISSING;
   expect(() => readSecret("TAPSTER_MISSING")).toThrow(TapsterError);
 });
+
+test("outside GitHub Actions nothing is printed when a value is registered", () => {
+  const before = process.env.GITHUB_ACTIONS;
+  delete process.env.GITHUB_ACTIONS;
+  const writes: string[] = [];
+  const original = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    writes.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    register("cli-only-secret-value");
+  } finally {
+    process.stdout.write = original;
+    if (before !== undefined) process.env.GITHUB_ACTIONS = before;
+  }
+  expect(writes.join("")).not.toContain("cli-only-secret-value");
+  expect(scrub("x cli-only-secret-value")).toBe("x ***");
+});
