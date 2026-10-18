@@ -57,7 +57,7 @@ hold no secrets. Phase 1 covers command-line tools written in Go and in Bun/Type
 | ready | A draft that passes §5's checks without anything being downloaded. |
 | App | A GitHub App the user creates for their own hub. It gives the hub short-lived access to the projects. |
 | environment | A GitHub environment in the hub (`tapster`) holding the credentials. Only workflows on `main` may open it. |
-| state | `.tapster/state.json` in the hub: which releases tapster published, by release ID and `checksums.txt` digest. |
+| state | `.tapster/state.json` in the hub: each release tapster publishes, with its ID, `checksums.txt` digest and status (`publishing` or `published`). |
 
 ## 3. Decisions
 
@@ -66,7 +66,7 @@ hold no secrets. Phase 1 covers command-line tools written in Go and in Bun/Type
 | Model | Pull: projects open drafts, the hub signs and publishes | Secrets live in one place, and the signing job never runs project code. |
 | Hub name | Keep `homebrew-tap` | `brew install user/tap/pkg` needs the `homebrew-` prefix. Scoop reads `bucket/` from any repository. |
 | Access | The user's own GitHub App, created through the manifest flow | One token per work item, limited to one repository, revoked when done. No personal access tokens. |
-| Language | TypeScript, developed and tested with Bun, shipped as a Node 24 JavaScript action and an npm CLI (`@doguyilmaz/tapster`) | GitHub Actions' native runtime. The user's main language. |
+| Language | TypeScript, developed and tested with Bun, shipped as a Node 24 JavaScript action and an npm CLI (`@doguyilmaz/tapster`). Runtime dependencies: `@actions/core`, `yaml` and `zod` only; GitHub is called with plain `fetch`. | GitHub Actions' native runtime. The user's main language. Fewest dependencies in the job that holds the keys. |
 | Signing | Apple's `codesign` and `notarytool` on a macOS runner, called by absolute path | The path Xcode uses. One engine serves phase 2 apps too. |
 | Trigger | Schedule every 10 minutes plus manual dispatch; the webhook Worker comes in phase 3 | No Cloudflare dependency in phase 1. A cheap Linux job finds work; macOS starts only when there is some. |
 | Attestation | `auto` by default: required where the platform provides it (public repositories), skipped with a warning where it cannot (private repositories without the plan). `off` per project. | Real protection for public projects, no failure where attestations are impossible. |
@@ -211,6 +211,7 @@ Each work item is isolated: one failing never stops the others.
 2. Attestation (§12.6).
 3. Unpack the darwin archives into one directory per archive, with the checks in §12.7.
 4. Every file listed in `binaries` must be Mach-O. Any other Mach-O file in a darwin archive stops the item.
+   Darwin archives must be `tar.gz`; tapster reads them in its own code, so no external tool parses untrusted input.
 
 **sign** (step env: Apple keys only):
 5. Set up the keychain (§8).
@@ -226,25 +227,28 @@ Each work item is isolated: one failing never stops the others.
    over unchanged.
 10. Re-list the draft's assets. If any ID or digest changed since fetch, stop the item; the project is still
     uploading or changed the draft.
-11. Upload each repacked archive under a staging name (`.tapster-staging.<name>`), delete the original, then rename
-    the staging asset to the original name. `checksums.txt` goes last, the same way.
-12. Publish with `draft: false` and `make_latest: "true"` only when this is the highest stable version, `"false"`
+11. Record the release in the state as `publishing` (a hub commit through the Git Data API with the job's
+    `GITHUB_TOKEN`).
+12. Upload each repacked archive and the new `checksums.txt` under staging names (`tapster-staging--<name>`). Then,
+    one by one with `checksums.txt` last, delete the original and rename the staging asset to the original name.
+13. Publish with `draft: false` and `make_latest: "true"` only when this is the highest stable version, `"false"`
     otherwise.
-13. Wait until every asset URL answers `200` to an unauthenticated request, retrying with backoff for up to 5
+14. Wait until every asset URL answers `200` to an unauthenticated request, retrying with backoff for up to 5
     minutes.
-14. Attest the repacked archives in the hub (`actions/attest-build-provenance`), so the signed outputs have provenance
+15. Mark the state entry `published`. A run that finds a `publishing` entry whose release is already published and
+    whose `checksums.txt` digest matches marks it `published`; one whose release is still a draft resumes it.
+16. Attest the repacked archives in the hub (`actions/attest-build-provenance`), so the signed outputs have provenance
     of their own.
-15. Record the release ID and `checksums.txt` digest in the state. This hands over to render.
 
 ### render (ubuntu, no environment)
 
-16. For each package, take the newest stable release recorded in the state. Releases published any other way are
+17. For each package, take the newest stable release recorded in the state as `published`. Releases published any other way are
     never rendered; the summary reports them.
-17. Read the published `checksums.txt`, check its digest against the state, and render the cask and the Scoop
-    manifest (§10).
-18. Run `brew style` and `brew audit --cask --online`. Run them on a local commit of the hub, because
+18. Read the published `checksums.txt`, check its digest against the state, and render the cask and the Scoop
+    manifest (§10). When the rendered files equal the committed ones, stop here.
+19. Run `brew style` and `brew audit --cask --online`. Run them on a local commit of the hub, because
     `brew tap <path>` clones only committed content.
-19. Commit through the Git Data API (`"<name> <tag>"`), which makes the commits verified. On conflict, rebase and
+20. Commit through the Git Data API (`"<name> <tag>"`), which makes the commits verified. On conflict, rebase and
     retry.
 
 ### Concurrency and failure
@@ -286,7 +290,7 @@ Each work item is isolated: one failing never stops the others.
 
 - **Resume.** A draft is resumed rather than rejected when it has staging assets, or when its darwin binaries are
   already signed with the configured Team ID. The next run finishes the staging renames and the publish.
-- **Assets.** Replaced only through the staging-and-rename sequence in §7.11.
+- **Assets.** Replaced only through the staging-and-rename sequence in §7.12.
 - **Immutable releases.** Nothing changes after publish, which is why every check runs before it.
 
 ## 10. Output files
@@ -435,9 +439,9 @@ Archives are parsed in the fetch step, which holds no Apple key.
 | Logs expose a credential | §12.2, proven on success and failure paths by §12.3. |
 | A tag name injects code into a cask | Strict tag pattern, escaping, and render without credentials (§10, §12.5). |
 | A compromised project build gets signed | Attestation required for public projects (§12.6). Otherwise the user's responsibility, as agreed. |
-| A release published outside tapster gets a cask | Render uses only releases recorded in the state (§7.16). |
+| A release published outside tapster gets a cask | Render uses only releases recorded in the state as `published` (§7.17). |
 | A project changes a draft during processing | Re-list and compare before mutating (§7.10). |
-| A malicious package inside tapster | Few dependencies (`@actions/core`, `@octokit/rest`), lockfile, `--ignore-scripts`, reproducible `dist/` checked in CI, pinned actions. |
+| A malicious package inside tapster | Three runtime dependencies (`@actions/core`, `yaml`, `zod`), exact versions, lockfile, `--ignore-scripts`, reproducible `dist/` checked in CI, pinned actions. |
 | A workflow change to the hub gets the credentials | Branch-only environment, trigger allowlist and `doctor` checks (§12.4), and the `main` ruleset. |
 | A leaked App key | It can write to the installed repositories until revoked. `tapster init --rotate app` makes a new key and deletes the old one. |
 | A leaked Apple key | Revoke it in App Store Connect or with Apple; `init --rotate notary` or `init --rotate certificate`. |
@@ -523,9 +527,9 @@ For each project:
 
 | Phase | Scope |
 | --- | --- |
-| 1 (this spec) | Go and Bun CLIs, casks, Scoop, `init`/`add`/`doctor`, leak test, migration of the five CLIs. |
+| 1 (this spec) | Go and Bun CLIs, casks, Scoop, `init`/`add`/`doctor`, leak test. tapster becomes public (the public hub can only use a public action), then the five CLIs migrate. |
 | 2 | SwiftUI apps: Release build ad-hoc signed in the project; in the hub, Sparkle-order re-signing with `codesign`, DMG, notarize and staple, Sparkle EdDSA signature, appcast under a custom domain. |
-| 3 | Instant trigger with a Cloudflare Worker and verified webhooks, optionally OIDC from project CI. tapster made public, Marketplace listing, docs for others. Linux package repositories if wanted. |
+| 3 | Instant trigger with a Cloudflare Worker and verified webhooks, optionally OIDC from project CI. Marketplace listing and docs for others. Linux package repositories if wanted. |
 
 **Out of scope for phase 1:**
 - app bundles, DMGs and pkgs;
@@ -556,7 +560,8 @@ These assumptions decide details of the design and are verified before building:
   - an off-hour cron offset;
   - manual dispatch;
   - the phase 3 webhook trigger.
-- **Development cost.** Until tapster is public, the public hub cannot use it, and macOS CI minutes are paid.
+- **Development cost.** Until tapster is public, the public hub cannot use it, and macOS CI minutes are paid. It goes
+  public once the leak test and the end-to-end test pass.
 - **Bun signing regressed once (1.3.12).** Bun is pinned in the template, and every signature is verified.
 - **No fixes after publishing.** Immutable releases leave nothing to repair after publish, so every check runs before
   it.
