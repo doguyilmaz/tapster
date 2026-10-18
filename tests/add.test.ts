@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import { parse } from "yaml";
-import { adaptGoreleaser, adaptReleaseWorkflow, bunWorkflow, inferEntry } from "../src/cli/add";
+import { add, adaptGoreleaser, adaptReleaseWorkflow, bunWorkflow, inferEntry } from "../src/cli/add";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { TapsterError } from "../src/errors";
 import pins from "../templates/pins.json";
 
 test("goreleaser config hands signing and casks to the hub", () => {
@@ -67,4 +71,52 @@ test("the hub entry is inferred from the latest release", () => {
   expect(entry).toContain('darwin-arm64: "aims_{version}_darwin_arm64.tar.gz"');
   expect(entry).toContain('windows-amd64: "aims_{version}_windows_amd64.zip"');
   expect(entry).toContain("scoop: true");
+});
+
+const goFlow = `on: { push: { tags: ["v*"] } }
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions: { contents: write, packages: write }
+    steps:
+      - uses: goreleaser/goreleaser-action@abc
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+`;
+
+test("existing job permissions are kept", () => {
+  const y = parse(adaptReleaseWorkflow(goFlow, "a".repeat(40), "v4").text);
+  expect(y.jobs.release.permissions).toEqual({ contents: "write", packages: "write", "id-token": "write", attestations: "write" });
+});
+
+test("running add twice adds one attestation step", () => {
+  const once = adaptReleaseWorkflow(goFlow, "a".repeat(40), "v4").text;
+  const twice = adaptReleaseWorkflow(once, "a".repeat(40), "v4");
+  expect(parse(twice.text).jobs.release.steps.length).toBe(2);
+  expect(twice.notes.join(" ")).toContain("already");
+});
+
+test("an existing Bun release workflow is not overwritten", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "add-"));
+  Bun.spawnSync(["git", "init", "-q", dir]);
+  Bun.spawnSync(["git", "-C", dir, "remote", "add", "origin", "https://github.com/o/tool.git"]);
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "tool", bin: "./src/cli.ts" }));
+  writeFileSync(join(dir, "bun.lock"), "{}");
+  mkdirSync(join(dir, ".github/workflows"), { recursive: true });
+  writeFileSync(join(dir, ".github/workflows/release.yml"), "mine\n");
+  const cwd = process.cwd();
+  process.chdir(dir);
+  try {
+    await expect(add([])).rejects.toBeInstanceOf(TapsterError);
+  } finally {
+    process.chdir(cwd);
+  }
+  expect(readFileSync(join(dir, ".github/workflows/release.yml"), "utf8")).toBe("mine\n");
+});
+
+test("workflow-level and write-all permissions are respected", () => {
+  const top = goFlow.replace("    permissions: { contents: write, packages: write }\n", "").replace("jobs:", "permissions: { contents: write, pages: write }\njobs:");
+  expect(parse(adaptReleaseWorkflow(top, "a".repeat(40), "v4").text).jobs.release.permissions).toEqual({ contents: "write", pages: "write", "id-token": "write", attestations: "write" });
+  const all = goFlow.replace("permissions: { contents: write, packages: write }", "permissions: write-all");
+  expect(parse(adaptReleaseWorkflow(all, "a".repeat(40), "v4").text).jobs.release.permissions).toBe("write-all");
 });

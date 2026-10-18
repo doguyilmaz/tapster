@@ -25,6 +25,8 @@ export function adaptGoreleaser(text: string): { text: string; notes: string[] }
   return { text: doc.toString(), notes };
 }
 
+const jobMap = (job: { value: unknown }) => job.value as YAMLMap;
+
 export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag: string): { text: string; notes: string[] } {
   const doc = parseDocument(text);
   const notes: string[] = [];
@@ -46,10 +48,22 @@ export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag:
         }
       }
     }
+    const already = steps.items.some((st) => isMap(st) && String(st.get("uses") ?? "").startsWith("actions/attest-build-provenance@"));
+    const map = jobMap(job);
+    const own = map.get("permissions");
+    const top = doc.get("permissions");
+    const base = own ?? top;
+    if (base !== "write-all") {
+      const merged: Record<string, string> = isMap(base) ? (base.toJSON() as Record<string, string>) : {};
+      map.set("permissions", doc.createNode({ ...merged, contents: "write", "id-token": "write", attestations: "write" }));
+    }
+    if (already) {
+      notes.push("the attestation step is already there; permissions checked");
+      return { text: doc.toString(), notes };
+    }
     const attest = doc.createNode({ name: "Attest the archives for tapster", uses: `actions/attest-build-provenance@${attestSha}`, "continue-on-error": "${{ github.event.repository.private }}", with: { "subject-checksums": "dist/checksums.txt" } });
     (attest.get("uses", true) as Scalar).comment = ` ${attestTag}`;
     steps.items.splice(index + 1, 0, attest as never);
-    (job.value as YAMLMap).set("permissions", doc.createNode({ contents: "write", "id-token": "write", attestations: "write" }));
     notes.push(`added the attestation step (actions/attest-build-provenance ${attestTag}) and its permissions`);
     return { text: doc.toString(), notes };
   }
@@ -93,7 +107,7 @@ export function inferEntry(name: string, repo: string, assets: string[], version
   return lines.join("\n");
 }
 
-export async function add(_args: string[]): Promise<void> {
+export async function add(args: string[]): Promise<void> {
   const dir = process.cwd();
   const repo = await currentRepo(dir);
   const name = repo.split("/")[1]!.toLowerCase();
@@ -114,8 +128,12 @@ export async function add(_args: string[]): Promise<void> {
     const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8")) as { bin?: string | Record<string, string> };
     const entry = typeof pkg.bin === "string" ? pkg.bin : Object.values(pkg.bin ?? {})[0];
     if (!entry) throw new TapsterError("package.json has no bin entry", "Add the CLI entry file to bin in package.json.");
+    const flow = join(dir, ".github/workflows/release.yml");
+    if (existsSync(flow) && !args.includes("--force")) {
+      throw new TapsterError(".github/workflows/release.yml already exists", "Move it aside and run tapster add again. To replace it, run tapster add --force.");
+    }
     await mkdir(join(dir, ".github/workflows"), { recursive: true });
-    await writeFile(join(dir, ".github/workflows/release.yml"), bunWorkflow(name, entry.replace(/^\.\//, ""), pinsJson));
+    await writeFile(flow, bunWorkflow(name, entry.replace(/^\.\//, ""), pinsJson));
     console.log("- wrote .github/workflows/release.yml (build, attest, draft)");
   } else {
     throw new TapsterError("this project is neither GoReleaser-based Go nor Bun", "tapster add supports those two in phase 1.");
