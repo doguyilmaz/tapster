@@ -1,0 +1,9 @@
+version: 1
+tap: doguyilmaz/tapster-test
+packages:
+  - name: fixture
+    repo: doguyilmaz/tapster-fixture
+    binaries: [fixture]
+    assets:
+      darwin-arm64: "fixture_{version}_darwin_arm64.tar.gz"
+```
