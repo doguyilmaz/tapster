@@ -43,8 +43,8 @@ hold no secrets. Phase 1 covers command-line tools written in Go and in Bun/Type
 - **One account.** One GitHub account owns the hub and the projects. Organizations work the same way but are not
   tested in phase 1.
 - **Public assets.** Release assets are downloadable without authentication, which means public project repositories.
-  A cask that points at a private repository's release fails with 404 for everyone else. **ebb and lockstep are
-  private today.**
+  A cask that points at a private repository's release fails with 404 for everyone else. ebb and lockstep are private
+  today; the user decided both become public, and they migrate when they are.
 - **macOS runners.** The hub is public, so macOS runners cost nothing.
 
 ## 2. Terms
