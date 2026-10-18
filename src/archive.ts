@@ -94,8 +94,14 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
       pax = parsePax(data);
       continue;
     }
-    if (type === "g") continue;
-    const prefix = cstr(h.subarray(345, 500));
+    if (type === "g") {
+      const global = parsePax(data);
+      if ("path" in global || "linkpath" in global || "size" in global) throw bad("has a global header that renames or resizes files");
+      continue;
+    }
+    if (pax.size !== undefined && Number(pax.size) !== size) throw bad("has a damaged extended header");
+    const posixHeader = h.subarray(257, 263).equals(Buffer.from("ustar\0", "latin1"));
+    const prefix = posixHeader ? cstr(h.subarray(345, 500)) : "";
     const base = cstr(h.subarray(0, 100));
     const rawName = pax.path ?? longName ?? (prefix ? `${prefix}/${base}` : base);
     const rawLink = pax.linkpath ?? longLink ?? cstr(h.subarray(157, 257));
@@ -110,7 +116,34 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
     if (kind === "symlink") checkLink(name, rawLink);
     entries.push({ name, type: kind, mode: octal(h, 100, 8) & 0o7777, data: Buffer.from(data), ...(kind === "symlink" ? { linkname: rawLink } : {}) });
   }
+  checkSymlinks(entries);
   return entries;
+}
+
+function checkSymlinks(entries: TarEntry[]) {
+  const links = new Set(entries.filter((e) => e.type === "symlink").map((e) => e.name));
+  if (links.size === 0) return;
+  for (const e of entries) {
+    const parts = e.name.split("/");
+    for (let i = 1; i < parts.length; i++) {
+      if (links.has(parts.slice(0, i).join("/"))) throw bad(`has ${e.name}, which passes through a symlink`);
+    }
+  }
+  for (const e of entries) {
+    if (e.type !== "symlink") continue;
+    const dir = posix.dirname(e.name);
+    const stack = dir === "." ? [] : dir.split("/");
+    const parts = e.linkname!.split("/").filter((p) => p !== "" && p !== ".");
+    for (const [i, p] of parts.entries()) {
+      if (p === "..") {
+        if (stack.length === 0) throw bad(`has a symlink ${e.name} pointing outside`);
+        stack.pop();
+        continue;
+      }
+      stack.push(p);
+      if (i < parts.length - 1 && links.has(stack.join("/"))) throw bad(`has a symlink ${e.name} whose target passes through another symlink`);
+    }
+  }
 }
 
 function put(h: Buffer, off: number, len: number, value: string) {

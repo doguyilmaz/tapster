@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { isMachO, readTarGz, writeTarGz } from "../src/archive";
 import { TapsterError } from "../src/errors";
-import { rawTarGz } from "./helpers/rawtar";
+import { paxRecord, rawTarGz } from "./helpers/rawtar";
 
 test("reads files, folders and inner symlinks", () => {
   const entries = readTarGz(
@@ -28,8 +28,32 @@ test.each([
   ["fifo", [{ name: "f", type: "6" }]],
   ["device", [{ name: "d", type: "3" }]],
   ["duplicate", [{ name: "a", data: "1" }, { name: "./a", data: "2" }]],
+  ["symlink chain that leaves", [{ name: "s", type: "2", linkname: "." }, { name: "s/l", type: "2", linkname: "../x" }]],
+  ["path through a symlink", [{ name: "sub/", type: "5" }, { name: "s", type: "2", linkname: "sub" }, { name: "s/f", data: "x" }]],
+  ["link target through a symlink", [{ name: "s", type: "2", linkname: "." }, { name: "l", type: "2", linkname: "s/.." }]],
+  ["PAX size that disagrees", [{ name: "PaxHeader", type: "x", data: paxRecord("size", "100") }, { name: "a", data: "x" }]],
+  ["global header with a path", [{ name: "g", type: "g", data: paxRecord("path", "evil") }, { name: "a", data: "x" }]],
 ])("rejects %s", (_, entries) => {
   expect(() => readTarGz(rawTarGz(entries))).toThrow(TapsterError);
+});
+
+test("the prefix field counts only in POSIX headers", () => {
+  expect(readTarGz(rawTarGz([{ name: "aims", prefix: "dir", data: "x" }]))[0]!.name).toBe("dir/aims");
+  expect(readTarGz(rawTarGz([{ name: "aims", prefix: "14567012345", gnu: true, data: "x" }]))[0]!.name).toBe("aims");
+});
+
+test("an inner symlink chain and a global comment header are fine", () => {
+  const entries = readTarGz(
+    rawTarGz([
+      { name: "g", type: "g", data: paxRecord("comment", "abc") },
+      { name: "bin/", type: "5" },
+      { name: "bin/aims", data: "x" },
+      { name: "a", type: "2", linkname: "bin" },
+      { name: "b", type: "2", linkname: "a" },
+      { name: "bin/up", type: "2", linkname: "../bin/aims" },
+    ]),
+  );
+  expect(entries.map((e) => e.name)).toEqual(["bin", "bin/aims", "a", "b", "bin/up"]);
 });
 
 test("enforces size limits", () => {
