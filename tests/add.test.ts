@@ -53,6 +53,7 @@ jobs:
 test("bun workflow builds every target and drafts the release", () => {
   const flow = bunWorkflow("konvoy", "src/cli.ts", pins);
   expect(flow).toContain("--draft");
+  expect(flow).toContain('tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]');
   expect(flow).toContain("bun build src/cli.ts --compile");
   expect(flow).not.toContain("__");
   expect(flow).not.toContain("secrets.");
