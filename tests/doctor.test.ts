@@ -11,4 +11,9 @@ test("no other workflow may use the tapster environment", () => {
   expect(otherWorkflowsCheck({ "ci.yml": "jobs:\n  a:\n    runs-on: ubuntu-24.04\n" }).ok).toBe(true);
   expect(otherWorkflowsCheck({ "x.yml": "jobs:\n  a:\n    environment: tapster\n" }).ok).toBe(false);
   expect(otherWorkflowsCheck({ "x.yml": "jobs:\n  a:\n    environment: { name: tapster }\n" }).ok).toBe(false);
+  expect(otherWorkflowsCheck({ "x.yml": "jobs:\n  a:\n    environment:\n      name: tapster\n" }).ok).toBe(false);
+  expect(otherWorkflowsCheck({ "x.yml": "jobs:\n  a:\n    environment: 'tapster'\n" }).ok).toBe(false);
+  expect(otherWorkflowsCheck({ "x.yml": "jobs:\n  a:\n    environment: ${{ inputs.env }}\n" }).ok).toBe(false);
+  expect(otherWorkflowsCheck({ "x.yml": "jobs:\n  a:\n    environment: production\n" }).ok).toBe(true);
+  expect(otherWorkflowsCheck({ "x.yml": "jobs: [unclosed\n" }).ok).toBe(false);
 });

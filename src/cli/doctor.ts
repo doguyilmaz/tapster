@@ -21,7 +21,22 @@ export function workflowTriggerCheck(yaml: string): Check {
 
 export function otherWorkflowsCheck(files: Record<string, string>): Check {
   const name = "no other workflow uses the tapster environment";
-  const offenders = Object.entries(files).filter(([, text]) => /environment:\s*(\{[^}]*name:\s*)?["']?tapster["']?/.test(text)).map(([f]) => f);
+  const usesTapster = (text: string): boolean => {
+    let flow: unknown;
+    try {
+      flow = parse(text);
+    } catch {
+      return true;
+    }
+    const jobs = (flow as { jobs?: unknown } | null)?.jobs;
+    if (!jobs || typeof jobs !== "object") return false;
+    return Object.values(jobs as Record<string, unknown>).some((job) => {
+      const env = (job as { environment?: unknown } | null)?.environment;
+      const name = typeof env === "object" && env !== null ? (env as { name?: unknown }).name : env;
+      return typeof name === "string" && (name.trim() === "tapster" || name.includes("${{"));
+    });
+  };
+  const offenders = Object.entries(files).filter(([, text]) => usesTapster(text)).map(([f]) => f);
   return offenders.length === 0 ? ok(name) : bad(name, `Remove the tapster environment from ${offenders.join(", ")}.`);
 }
 
@@ -34,7 +49,7 @@ async function apiChecks(gh: GitHub, hub: string, repos: string[]): Promise<Chec
   if (!env) return [bad("the tapster environment exists", "Run tapster init.")];
   const policies = await gh.json<{ branch_policies: { name: string; type?: string }[] }>("GET", `/repos/${hub}/environments/tapster/deployment-branch-policies`);
   checks.push(
-    env.deployment_branch_policy?.custom_branch_policies && policies.branch_policies.length === 1 && policies.branch_policies[0]!.name === "main"
+    env.deployment_branch_policy?.custom_branch_policies && policies.branch_policies.length === 1 && policies.branch_policies[0]!.name === "main" && (policies.branch_policies[0]!.type ?? "branch") === "branch"
       ? ok("only main may open the tapster environment")
       : bad("only main may open the tapster environment", "Run tapster init to restore the branch rule."),
   );
@@ -42,6 +57,9 @@ async function apiChecks(gh: GitHub, hub: string, repos: string[]): Promise<Chec
   const missing = SECRETS.filter((s) => !secrets.includes(s));
   checks.push(missing.length ? bad("all credentials are stored", `Missing: ${missing.join(", ")}. Run tapster init --rotate for them.`) : ok("all credentials are stored"));
   const vars = (await gh.json<{ variables: { name: string; value: string }[] }>("GET", `/repos/${hub}/environments/tapster/variables`)).variables;
+  const repoVars = (await gh.json<{ variables: { name: string }[] }>("GET", `/repos/${hub}/actions/variables`)).variables;
+  const exposed = [...vars, ...repoVars].map((v) => v.name).filter((n) => SECRETS.includes(n) || /^SPARKLE_KEY_/.test(n));
+  checks.push(exposed.length ? bad("credentials are secrets, not variables", `Variables are readable by anyone with access; delete ${exposed.join(", ")} and store them with tapster init --rotate.`) : ok("credentials are secrets, not variables"));
   const missingVars = VARIABLES.filter((v) => !vars.some((x) => x.name === v));
   checks.push(missingVars.length ? bad("the App and team variables are set", `Missing: ${missingVars.join(", ")}. Run tapster init.`) : ok("the App and team variables are set"));
   const perms = await gh.json<{ default_workflow_permissions: string }>("GET", `/repos/${hub}/actions/permissions/workflow`);
