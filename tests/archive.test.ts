@@ -33,6 +33,11 @@ test.each([
   ["link target through a symlink", [{ name: "s", type: "2", linkname: "." }, { name: "l", type: "2", linkname: "s/.." }]],
   ["PAX size that disagrees", [{ name: "PaxHeader", type: "x", data: paxRecord("size", "100") }, { name: "a", data: "x" }]],
   ["global header with a path", [{ name: "g", type: "g", data: paxRecord("path", "evil") }, { name: "a", data: "x" }]],
+  ["duplicate that differs only in case", [{ name: "aims", data: "1" }, { name: "AIMS", data: "2" }]],
+  ["path through a symlink spelled in another case", [{ name: "S", type: "2", linkname: "." }, { name: "s/l", type: "2", linkname: "../x" }]],
+  ["non-ASCII name", [{ name: "a\u00e9", data: "x" }]],
+  ["control character in a name", [{ name: "a\u0001b", data: "x" }]],
+  ["backslash in a symlink target", [{ name: "l", type: "2", linkname: "..\\x" }]],
 ])("rejects %s", (_, entries) => {
   expect(() => readTarGz(rawTarGz(entries))).toThrow(TapsterError);
 });

@@ -44,7 +44,10 @@ function parsePax(data: Buffer): Record<string, string> {
   return out;
 }
 
+const PRINTABLE = /^[\x20-\x5b\x5d-\x7e]+$/;
+
 function safeName(raw: string): string {
+  if (!PRINTABLE.test(raw)) throw bad("has a name with characters tapster does not accept (printable ASCII only, no backslash)");
   const trimmed = raw.replace(/\/+$/, "");
   if (trimmed === "" || trimmed.startsWith("/")) throw bad(`has an absolute or empty path (${trimmed || "empty"})`);
   const norm = posix.normalize(trimmed).replace(/^(\.\/)+/, "");
@@ -54,6 +57,7 @@ function safeName(raw: string): string {
 
 function checkLink(name: string, target: string) {
   if (target === "" || target.startsWith("/")) throw bad(`has a symlink ${name} pointing outside`);
+  if (!PRINTABLE.test(target)) throw bad(`has a symlink ${name} with characters tapster does not accept`);
   const resolved = posix.normalize(posix.join(posix.dirname(name), target));
   if (resolved === ".." || resolved.startsWith("../")) throw bad(`has a symlink ${name} pointing outside`);
 }
@@ -111,8 +115,8 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
     const kind = type === "0" || type === "\0" ? "file" : type === "5" ? "dir" : type === "2" ? "symlink" : null;
     if (!kind) throw bad(`holds ${rawName}, which is not a file, folder or symlink`);
     const name = safeName(rawName);
-    if (seen.has(name)) throw bad(`lists ${name} twice`);
-    seen.add(name);
+    if (seen.has(name.toLowerCase())) throw bad(`lists ${name} twice`);
+    seen.add(name.toLowerCase());
     if (kind === "symlink") checkLink(name, rawLink);
     entries.push({ name, type: kind, mode: octal(h, 100, 8) & 0o7777, data: Buffer.from(data), ...(kind === "symlink" ? { linkname: rawLink } : {}) });
   }
@@ -121,10 +125,10 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
 }
 
 function checkSymlinks(entries: TarEntry[]) {
-  const links = new Set(entries.filter((e) => e.type === "symlink").map((e) => e.name));
+  const links = new Set(entries.filter((e) => e.type === "symlink").map((e) => e.name.toLowerCase()));
   if (links.size === 0) return;
   for (const e of entries) {
-    const parts = e.name.split("/");
+    const parts = e.name.toLowerCase().split("/");
     for (let i = 1; i < parts.length; i++) {
       if (links.has(parts.slice(0, i).join("/"))) throw bad(`has ${e.name}, which passes through a symlink`);
     }
@@ -141,7 +145,7 @@ function checkSymlinks(entries: TarEntry[]) {
         continue;
       }
       stack.push(p);
-      if (i < parts.length - 1 && links.has(stack.join("/"))) throw bad(`has a symlink ${e.name} whose target passes through another symlink`);
+      if (i < parts.length - 1 && links.has(stack.join("/").toLowerCase())) throw bad(`has a symlink ${e.name} whose target passes through another symlink`);
     }
   }
 }
