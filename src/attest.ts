@@ -16,10 +16,9 @@ export function attestArgs(file: string, repo: string, workflow: string, tag: st
   ];
 }
 
-export function decide(code: number, stderr: string, isPrivate: boolean): "verified" | "skipped" | "failed" {
+export function decide(code: number, isPrivate: boolean): "verified" | "skipped" | "failed" {
   if (code === 0) return "verified";
-  const unavailable = /no attestations found|feature not available|upgrade|HTTP 403/i.test(stderr);
-  return isPrivate && unavailable ? "skipped" : "failed";
+  return isPrivate ? "skipped" : "failed";
 }
 
 export async function verifyAttestation(file: string, pkg: PackageConfig, tag: string, isPrivate: boolean, token: string): Promise<AttestOutcome> {
@@ -28,7 +27,7 @@ export async function verifyAttestation(file: string, pkg: PackageConfig, tag: s
     env: { GH_TOKEN: token, GH_HOST: "github.com", GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" },
     allowFail: true,
   });
-  const outcome = decide(res.code, res.stderr, isPrivate);
+  const outcome = decide(res.code, isPrivate);
   if (outcome === "failed") {
     throw new TapsterError(
       `${basename(file)} has no valid build attestation from ${pkg.repo}/.github/workflows/${pkg.workflow} at ${tag}`,

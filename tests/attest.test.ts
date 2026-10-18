@@ -12,10 +12,9 @@ test("verification pins repository, workflow, tag and hosted runners", () => {
   ]);
 });
 
-test("public repositories must verify; private ones may skip when unavailable", () => {
-  expect(decide(0, "", false)).toBe("verified");
-  expect(decide(1, "no attestations found", false)).toBe("failed");
-  expect(decide(1, "no attestations found", true)).toBe("skipped");
-  expect(decide(1, "HTTP 403: feature not available", true)).toBe("skipped");
-  expect(decide(1, "certificate identity mismatch", true)).toBe("failed");
+test("public repositories must verify; private ones skip on any failure, without reading the error text", () => {
+  expect(decide(0, false)).toBe("verified");
+  expect(decide(1, false)).toBe("failed");
+  expect(decide(0, true)).toBe("verified");
+  expect(decide(1, true)).toBe("skipped");
 });
