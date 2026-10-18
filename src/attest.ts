@@ -45,7 +45,7 @@ export async function verifyAttestation(file: string, pkg: PackageConfig, tag: s
   if (outcome === "failed") {
     throw new TapsterError(
       `${basename(file)} has no valid build attestation from ${pkg.repo}/.github/workflows/${pkg.workflow} at ${tag}`,
-      "Attest the archives in the project's release workflow (tapster add sets it up), or set attestation: off for this package.",
+      "Attest the archives in the project's release workflow (tapster add sets it up). To skip the check, set attestation: off for this package.",
     );
   }
   return outcome;

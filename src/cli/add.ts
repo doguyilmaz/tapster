@@ -103,7 +103,7 @@ export async function add(_args: string[]): Promise<void> {
     const g = adaptGoreleaser(await readFile(join(dir, goreleaser), "utf8"));
     await writeFile(join(dir, goreleaser), g.text);
     const flowPath = join(dir, ".github/workflows/release.yml");
-    if (!existsSync(flowPath)) throw new TapsterError("no .github/workflows/release.yml found", "tapster expects the release workflow at that path, or set workflow: in the hub entry.");
+    if (!existsSync(flowPath)) throw new TapsterError("no .github/workflows/release.yml found", "tapster expects the release workflow at that path. For another file, set workflow: in the hub entry.");
     const w = adaptReleaseWorkflow(await readFile(flowPath, "utf8"), pinsJson["actions/attest-build-provenance"].sha, pinsJson["actions/attest-build-provenance"].tag);
     await writeFile(flowPath, w.text);
     for (const n of [...g.notes, ...w.notes]) console.log(`- ${n}`);

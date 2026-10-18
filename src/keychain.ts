@@ -63,7 +63,7 @@ export async function openKeychain(p12Base64: string, p12Password: string, expec
     const found = parseIdentities((await run("security", ["find-identity", "-v", "-p", "codesigning", path])).stdout);
     const id = found.find((i) => i.name.startsWith("Developer ID Application:"));
     if (!id) throw new TapsterError("the certificate holds no valid Developer ID Application identity", "Export the Developer ID Application certificate with its private key as .p12; tapster init --rotate certificate.");
-    if (id.teamId !== expectedTeamId) throw new TapsterError(`the certificate belongs to team ${id.teamId}, not ${expectedTeamId}`, "Use the team's certificate, or update TAPSTER_TEAM_ID with tapster init --rotate certificate.");
+    if (id.teamId !== expectedTeamId) throw new TapsterError(`the certificate belongs to team ${id.teamId}, not ${expectedTeamId}`, "Use the team's certificate. To change teams, run tapster init --rotate certificate.");
     return { path, identity: id.sha1, teamId: id.teamId, close };
   } catch (e) {
     await close();

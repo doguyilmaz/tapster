@@ -17,7 +17,7 @@ export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 const HINTS: Record<number, string> = {
   401: "The credential was rejected; rotate it with tapster init --rotate.",
   403: "Access denied: check the App's permissions and that it is installed on this repository.",
-  404: "Not found, or the App is not installed on this repository.",
+  404: "Not found. The App may not be installed on this repository.",
   409: "GitHub reported a conflict; the next run retries.",
   422: "GitHub rejected the request.",
 };

@@ -160,7 +160,7 @@ export async function init(args: string[]): Promise<void> {
   if (rotate === "app") return createApp(hub.split("/")[0]!, hub, true);
   if (rotate === "certificate") return storeCertificate(hub);
   if (rotate === "notary") return storeNotary(hub);
-  if (args.length) throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, or tapster init --rotate app|certificate|notary.");
+  if (args.length) throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init or tapster init --rotate app|certificate|notary.");
   await protectHub(gh, hub);
   await createApp(hub.split("/")[0]!, hub, false);
   await storeCertificate(hub);
