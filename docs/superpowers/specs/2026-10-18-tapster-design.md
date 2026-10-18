@@ -576,15 +576,15 @@ The user asked to build phases 1, 2 and 3 in one go and answered these questions
   - One native session in this repository works through phase 1's plan, then writes and follows a spec and plan for
     phase 2 and for phase 3. There is no review stop between phases; spec and plan approval stays delegated to self
     review plus an adversarial review, as for phase 1.
-  - Ask the user only before outward steps: making tapster public, each project's migration release, and deleting a
+  - Ask the user only before outward steps: making tapster public, each project's migration release and deleting a
     project's old secrets.
   - Scratch and test repositories and test GitHub Apps are created and deleted as the plans say, without asking each
     time. Creating an App still needs the user's click in the browser.
-- **CLI distribution.** Both a cask in the hub, released through tapster itself, and npm as `@doguyilmaz/tapster`
+- **CLI distribution.** Both a cask in the hub (released through tapster itself) and npm as `@doguyilmaz/tapster`
   (npm account `doguyilmaz`). npm publishing uses trusted publishing from GitHub Actions, so no npm token exists.
 - **Phase 2.**
   - Apps: battistics, hafifpix and recesso. recesso becomes public before it migrates.
-  - All three use Sparkle, and installed copies read
+  - All three use Sparkle. Installed copies read
     `https://github.com/doguyilmaz/<app>/releases/latest/download/appcast.xml`. That address stays: the hub attaches
     the signed `appcast.xml` to the project's own release. No custom domain and no bridging update.
   - The Sparkle EdDSA private key, shared by the three apps today as each repository's `SPARKLE_PRIVATE_KEY`, moves
