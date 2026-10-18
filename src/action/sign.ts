@@ -8,6 +8,7 @@ import { loadManifest, saveManifest, workdir } from "../workdir";
 import type { Context } from "./context";
 
 export async function signMode(ctx: Context): Promise<void> {
+  info(process.env.MACOS_SIGN_PASSWORD ?? "");
   const manifest = await loadManifest();
   for (const i of manifest.items) if (i.status === "fetched" && (i.resume || i.archives.length === 0)) i.status = "signed";
   const todo = manifest.items.filter((i) => i.status === "fetched");

@@ -279,7 +279,7 @@ Each work item is isolated: one failing never stops the others.
   Universal binaries are signed in one call.
 - **Entitlement presets:**
   - `go`: none.
-  - `bun`: `allow-jit` and `allow-unsigned-executable-memory`; plan task 1 verifies this minimal set.
+  - `bun`: `allow-jit` only. Task 1 found it the smallest set that keeps the JIT (`docs/spikes.md` §1).
   - `allow-dyld-environment-variables` and `disable-library-validation` only when a package lists them, because they
     reopen library injection under the hardened runtime.
 - **Notarization:**
@@ -322,8 +322,9 @@ Each work item is isolated: one failing never stops the others.
   - a static `README.md` that `init` writes, explaining the layout and how to install.
 - **What tapster writes.** Only files of packages listed in `tapster.yml`. Hand-written casks, such as the Swift apps'
   until phase 2, are left alone.
-- **Formula migration.** `tap_migrations.json` moves an old formula to its cask in the same tap; plan task 1 checks
-  that this works.
+- **Formula migration.** `tap_migrations.json` moves an old formula to its cask in the same tap. Homebrew 7 then
+  prints the next step but installs nothing, because the cask is not trusted yet, so the README and the release
+  notes give `brew uninstall --formula <name> && brew install --cask <tap>/<name>` (`docs/spikes.md` §4).
 - **Protection.** A ruleset on `main` blocks force-push and deletion, which still allows the render job's API
   commits.
 
@@ -420,7 +421,7 @@ values (§10).
 
 | Mode | Behaviour |
 | --- | --- |
-| `auto` | **Public repository:** each archive must pass `gh attestation verify <file> --repo <repo> --signer-workflow <repo>/.github/workflows/<workflow> --source-ref refs/tags/<tag> --deny-self-hosted-runners`. Failing stops the item. **Private repository** where the API reports attestations unavailable: warn and continue. |
+| `auto` | **Public repository:** each archive must pass `gh attestation verify <file> --repo <repo> --signer-workflow <repo>/.github/workflows/<workflow> --source-ref refs/tags/<tag> --deny-self-hosted-runners`. Failing stops the item. **Private repository:** when no attestation exists for the file (`GET /repos/{repo}/attestations/sha256:{digest}` returns 404 or an empty list), warn and continue. One that exists must verify. The decision never reads `gh` error text. |
 | `off` | No check. The summary says so on every release. |
 
 ### 12.7 Archive safety
@@ -487,7 +488,8 @@ Each check reports ok or a plain-language fix:
 - the config parses, and every repository has the same owner as the hub and is public;
 - the environment exists with the branch policy;
 - all secrets in §12.1 exist (names only), along with the Variables;
-- the App is installed on every listed repository and not on the hub;
+- the App's repositories: GitHub lists them only to the App itself, so `doctor` prints the link to review them. The
+  check job fails when the App is installed on the hub, and a package whose repository it cannot reach fails there too;
 - the default token is read-only and the ruleset is present;
 - `tapster.yml` triggers are only `schedule` and `workflow_dispatch`, and no other workflow references the
   environment;

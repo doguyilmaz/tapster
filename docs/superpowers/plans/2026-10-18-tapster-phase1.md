@@ -2384,7 +2384,7 @@ import { TapsterError } from "../src/errors";
 
 test("presets", () => {
   expect(PRESETS.go).toEqual([]);
-  expect(PRESETS.bun).toEqual(["com.apple.security.cs.allow-jit", "com.apple.security.cs.allow-unsigned-executable-memory"]);
+  expect(PRESETS.bun).toEqual(["com.apple.security.cs.allow-jit"]);
 });
 
 test("entitlements plist lists the keys", () => {
@@ -2443,7 +2443,7 @@ import { run } from "./run";
 
 export const PRESETS: Record<"go" | "bun", string[]> = {
   go: [],
-  bun: ["com.apple.security.cs.allow-jit", "com.apple.security.cs.allow-unsigned-executable-memory"],
+  bun: ["com.apple.security.cs.allow-jit"],
 };
 
 export function entitlementsPlist(keys: string[]): string {
