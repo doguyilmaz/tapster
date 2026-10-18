@@ -42,6 +42,11 @@ test.each([
   expect(() => readTarGz(rawTarGz(entries))).toThrow(TapsterError);
 });
 
+test("a bare ./ root entry is skipped", () => {
+  const entries = readTarGz(rawTarGz([{ name: "./", type: "5", mode: 0o755 }, { name: "./konvoy", data: "x", mode: 0o755 }]));
+  expect(entries.map((e) => e.name)).toEqual(["konvoy"]);
+});
+
 test("the prefix field counts only in POSIX headers", () => {
   expect(readTarGz(rawTarGz([{ name: "aims", prefix: "dir", data: "x" }]))[0]!.name).toBe("dir/aims");
   expect(readTarGz(rawTarGz([{ name: "aims", prefix: "14567012345", gnu: true, data: "x" }]))[0]!.name).toBe("aims");

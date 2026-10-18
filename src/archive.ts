@@ -114,6 +114,7 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
     longLink = null;
     const kind = type === "0" || type === "\0" ? "file" : type === "5" ? "dir" : type === "2" ? "symlink" : null;
     if (!kind) throw bad(`holds ${rawName}, which is not a file, folder or symlink`);
+    if (kind === "dir" && /^(\.\/)*\.\/?$/.test(rawName)) continue;
     const name = safeName(rawName);
     if (seen.has(name.toLowerCase())) throw bad(`lists ${name} twice`);
     seen.add(name.toLowerCase());
