@@ -1,0 +1,81 @@
+import { expect, test } from "bun:test";
+import { makeLatest, resumeSwap, sameAssets, stageAndSwap, waitDownloadable } from "../src/publish";
+import type { Asset, GitHub, Release } from "../src/github";
+import { TapsterError } from "../src/errors";
+
+const a = (id: number, name: string, digest = `sha256:${id}`): Asset => ({ id, name, size: 1, state: "uploaded", digest, browser_download_url: `https://dl/${name}` });
+const rel = (assets: Asset[], over: Partial<Release> = {}): Release => ({ id: 1, tag_name: "v1.0.0", draft: true, prerelease: false, created_at: "", published_at: null, upload_url: "u{?name}", assets, ...over });
+
+function fakeGh(current: Release) {
+  const log: string[] = [];
+  let next = 100;
+  const gh = {
+    getRelease: async () => current,
+    uploadAsset: async (_r: Release, name: string) => {
+      log.push(`upload ${name}`);
+      return a(next++, name);
+    },
+    deleteAsset: async (_repo: string, id: number) => {
+      log.push(`delete ${id}`);
+    },
+    renameAsset: async (_repo: string, id: number, name: string) => {
+      log.push(`rename ${id} ${name}`);
+      return a(id, name);
+    },
+  } as unknown as GitHub;
+  return { gh, log };
+}
+
+test("uploads every staging file first, then swaps with checksums last", async () => {
+  const before = [a(1, "x.tar.gz"), a(2, "checksums.txt")];
+  const f = fakeGh(rel(before));
+  await stageAndSwap(f.gh, "o/r", 1, [{ name: "checksums.txt", data: Buffer.from("s") }, { name: "x.tar.gz", data: Buffer.from("x") }], before);
+  expect(f.log).toEqual([
+    "upload tapster-staging--x.tar.gz",
+    "upload tapster-staging--checksums.txt",
+    "delete 1",
+    "rename 100 x.tar.gz",
+    "delete 2",
+    "rename 101 checksums.txt",
+  ]);
+});
+
+test("stops when the draft changed or was published", async () => {
+  const before = [a(1, "x.tar.gz")];
+  await expect(stageAndSwap(fakeGh(rel([a(1, "x.tar.gz", "sha256:other")])).gh, "o/r", 1, [], before)).rejects.toBeInstanceOf(TapsterError);
+  await expect(stageAndSwap(fakeGh(rel(before, { draft: false })).gh, "o/r", 1, [], before)).rejects.toBeInstanceOf(TapsterError);
+});
+
+test("resume finishes a half-done swap", async () => {
+  const half = rel([a(2, "checksums.txt"), a(100, "tapster-staging--x.tar.gz"), a(101, "tapster-staging--checksums.txt")]);
+  const f = fakeGh(half);
+  await resumeSwap(f.gh, "o/r", half);
+  expect(f.log).toEqual(["rename 100 x.tar.gz", "delete 2", "rename 101 checksums.txt"]);
+});
+
+test("resume after an interrupted upload removes the partial staging files and starts over", async () => {
+  const partial = rel([a(1, "x.tar.gz"), a(2, "checksums.txt"), a(100, "tapster-staging--x.tar.gz")]);
+  const f = fakeGh(partial);
+  await expect(resumeSwap(f.gh, "o/r", partial)).rejects.toBeInstanceOf(TapsterError);
+  expect(f.log).toEqual(["delete 100"]);
+});
+
+test("sameAssets ignores order", () => {
+  expect(sameAssets([a(1, "x"), a(2, "y")], [a(2, "y"), a(1, "x")])).toBe(true);
+  expect(sameAssets([a(1, "x")], [a(1, "x"), a(3, "z")])).toBe(false);
+});
+
+test("make_latest only for the highest stable version", () => {
+  const published = (tag: string) => rel([], { tag_name: tag, draft: false });
+  expect(makeLatest("v1.2.0", [published("v1.1.0")])).toBe("true");
+  expect(makeLatest("v1.0.1", [published("v1.1.0")])).toBe("false");
+  expect(makeLatest("v2.0.0-rc.1", [])).toBe("false");
+});
+
+test("waits until every asset downloads", async () => {
+  let calls = 0;
+  const fetchImpl = async () => new Response(null, { status: ++calls > 2 ? 200 : 404 });
+  await waitDownloadable(["https://dl/a"], fetchImpl, async () => {}, 60_000);
+  expect(calls).toBe(3);
+  await expect(waitDownloadable(["https://dl/a"], async () => new Response(null, { status: 404 }), async () => {}, -1)).rejects.toBeInstanceOf(TapsterError);
+});
