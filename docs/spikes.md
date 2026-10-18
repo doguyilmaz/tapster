@@ -42,7 +42,7 @@ waiting, never processed (Review Focus 2).
 
 ## 3. Environment with `deployment: false`
 
-Setup: environment `t` with a custom branch policy for `main`, secret `S`, and a workflow job with
+Setup: environment `t` with a custom branch policy for `main`, secret `S` and a workflow job with
 `environment: { name: t, deployment: false }` that prints whether `S` is set. Dispatched on `main` and on `other`.
 
 Observed:
@@ -67,7 +67,7 @@ and `tap_migrations.json` (`{"spk": "doguyilmaz/tapster-spike/spk"}`) and ran `b
 - Homebrew 7 notices the move but does not install the cask by itself: "Not automatically installing
   doguyilmaz/tapster-spike/spk because the migration target is not trusted." It prints
   `brew trust --cask …` and `brew install --cask …`.
-- After both commands the formula is still installed, and the cask skips its binary ("there is already a Binary at
+- After both commands the formula is still installed. The cask skips its binary ("there is already a Binary at
   '/opt/homebrew/bin/spk' from formula spk; skipping link").
 - `brew install user/tap/name` trusts that one entry automatically (`brew trust --json v1` lists it), so a person who
   installs a cask by its full name needs no extra step.
@@ -92,7 +92,7 @@ Observed:
 - `/usr/bin/openssl` (LibreSSL 3.3.6) reads both files with `-passin env:` and re-wraps them with `-passout env:`;
 - `security import -P <one-time password>` imports the re-wrapped file;
 - `security find-identity -p codesigning` lists the identity only when the certificate has the code signing usage
-  (`extendedKeyUsage=critical,codeSigning`). It is then listed as `CSSMERR_TP_NOT_TRUSTED`, and `-v` hides it.
+  (`extendedKeyUsage=critical,codeSigning`). It is then listed as `CSSMERR_TP_NOT_TRUSTED`. `-v` hides it.
 
 **Decision:** the re-wrap works as designed. Test fixtures that must reach `codesign` need the code signing usage and
 a trusted certificate. The leak test (Task 21) trusts its canary certificate on the runner with
@@ -117,7 +117,7 @@ the owner's `gh` token:
   lists nothing for them;
 - the darwin archives unpacked, each held exactly one Mach-O file named in `binaries`;
 - `codesign` with the Developer ID and `verifySigned` passed, the Bun binary carrying only `allow-jit`;
-- the repack was byte-stable when read and written again, `/usr/bin/tar` extracted it, and both signed binaries ran
+- the repack was byte-stable when read and written again. `/usr/bin/tar` extracted it and both signed binaries ran
   (the Bun one with its JIT working).
 
 ## 8. Re-enabling a scheduled workflow
