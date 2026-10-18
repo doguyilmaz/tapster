@@ -92,4 +92,6 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with: { bun-version: 1.4.3 }
       - run: bun tests/leak/run-scan.ts
-        env: { GH_TOKEN: "${{ github.token }}" }
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECT_STAGES: '{"plain":["fixture v0.0.1: failed (openssl exited with"]}'
