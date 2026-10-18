@@ -2,17 +2,22 @@ export type Finding = { line: number; kind: string };
 
 const stamp = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z ?/;
 
-export function bodyLines(log: string): { line: number; text: string }[] {
-  const out: { line: number; text: string }[] = [];
+export function bodyLines(log: string): { line: number; text: string; step: string }[] {
+  const out: { line: number; text: string; step: string }[] = [];
   let header = false;
+  let step = "";
   for (const [i, raw] of log.split(/\r?\n/).entries()) {
     const text = raw.replace(stamp, "");
-    if (text.startsWith("##[group]Run ")) header = true;
-    else if (header && text.startsWith("##[endgroup]")) header = false;
-    else if (!header) out.push({ line: i + 1, text });
+    if (text.startsWith("##[group]Run ")) {
+      header = true;
+      step = text.slice("##[group]Run ".length).trim();
+    } else if (header && text.startsWith("##[endgroup]")) header = false;
+    else if (!header) out.push({ line: i + 1, text, step });
   }
   return out;
 }
+
+const TAPSTER_STEP = /^(\.\/|doguyilmaz\/tapster@)/;
 
 export function encodings(canary: string): { kind: string; value: string }[] {
   const b = Buffer.from(canary, "utf8");
@@ -50,7 +55,7 @@ export function scanPlain(log: string, canaries: string[]): Finding[] {
 
 export function scanMasked(log: string): Finding[] {
   return bodyLines(log)
-    .filter(({ text }) => text.includes("***"))
+    .filter(({ text, step }) => TAPSTER_STEP.test(step) && text.includes("***"))
     .map(({ line }) => ({ line, kind: "masked value printed" }));
 }
 

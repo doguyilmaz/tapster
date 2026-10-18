@@ -15,12 +15,13 @@ test("finds a canary in plain text, base64 at any offset, hex and fragments", ()
 test("step headers are not scanned", () => {
   const text = log("##[group]Run doguyilmaz/tapster@abc", "env:", `  MACOS_SIGN_PASSWORD: ${canary}`, "##[endgroup]", "tapster: done");
   expect(bodyLines(text).map((l) => l.text)).toEqual(["tapster: done"]);
+  expect(bodyLines(text)[0]!.step).toBe("doguyilmaz/tapster@abc");
   expect(scanPlain(text, [canary])).toEqual([]);
 });
 
 test("masked runs flag any *** outside headers", () => {
   expect(scanMasked(log("##[group]Run x", "  MACOS_SIGN_P12: ***", "##[endgroup]", "fine"))).toEqual([]);
-  expect(scanMasked(log("aims: failed (token ***)"))).toEqual([{ line: 1, kind: "masked value printed" }]);
+  expect(scanMasked(log("##[group]Run ./", "##[endgroup]", "aims: failed (token ***)"))).toEqual([{ line: 3, kind: "masked value printed" }]);
 });
 
 test("encodings are long enough to be meaningful", () => {
@@ -31,4 +32,10 @@ test("a job that never reached its stages fails the scan", () => {
   const text = log("##[group]Run x", "openssl exited with 1", "##[endgroup]", "fixture v0.0.1: failed (openssl exited with 1. x)");
   expect(missingStages(text, ["fixture v0.0.1: failed (openssl exited"])).toEqual([]);
   expect(missingStages(log("tapster: failed (tapster.yml is not valid YAML)"), ["openssl exited"])).toEqual(["openssl exited"]);
+});
+
+test("masked scans cover tapster steps only", () => {
+  const text = log("##[group]Run actions/checkout@abc", "##[endgroup]", "AUTHORIZATION: basic ***", "##[group]Run ./", "##[endgroup]", "tapster: failed (token ***)");
+  expect(scanMasked(text)).toEqual([{ line: 6, kind: "masked value printed" }]);
+  expect(scanMasked(log("##[group]Run doguyilmaz/tapster@abc", "##[endgroup]", "x ***")).length).toBe(1);
 });
