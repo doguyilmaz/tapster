@@ -45,7 +45,7 @@ export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag:
         }
       }
     }
-    const attest = doc.createNode({ name: "Attest the archives for tapster", uses: `actions/attest-build-provenance@${attestSha}`, with: { "subject-checksums": "dist/checksums.txt" } });
+    const attest = doc.createNode({ name: "Attest the archives for tapster", uses: `actions/attest-build-provenance@${attestSha}`, "continue-on-error": "${{ github.event.repository.private }}", with: { "subject-checksums": "dist/checksums.txt" } });
     (attest.get("uses", true) as Scalar).comment = ` ${attestTag}`;
     steps.items.splice(index + 1, 0, attest as never);
     (job.value as YAMLMap).set("permissions", doc.createNode({ contents: "write", "id-token": "write", attestations: "write" }));

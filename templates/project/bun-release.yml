@@ -31,6 +31,7 @@ jobs:
           (cd windows-x64 && zip -qX "../__NAME___${v}_windows_amd64.zip" __NAME__.exe)
           sha256sum *.tar.gz *.zip > checksums.txt
       - uses: actions/attest-build-provenance@__ATTEST_SHA__ # __ATTEST_TAG__
+        continue-on-error: ${{ github.event.repository.private }}
         with: { subject-checksums: dist/checksums.txt }
       - name: Hand the draft to the tapster hub
         env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" }

@@ -45,6 +45,7 @@ jobs:
   expect(Object.keys(steps[0].env)).toEqual(["GITHUB_TOKEN"]);
   expect(steps[1].uses).toBe(`actions/attest-build-provenance@${pins["actions/attest-build-provenance"].sha}`);
   expect(steps[1].with).toEqual({ "subject-checksums": "dist/checksums.txt" });
+  expect(steps[1]["continue-on-error"]).toBe("${{ github.event.repository.private }}");
   expect(text).toContain(`actions/attest-build-provenance@${pins["actions/attest-build-provenance"].sha} # v3`);
   expect(y.jobs.release.permissions).toEqual({ contents: "write", "id-token": "write", attestations: "write" });
 });
@@ -56,6 +57,7 @@ test("bun workflow builds every target and drafts the release", () => {
   expect(flow).not.toContain("__");
   expect(flow).not.toContain("secrets.");
   expect(flow).toContain("subject-checksums: dist/checksums.txt");
+  expect(flow).toContain("continue-on-error: ${{ github.event.repository.private }}");
   expect(flow).toContain('tar -C "$t" -czf "konvoy_${v}_${p/-/_}.tar.gz" konvoy');
 });
 
