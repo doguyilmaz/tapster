@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { createVerify, generateKeyPairSync } from "node:crypto";
-import { appJwt, installationToken } from "../src/token";
+import { appJwt, installationExists, installationToken } from "../src/token";
 import { resetMaskForTests, scrub } from "../src/mask";
 
 afterEach(resetMaskForTests);
@@ -34,4 +34,15 @@ test("installation tokens are scoped, masked and revocable", async () => {
   expect(body).toEqual({ repositories: ["aims"], permissions: { contents: "write" } });
   await tok.revoke();
   expect(calls.at(-1)!.init!.method).toBe("DELETE");
+});
+
+test("installationExists asks GitHub with the App JWT", async () => {
+  const seen: string[] = [];
+  const reply = (status: number) => async (url: string, init?: RequestInit) => {
+    seen.push(`${url} ${(init?.headers as Record<string, string>).Authorization?.split(".").length}`);
+    return new Response(status === 200 ? "{}" : null, { status });
+  };
+  expect(await installationExists("1", pem, "o/hub", reply(200))).toBe(true);
+  expect(await installationExists("1", pem, "o/hub", reply(404))).toBe(false);
+  expect(seen[0]).toBe("https://api.github.com/repos/o/hub/installation 3");
 });

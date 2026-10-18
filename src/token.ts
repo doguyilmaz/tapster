@@ -1,4 +1,5 @@
 import { createSign } from "node:crypto";
+import { GitHubError } from "./errors";
 import { GitHub, type FetchLike } from "./github";
 import { register } from "./mask";
 
@@ -37,4 +38,14 @@ export async function installationToken(
       await gh.request("DELETE", "/installation/token").catch(() => undefined);
     },
   };
+}
+
+export async function installationExists(appId: string, pem: string, repo: string, fetchImpl?: FetchLike): Promise<boolean> {
+  try {
+    await new GitHub(appJwt(appId, pem), fetchImpl).json("GET", `/repos/${repo}/installation`);
+    return true;
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 404) return false;
+    throw e;
+  }
 }

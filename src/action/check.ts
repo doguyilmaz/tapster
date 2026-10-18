@@ -4,7 +4,8 @@ import { GitHub } from "../github";
 import { readSecret, requireVar } from "../mask";
 import { type WorkItem, planPackage } from "../plan";
 import { failure, record } from "../report";
-import { type InstallationToken, installationToken } from "../token";
+import { TapsterError } from "../errors";
+import { type InstallationToken, installationExists, installationToken } from "../token";
 import type { Context } from "./context";
 import { renderNeeded } from "./render";
 
@@ -13,6 +14,9 @@ export async function check(ctx: Context): Promise<void> {
   const pem = readSecret("TAPSTER_APP_PRIVATE_KEY");
   const only = core.getInput("package");
   const items: WorkItem[] = [];
+  if (await installationExists(appId, pem, ctx.hub)) {
+    failure(ctx.hub, new TapsterError("the App is installed on the hub", "Remove the hub from the App's repositories; the App only needs the projects."));
+  }
   for (const pkg of ctx.config.packages) {
     if (only && pkg.name !== only) continue;
     let tok: InstallationToken | undefined;
