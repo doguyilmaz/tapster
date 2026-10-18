@@ -530,8 +530,8 @@ For each project:
 | Phase | Scope |
 | --- | --- |
 | 1 (this spec) | Go and Bun CLIs, casks, Scoop, `init`/`add`/`doctor`, leak test. tapster becomes public (the public hub can only use a public action), then the five CLIs migrate. |
-| 2 | SwiftUI apps: Release build ad-hoc signed in the project; in the hub, Sparkle-order re-signing with `codesign`, DMG, notarize and staple, Sparkle EdDSA signature, appcast under a custom domain. |
-| 3 | Instant trigger with a Cloudflare Worker and verified webhooks, optionally OIDC from project CI. Marketplace listing and docs for others. Linux package repositories if wanted. |
+| 2 | SwiftUI apps (battistics, hafifpix, recesso): Release build ad-hoc signed in the project; in the hub, Sparkle-order re-signing with `codesign`, DMG, notarize and staple, Sparkle EdDSA signature, and the appcast attached to the project's own release (§20). |
+| 3 | A Cloudflare Worker that takes verified release webhooks and OIDC calls from project CI and starts the hub run at once. Marketplace listing and a docs site for others. apt and rpm repositories from the hub. |
 
 **Out of scope for phase 1:**
 - app bundles, DMGs and pkgs;
@@ -567,3 +567,34 @@ These assumptions decide details of the design and are verified before building:
 - **Bun signing regressed once (1.3.12).** Bun is pinned in the template, and every signature is verified.
 - **No fixes after publishing.** Immutable releases leave nothing to repair after publish, so every check runs before
   it.
+
+## 20. Decisions for all phases (2026-10-19)
+
+The user asked to build phases 1, 2 and 3 in one go and answered these questions up front.
+
+- **How the work runs.**
+  - One native session in this repository works through phase 1's plan, then writes and follows a spec and plan for
+    phase 2 and for phase 3. There is no review stop between phases; spec and plan approval stays delegated to self
+    review plus an adversarial review, as for phase 1.
+  - Ask the user only before outward steps: making tapster public, each project's migration release, and deleting a
+    project's old secrets.
+  - Scratch and test repositories and test GitHub Apps are created and deleted as the plans say, without asking each
+    time. Creating an App still needs the user's click in the browser.
+- **CLI distribution.** Both a cask in the hub, released through tapster itself, and npm as `@doguyilmaz/tapster`
+  (npm account `doguyilmaz`). npm publishing uses trusted publishing from GitHub Actions, so no npm token exists.
+- **Phase 2.**
+  - Apps: battistics, hafifpix and recesso. recesso becomes public before it migrates.
+  - All three use Sparkle, and installed copies read
+    `https://github.com/doguyilmaz/<app>/releases/latest/download/appcast.xml`. That address stays: the hub attaches
+    the signed `appcast.xml` to the project's own release. No custom domain and no bridging update.
+  - The Sparkle EdDSA private key, shared by the three apps today as each repository's `SPARKLE_PRIVATE_KEY`, moves
+    into the hub's environment. Losing it strands every installed copy, so `doctor` checks it and `init` never prints it.
+  - DMGs stay the distribution format. hafifpix ships a CLI inside the app (`Contents/Resources/bin/hafif`), which
+    the nested signing order must cover.
+- **Phase 3.**
+  - The Worker runs on Cloudflare's free plan (100,000 requests a day; tapster needs a few per release). It verifies
+    GitHub's webhook signature or the project's OIDC token before it starts a hub run. The credential it uses to start
+    the run is its only secret; the phase 3 spec decides its scope.
+  - Marketplace listing and a docs site at `tapster.doguyilmaz.com`.
+  - apt and rpm repositories served from the hub.
+  - Personal accounts only. Organizations stay out of scope.
