@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isMachO, readTarGz } from "../archive";
 import { verifyAttestation } from "../attest";
+import { macCodeIn } from "../maccode";
 import { parseChecksums, sha256 } from "../checksums";
 import { type Platform, assetName, versionOf } from "../config";
 import { TapsterError } from "../errors";
@@ -39,6 +40,8 @@ export async function fetchMode(ctx: Context): Promise<void> {
         const sums = release.assets.find((a) => a.name === "checksums.txt");
         if (!sums) throw new TapsterError("checksums.txt disappeared from the draft", "The next run checks again.");
         fetched.checksums = parseChecksums((await gh.downloadAsset(pkg.repo, sums.id)).toString("utf8"));
+        const version = versionOf(item.tag);
+        const signedHere = new Set((Object.keys(pkg.assets) as Platform[]).filter((p) => p.startsWith("darwin")).map((p) => assetName(pkg, p, version)!));
         for (const a of release.assets) {
           if (a.name === "checksums.txt") continue;
           const data = await gh.downloadAsset(pkg.repo, a.id);
@@ -46,13 +49,14 @@ export async function fetchMode(ctx: Context): Promise<void> {
           if (!line || sha256(data) !== line.sha256 || (a.digest !== null && a.digest !== `sha256:${line.sha256}`)) {
             throw new TapsterError(`${a.name} does not match checksums.txt`, "Rebuild the release; the files changed after the checksums were written.");
           }
+          const unsigned = signedHere.has(a.name) ? null : macCodeIn(a.name, data);
+          if (unsigned) throw new TapsterError(unsigned, "Map every macOS archive in tapster.yml so tapster signs it, or stop attaching the file.");
           const file = join(dir, "assets", a.name);
           await writeFile(file, data, { mode: 0o600 });
           if ((await verifyAttestation(file, pkg, item.tag, repo.private, tok.token)) === "skipped") {
             warn(`${pkg.name} ${item.tag}: ${a.name} has no attestation; ${pkg.repo} is private, so this is allowed`);
           }
         }
-        const version = versionOf(item.tag);
         for (const platform of (Object.keys(pkg.assets) as Platform[]).filter((p) => p.startsWith("darwin"))) {
           const name = assetName(pkg, platform, version)!;
           const binDir = join(dir, "bin", name);
