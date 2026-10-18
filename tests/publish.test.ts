@@ -2,15 +2,17 @@ import { expect, test } from "bun:test";
 import { makeLatest, resumeSwap, sameAssets, stageAndSwap, waitDownloadable } from "../src/publish";
 import type { Asset, GitHub, Release } from "../src/github";
 import { TapsterError } from "../src/errors";
+import { sha256 } from "../src/checksums";
 
 const a = (id: number, name: string, digest = `sha256:${id}`): Asset => ({ id, name, size: 1, state: "uploaded", digest, browser_download_url: `https://dl/${name}` });
 const rel = (assets: Asset[], over: Partial<Release> = {}): Release => ({ id: 1, tag_name: "v1.0.0", draft: true, prerelease: false, created_at: "", published_at: null, upload_url: "u{?name}", assets, ...over });
 
-function fakeGh(current: Release) {
+function fakeGh(current: Release, download = "") {
   const log: string[] = [];
   let next = 100;
   const gh = {
     getRelease: async () => current,
+    downloadAsset: async () => Buffer.from(download),
     uploadAsset: async (_r: Release, name: string) => {
       log.push(`upload ${name}`);
       return a(next++, name);
@@ -46,17 +48,39 @@ test("stops when the draft changed or was published", async () => {
   await expect(stageAndSwap(fakeGh(rel(before, { draft: false })).gh, "o/r", 1, [], before)).rejects.toBeInstanceOf(TapsterError);
 });
 
-test("resume finishes a half-done swap", async () => {
-  const half = rel([a(2, "checksums.txt"), a(100, "tapster-staging--x.tar.gz"), a(101, "tapster-staging--checksums.txt")]);
-  const f = fakeGh(half);
-  await resumeSwap(f.gh, "o/r", half);
+const hx = "1".repeat(64);
+const signedSums = `${hx}  x.tar.gz\n`;
+const half = () => rel([a(2, "checksums.txt"), a(100, "tapster-staging--x.tar.gz", `sha256:${hx}`), a(101, "tapster-staging--checksums.txt")]);
+
+test("resume finishes a half-done swap that tapster recorded", async () => {
+  const f = fakeGh(half(), signedSums);
+  await resumeSwap(f.gh, "o/r", half(), sha256(Buffer.from(signedSums)));
   expect(f.log).toEqual(["rename 100 x.tar.gz", "delete 2", "rename 101 checksums.txt"]);
+});
+
+test("staging files tapster did not record are removed, never published", async () => {
+  const f = fakeGh(half(), signedSums);
+  await expect(resumeSwap(f.gh, "o/r", half(), undefined)).rejects.toBeInstanceOf(TapsterError);
+  expect(f.log).toEqual(["delete 100", "delete 101"]);
+});
+
+test("staging files whose checksums differ from the record are removed", async () => {
+  const f = fakeGh(half(), `${"2".repeat(64)}  x.tar.gz\n`);
+  await expect(resumeSwap(f.gh, "o/r", half(), sha256(Buffer.from(signedSums)))).rejects.toBeInstanceOf(TapsterError);
+  expect(f.log).toEqual(["delete 100", "delete 101"]);
+});
+
+test("a staged file that does not match the recorded checksums is removed", async () => {
+  const forged = rel([a(2, "checksums.txt"), a(100, "tapster-staging--x.tar.gz", `sha256:${"3".repeat(64)}`), a(101, "tapster-staging--checksums.txt")]);
+  const f = fakeGh(forged, signedSums);
+  await expect(resumeSwap(f.gh, "o/r", forged, sha256(Buffer.from(signedSums)))).rejects.toBeInstanceOf(TapsterError);
+  expect(f.log).toEqual(["delete 100", "delete 101"]);
 });
 
 test("resume after an interrupted upload removes the partial staging files and starts over", async () => {
   const partial = rel([a(1, "x.tar.gz"), a(2, "checksums.txt"), a(100, "tapster-staging--x.tar.gz")]);
   const f = fakeGh(partial);
-  await expect(resumeSwap(f.gh, "o/r", partial)).rejects.toBeInstanceOf(TapsterError);
+  await expect(resumeSwap(f.gh, "o/r", partial, sha256(Buffer.from(signedSums)))).rejects.toBeInstanceOf(TapsterError);
   expect(f.log).toEqual(["delete 100"]);
 });
 

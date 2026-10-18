@@ -1,3 +1,4 @@
+import { parseChecksums, sha256 } from "./checksums";
 import { compareSemver, parseTag } from "./config";
 import { TapsterError } from "./errors";
 import type { Asset, FetchLike, GitHub, Release } from "./github";
@@ -36,14 +37,24 @@ export async function stageAndSwap(gh: GitHub, repo: string, releaseId: number, 
   await swap(gh, repo, current.assets, staged);
 }
 
-export async function resumeSwap(gh: GitHub, repo: string, release: Release): Promise<void> {
+export async function resumeSwap(gh: GitHub, repo: string, release: Release, recorded: string | undefined): Promise<void> {
   const stagedAssets = release.assets.filter((x) => x.name.startsWith(STAGING));
-  const complete = stagedAssets.some((x) => x.name === `${STAGING}checksums.txt`) && stagedAssets.every((x) => x.state === "uploaded");
-  if (!complete) {
+  const discard = async (reason: string) => {
     for (const x of stagedAssets) await gh.deleteAsset(repo, x.id);
-    throw new TapsterError("an earlier run stopped while uploading the signed files", "tapster removed the partial upload; the next run signs the draft again.");
-  }
+    throw new TapsterError(reason, "tapster removed the staging files; the next run signs the draft again.");
+  };
+  const stagedSums = stagedAssets.find((x) => x.name === `${STAGING}checksums.txt`);
+  if (!recorded) return discard("the draft holds staging files that tapster has no record of uploading");
+  if (!stagedSums || stagedAssets.some((x) => x.state !== "uploaded")) return discard("an earlier run stopped while uploading the signed files");
+  const sums = await gh.downloadAsset(repo, stagedSums.id);
+  if (sha256(sums) !== recorded) return discard("the staged checksums.txt is not the one tapster recorded");
   const staged = new Map(stagedAssets.map((x) => [x.name.slice(STAGING.length), x] as const));
+  const final = new Map(release.assets.filter((x) => !x.name.startsWith(STAGING) && !staged.has(x.name)).map((x) => [x.name, x] as const));
+  for (const [name, x] of staged) if (name !== "checksums.txt") final.set(name, x);
+  const lines = parseChecksums(sums.toString("utf8"));
+  if (lines.length !== final.size || !lines.every((l) => final.get(l.name)?.digest === `sha256:${l.sha256}`)) {
+    return discard("the staged files do not match the checksums tapster recorded");
+  }
   await swap(gh, repo, release.assets.filter((x) => !x.name.startsWith(STAGING)), staged);
 }
 
