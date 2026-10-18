@@ -6,4 +6,3 @@ packages:
     binaries: [fixture]
     assets:
       darwin-arm64: "fixture_{version}_darwin_arm64.tar.gz"
-```

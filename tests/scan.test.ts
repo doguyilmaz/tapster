@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bodyLines, encodings, scanMasked, scanPlain } from "./leak/scan";
+import { bodyLines, encodings, missingStages, scanMasked, scanPlain } from "./leak/scan";
 
 const canary = "CANARY-p12-password-7f3a9c2e1b";
 const log = (...lines: string[]) => lines.map((l, i) => `2026-10-18T10:00:0${i}.0000000Z ${l}`).join("\n");
@@ -25,4 +25,10 @@ test("masked runs flag any *** outside headers", () => {
 
 test("encodings are long enough to be meaningful", () => {
   for (const e of encodings(canary)) expect(e.value.length).toBeGreaterThanOrEqual(8);
+});
+
+test("a job that never reached its stages fails the scan", () => {
+  const text = log("##[group]Run x", "openssl exited with 1", "##[endgroup]", "fixture v0.0.1: failed (openssl exited with 1. x)");
+  expect(missingStages(text, ["fixture v0.0.1: failed (openssl exited"])).toEqual([]);
+  expect(missingStages(log("tapster: failed (tapster.yml is not valid YAML)"), ["openssl exited"])).toEqual(["openssl exited"]);
 });

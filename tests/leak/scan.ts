@@ -53,3 +53,8 @@ export function scanMasked(log: string): Finding[] {
     .filter(({ text }) => text.includes("***"))
     .map(({ line }) => ({ line, kind: "masked value printed" }));
 }
+
+export function missingStages(log: string, markers: string[]): string[] {
+  const body = bodyLines(log).map((l) => l.text);
+  return markers.filter((m) => !body.some((t) => t.includes(m)));
+}
