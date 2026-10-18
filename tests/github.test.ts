@@ -75,3 +75,11 @@ test("uploads go to the release upload url", async () => {
   await new GitHub("t", f.fetch, noSleep).uploadAsset(release, "tapster-staging--a", new Uint8Array([1]));
   expect(f.calls[0]!.url).toBe("https://uploads.github.com/repos/o/r/releases/1/assets?name=tapster-staging--a");
 });
+
+test("a renamed repository's API redirect is followed with auth, other hosts are not", async () => {
+  const f = fake([new Response(null, { status: 301, headers: { location: "https://api.github.com/repositories/42" } }), json({ id: 42 })]);
+  expect((await new GitHub("tok", f.fetch, noSleep).getRepo("o/old")).id).toBe(42);
+  expect((f.calls[1]!.init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
+  const g = fake([new Response(null, { status: 301, headers: { location: "https://evil.example/x" } })]);
+  await expect(new GitHub("tok", g.fetch, noSleep).getRepo("o/old")).rejects.toBeInstanceOf(GitHubError);
+});

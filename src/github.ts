@@ -74,7 +74,20 @@ export class GitHub {
   }
 
   async json<T>(method: string, url: string, body?: unknown): Promise<T> {
-    const res = await this.request(method, url, body === undefined ? {} : { body });
+    let res = await this.request(method, url, body === undefined ? {} : { body });
+    for (let hops = 0; res.status >= 300 && res.status < 400; hops++) {
+      const location = res.headers.get("location");
+      let next: URL | null = null;
+      try {
+        next = location ? new URL(location) : null;
+      } catch {
+        next = null;
+      }
+      if (hops >= 3 || !next || next.protocol !== "https:" || next.host !== "api.github.com") {
+        throw new GitHubError(`GitHub ${method} ${pathOf(url)} moved somewhere tapster does not follow`, "Update the repository name in tapster.yml.", res.status);
+      }
+      res = await this.request(method, next.toString(), body === undefined ? {} : { body });
+    }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
   }

@@ -53,6 +53,7 @@ export async function check(ctx: Context): Promise<void> {
       await tok?.revoke();
     }
   }
-  core.setOutput("work", JSON.stringify(items));
+  if (items.length > 50) record({ item: "hub", result: "waiting", detail: `${items.length - 50} more drafts wait for the next run` });
+  core.setOutput("work", JSON.stringify(items.slice(0, 50)));
   core.setOutput("render", String(items.length > 0 || (await renderNeeded(ctx, privateRepos))));
 }

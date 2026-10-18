@@ -35,4 +35,4 @@ jobs:
         with: { subject-checksums: dist/checksums.txt }
       - name: Hand the draft to the tapster hub
         env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" }
-        run: gh release create "$TAG" dist/*.tar.gz dist/*.zip dist/checksums.txt --draft --verify-tag --generate-notes --title "$TAG"
+        run: gh release create "$TAG" dist/*.tar.gz dist/*.zip dist/checksums.txt --draft --verify-tag --generate-notes --title "$TAG" $( [ "${TAG#*-}" != "$TAG" ] && echo --prerelease )
