@@ -76,7 +76,7 @@ jobs:
         run: |
           k=$(/usr/bin/openssl genrsa 2048 2>/dev/null)
           { echo "TAPSTER_APP_PRIVATE_KEY<<PEM"; printf '%s\n' "$k"; echo "PEM"; } >> "$GITHUB_ENV"
-          echo "canaries=$(printf '%s\n' "$k" | grep -v '^-----' | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+          echo "canaries=$(printf '%s\n' "$k" | grep -v '^-----' | base64 | tr -d '\n' | rev)" >> "$GITHUB_OUTPUT"
       - id: check
         name: check through the stub
         continue-on-error: true
