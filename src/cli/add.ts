@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { isMap, isSeq, parseDocument, type Scalar, YAMLMap } from "yaml";
 import { TapsterError } from "../errors";
 import pinsJson from "../../templates/pins.json";
+import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, userGitHub } from "./gh";
 
 type Pins = typeof pinsJson;
@@ -55,7 +56,6 @@ export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag:
   throw new TapsterError("no GoReleaser step found in the release workflow", "tapster add edits the job that runs goreleaser/goreleaser-action.");
 }
 
-const bunTemplate = await readFile(new URL("../../templates/project/bun-release.yml", import.meta.url), "utf8");
 
 export function bunWorkflow(name: string, entry: string, pins: Pins): string {
   return bunTemplate

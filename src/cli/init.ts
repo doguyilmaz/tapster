@@ -6,12 +6,13 @@ import { join } from "node:path";
 import { TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { run, runPath } from "../run";
+import hubReadme from "../../templates/hub/README.md" with { type: "text" };
+import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
 import { currentRepo, setEnvSecret, setEnvVariable, userGitHub } from "./gh";
 import { ask } from "./prompt";
 
 type Pins = typeof pinsJson;
-const templates = new URL("../../templates/", import.meta.url);
 
 export function appManifest(owner: string, hub: string, redirect: string): object {
   return {
@@ -145,8 +146,8 @@ async function writeFiles(gh: GitHub, dir: string, hub: string): Promise<void> {
   };
   await write("tapster.yml", `version: 1\ntap: ${tap}\npackages: []\n`);
   await write(".tapster/state.json", `${JSON.stringify({ version: 1, packages: {} }, null, 2)}\n`);
-  await write("README.md", (await readFile(new URL("hub/README.md", templates), "utf8")).replaceAll("__TAP__", tap).replaceAll("__OWNER__", owner).replaceAll("__HUB__", hub));
-  const flow = fillWorkflow(await readFile(new URL("hub/tapster.yml", templates), "utf8"), pinsJson, await tapsterRef(gh));
+  await write("README.md", hubReadme.replaceAll("__TAP__", tap).replaceAll("__OWNER__", owner).replaceAll("__HUB__", hub));
+  const flow = fillWorkflow(hubWorkflow, pinsJson, await tapsterRef(gh));
   await mkdir(join(dir, ".github/workflows"), { recursive: true });
   await writeFile(join(dir, ".github/workflows/tapster.yml"), flow);
   console.log("wrote .github/workflows/tapster.yml");
