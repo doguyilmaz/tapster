@@ -1,0 +1,5 @@
+{
+  "actions/checkout": { "tag": "v7.0.1", "sha": "3d3c42e5aac5ba805825da76410c181273ba90b1" },
+  "actions/attest-build-provenance": { "tag": "v4.2.2", "sha": "4d101475d8b20a2381f78447822ac1eab6504dd8" },
+  "oven-sh/setup-bun": { "tag": "v2.2.0", "sha": "0c5077e51419868618aeaa5fe8019c62421857d6" }
+}

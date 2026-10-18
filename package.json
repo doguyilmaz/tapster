@@ -1,0 +1,31 @@
+{
+  "name": "@doguyilmaz/tapster",
+  "version": "0.0.0",
+  "description": "Sign, notarize and publish the releases of all your projects from one Homebrew tap",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "tapster": "./src/cli/main.ts"
+  },
+  "files": ["src", "templates", "README.md", "LICENSE"],
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit",
+    "build:action": "bun build ./src/action/main.ts --target=node --format=esm --minify --outfile dist/index.js"
+  },
+  "dependencies": {
+    "@actions/core": "3.0.1",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.3",
+    "typescript": "7.0.2"
+  }
+}
