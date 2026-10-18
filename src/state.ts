@@ -50,3 +50,7 @@ export function serializeState(s: State): string {
   const packages = Object.fromEntries(Object.keys(s.packages).sort().map((k) => [k, [...s.packages[k]!].sort(byNewest)]));
   return `${JSON.stringify({ version: 1, packages }, null, 2)}\n`;
 }
+
+export function recordedChecksums(s: State, pkg: string, releaseId: number): string | undefined {
+  return s.packages[pkg]?.find((e) => e.releaseId === releaseId && e.status === "publishing")?.checksums;
+}

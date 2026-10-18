@@ -21,6 +21,10 @@ outputs:
     description: Work list (JSON, check mode)
   render:
     description: "true when the render job has something to do (check mode)"
+  attest:
+    description: "true when publish wrote archives to attest"
+  attest-path:
+    description: Glob of the archives to attest
 runs:
   using: node24
   main: dist/index.js

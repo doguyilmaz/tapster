@@ -1,0 +1,79 @@
+name: tapster
+on:
+  schedule:
+    - cron: "7-59/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Only this package (optional)
+        required: false
+        default: ""
+permissions: {}
+concurrency:
+  group: tapster
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    environment: { name: tapster, deployment: false }
+    permissions: { contents: read }
+    outputs:
+      work: ${{ steps.check.outputs.work }}
+      render: ${{ steps.check.outputs.render }}
+    steps:
+      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+        with: { persist-credentials: false, ref: main }
+      - id: check
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: check, package: "${{ inputs.package }}" }
+        env:
+          TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
+          TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
+  sign:
+    needs: check
+    if: needs.check.outputs.work != '[]' && needs.check.outputs.work != ''
+    runs-on: macos-15
+    environment: { name: tapster, deployment: false }
+    permissions: { contents: write, id-token: write, attestations: write }
+    steps:
+      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+        with: { persist-credentials: false, ref: main }
+      - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: fetch, work: "${{ needs.check.outputs.work }}" }
+        env:
+          TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
+          TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
+      - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: sign }
+        env:
+          TAPSTER_TEAM_ID: ${{ vars.TAPSTER_TEAM_ID }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+      - id: publish
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: publish }
+        env:
+          TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
+          TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - if: steps.publish.outputs.attest == 'true'
+        uses: actions/attest-build-provenance@__ATTEST_SHA__ # __ATTEST_TAG__
+        with: { subject-path: "${{ steps.publish.outputs.attest-path }}" }
+      - if: always()
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: cleanup }
+  render:
+    needs: [check, sign]
+    if: always() && needs.check.result == 'success' && needs.check.outputs.render == 'true'
+    runs-on: macos-15
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+        with: { persist-credentials: false, ref: main }
+      - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: render }
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

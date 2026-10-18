@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { latestPublished, parseState, serializeState, upsert } from "../src/state";
+import { latestPublished, parseState, recordedChecksums, serializeState, upsert } from "../src/state";
 import { TapsterError } from "../src/errors";
 
 const sum = "c".repeat(64);
@@ -24,4 +24,12 @@ test("serialization is stable and round-trips", () => {
 test("a damaged state is an error with a fix", () => {
   expect(() => parseState('{"version":1,"packages":{"x":[{"tag":"v1.0.0#{}"}]}}')).toThrow(TapsterError);
   expect(() => parseState("not json")).toThrow(TapsterError);
+});
+
+test("the recorded checksums of a publishing release", () => {
+  let s = upsert(parseState(null), "aims", { tag: "v1.0.0", releaseId: 1, checksums: sum, status: "published" });
+  s = upsert(s, "aims", { tag: "v1.1.0", releaseId: 2, checksums: "d".repeat(64), status: "publishing" });
+  expect(recordedChecksums(s, "aims", 2)).toBe("d".repeat(64));
+  expect(recordedChecksums(s, "aims", 1)).toBeUndefined();
+  expect(recordedChecksums(s, "other", 2)).toBeUndefined();
 });

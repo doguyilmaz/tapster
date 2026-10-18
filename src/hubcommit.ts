@@ -3,6 +3,16 @@ import type { GitHub } from "./github";
 
 export type FileChange = { path: string; content: string | null };
 
+export async function readHubFile(gh: GitHub, hub: string, path: string, ref: string): Promise<string | null> {
+  try {
+    const file = await gh.json<{ content: string }>("GET", `/repos/${hub}/contents/${path}?ref=${ref}`);
+    return Buffer.from(file.content, "base64").toString("utf8");
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 404) return null;
+    throw e;
+  }
+}
+
 export async function commitToHub(
   gh: GitHub,
   hub: string,
@@ -13,16 +23,7 @@ export async function commitToHub(
     const ref = await gh.json<{ object: { sha: string } }>("GET", `/repos/${hub}/git/ref/heads/main`);
     const head = ref.object.sha;
     const commit = await gh.json<{ tree: { sha: string } }>("GET", `/repos/${hub}/git/commits/${head}`);
-    const read = async (path: string): Promise<string | null> => {
-      try {
-        const file = await gh.json<{ content: string }>("GET", `/repos/${hub}/contents/${path}?ref=${head}`);
-        return Buffer.from(file.content, "base64").toString("utf8");
-      } catch (e) {
-        if (e instanceof GitHubError && e.status === 404) return null;
-        throw e;
-      }
-    };
-    const changes = await build(read);
+    const changes = await build((path) => readHubFile(gh, hub, path, head));
     if (changes.length === 0) return "unchanged";
     const tree = await gh.json<{ sha: string }>("POST", `/repos/${hub}/git/trees`, {
       base_tree: commit.tree.sha,
