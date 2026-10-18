@@ -445,7 +445,7 @@ Archives are parsed in the fetch step, which holds no Apple key.
 | A project changes a draft during processing | Re-list and compare before mutating (§7.10). |
 | A malicious package inside tapster | Three runtime dependencies (`@actions/core`, `yaml`, `zod`), exact versions, lockfile, `--ignore-scripts`, reproducible `dist/` checked in CI, pinned actions. |
 | A workflow change to the hub gets the credentials | Branch-only environment, trigger allowlist and `doctor` checks (§12.4) and the `main` ruleset. |
-| A leaked App key | It can write to the installed repositories until revoked. `tapster init --rotate app` makes a new key and deletes the old one. |
+| A leaked App key | It can write to the installed repositories until revoked. `tapster init --rotate app` stores a new key generated on the App's settings page and shows its fingerprint, so the person deletes the old key there. |
 | A leaked Apple key | Revoke it in App Store Connect or with Apple; `init --rotate notary` or `init --rotate certificate`. |
 
 ## 13. Errors and reporting
@@ -472,7 +472,9 @@ Archives are parsed in the fetch step, which holds no Apple key.
 5. **Write files.** Write `tapster.yml`, the workflow, `README.md` and `.tapster/state.json` and add the `main`
    ruleset. The person commits.
 
-`init --rotate <app|certificate|notary>` replaces one credential and, for the App, deletes the old key.
+`init --rotate <app|certificate|notary>` replaces one credential. GitHub creates App keys only on the App's settings page, so for
+the App tapster opens that page, checks the downloaded key against the App, stores it and asks the person to delete the old
+key.
 
 ### `tapster add` (inside a project clone)
 
