@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { draftStatus, planPackage } from "../src/plan";
 import { parseConfig } from "../src/config";
+import { TapsterError } from "../src/errors";
 import type { Release } from "../src/github";
 
 const cfg = parseConfig(
@@ -59,4 +60,14 @@ test("two drafts for one tag stop the package", async () => {
 test("published releases are not work", async () => {
   const plan = await planPackage(cfg, [release(full, "v1.0.0", false)], async () => sums);
   expect(plan.items).toEqual([]);
+});
+
+test("an unreadable checksums.txt marks only its own draft", async () => {
+  const bad = { ...release(full, "v0.0.2"), id: 2 };
+  const plan = await planPackage(cfg, [release(full), bad], async (r) => {
+    if (r.id === 2) throw new TapsterError("checksums.txt line 1 is malformed", "x");
+    return sums;
+  });
+  expect(plan.items.map((i) => i.tag)).toEqual(["v1.0.0"]);
+  expect(plan.notes).toEqual(["v0.0.2: checksums.txt line 1 is malformed"]);
 });

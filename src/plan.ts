@@ -1,5 +1,6 @@
 import type { ChecksumLine } from "./checksums";
 import { type PackageConfig, type Platform, assetName, parseTag, versionOf } from "./config";
+import { TapsterError } from "./errors";
 import type { Release } from "./github";
 
 export const STAGING = "tapster-staging--";
@@ -47,7 +48,15 @@ export async function planPackage(
     }
     const r = list[0]!;
     const ready = r.assets.some((a) => a.name === "checksums.txt") && r.assets.every((a) => a.state === "uploaded");
-    const status = draftStatus(r, pkg, ready ? await checksumsOf(r) : null);
+    let checksums: ChecksumLine[] | null = null;
+    try {
+      checksums = ready ? await checksumsOf(r) : null;
+    } catch (e) {
+      if (!(e instanceof TapsterError)) throw e;
+      notes.push(`${tag}: ${e.reason}`);
+      continue;
+    }
+    const status = draftStatus(r, pkg, checksums);
     if (status.kind === "ready" || status.kind === "resume") items.push({ package: pkg.name, tag, releaseId: r.id, resume: status.kind === "resume" });
     else notes.push(`${tag}: ${status.reason}`);
   }
