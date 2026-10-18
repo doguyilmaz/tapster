@@ -18,6 +18,7 @@ export async function check(ctx: Context): Promise<void> {
   const pem = readSecret("TAPSTER_APP_PRIVATE_KEY");
   const only = core.getInput("package");
   const items: WorkItem[] = [];
+  const privateRepos = new Set<string>();
   const state = parseState(await readFile(join(ctx.workspace, STATE_PATH), "utf8").catch(() => null));
   if (await installationExists(appId, pem, ctx.hub)) {
     failure(ctx.hub, new TapsterError("the App is installed on the hub", "Remove the hub from the App's repositories; the App only needs the projects."));
@@ -37,9 +38,10 @@ export async function check(ctx: Context): Promise<void> {
         },
         (releaseId) => recordedChecksums(state, pkg.name, releaseId),
       );
-      const repo = pkg.attestation === "auto" ? await gh.getRepo(pkg.repo) : null;
+      const repo = await gh.getRepo(pkg.repo);
+      if (repo.private) privateRepos.add(pkg.name);
       for (const item of plan.items) {
-        const release = repo && !repo.private && !item.resume ? await gh.getRelease(pkg.repo, item.releaseId) : null;
+        const release = pkg.attestation === "auto" && !repo.private && !item.resume ? await gh.getRelease(pkg.repo, item.releaseId) : null;
         const missing = release ? await missingAttestations(pkg.repo, release.assets, tok.token) : [];
         if (missing.length) record({ item: pkg.name, result: "waiting", detail: `${item.tag}: no attestation yet for ${missing.join(", ")}` });
         else items.push(item);
@@ -52,5 +54,5 @@ export async function check(ctx: Context): Promise<void> {
     }
   }
   core.setOutput("work", JSON.stringify(items));
-  core.setOutput("render", String(items.length > 0 || (await renderNeeded(ctx))));
+  core.setOutput("render", String(items.length > 0 || (await renderNeeded(ctx, privateRepos))));
 }

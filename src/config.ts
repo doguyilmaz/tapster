@@ -1,6 +1,7 @@
 import { parse } from "yaml";
 import { z } from "zod";
 import { TapsterError } from "./errors";
+import { descProblems } from "./render";
 
 export const PLATFORMS = ["darwin-universal", "darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", "windows-amd64", "windows-arm64"] as const;
 export type Platform = (typeof PLATFORMS)[number];
@@ -77,6 +78,8 @@ export function parseConfig(text: string, hubOwner: string): HubConfig {
     if (p.repo.split("/")[0]!.toLowerCase() !== hubOwner.toLowerCase()) {
       throw new TapsterError(`${p.name}: ${p.repo} is not owned by ${hubOwner}`, "tapster publishes only repositories of the hub's owner.");
     }
+    const problems = p.description === undefined ? [] : descProblems(p.description, p.name);
+    if (problems.length) throw new TapsterError(`${p.name}: Homebrew rejects the description because ${problems.join(" and ")}`, "Rewrite description in tapster.yml.");
     const entries = Object.entries(p.assets);
     if (entries.length === 0) throw new TapsterError(`${p.name}: assets is empty`, "Map at least one platform to an asset name.");
     for (const [platform, name] of entries) {

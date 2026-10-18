@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { downloadUrl, renderCask, renderScoop, rubyString } from "../src/render";
+import { descProblems, downloadUrl, renderCask, renderScoop, rubyString } from "../src/render";
 import { parseConfig } from "../src/config";
 
 const golden = (n: string) => readFileSync(new URL(`./golden/${n}`, import.meta.url), "utf8");
@@ -68,4 +68,14 @@ test("scoop manifest", () => {
 
 test("ruby strings cannot interpolate or break out", () => {
   expect(rubyString('a"b\\c#{x}\n\u0001')).toBe('"a\\"b\\\\c\\#{x}\\n\\u{1}"');
+});
+
+test("descriptions follow Homebrew's rules", () => {
+  expect(descProblems("Several Claude Code and Codex accounts on one machine", "aims")).toEqual([]);
+  expect(descProblems("macOS menu bar for battery stats", "x")).not.toEqual([]);
+  expect(descProblems("iPhone backups made simple", "x")).toEqual([]);
+  for (const bad of ["A tool", "the tool", "tool for things", "Aims manages accounts", "Command line tool", "Works on the Mac", "Tool.", "Tool ★", "x".repeat(81), " Tool", ""]) {
+    expect(descProblems(bad, "aims"), bad).not.toEqual([]);
+  }
+  expect(descProblems("Lists files, dirs etc.", "x")).toEqual([]);
 });

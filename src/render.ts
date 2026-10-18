@@ -25,6 +25,24 @@ export const downloadUrl = (repo: string, tag: string, asset: string) => `https:
 
 const tidyDesc = (s: string) => s.trim().replace(/\.+$/, "");
 
+const LOWERCASE_STARTS = ["iOS", "iPhone", "macOS"];
+
+export function descProblems(desc: string, name: string): string[] {
+  const problems: string[] = [];
+  if (desc === "") return ["it is empty"];
+  if (/^\s/.test(desc) || /\s$/.test(desc)) problems.push("it has leading or trailing spaces");
+  if (/command ?line/i.test(desc)) problems.push('it should say "command-line"');
+  if (/^(?:the|an?)(?=\s)/i.test(desc)) problems.push("it starts with an article");
+  if (/^[a-z]/.test(desc) && !LOWERCASE_STARTS.includes(desc.split(/\s+/)[0]!)) problems.push("it starts with a lowercase letter");
+  if (new RegExp(`^${name.replaceAll("-", "").split("").join("[\\s\\-]?")}\\b`, "i").test(desc)) problems.push("it starts with the package name");
+  const platform = /\b(macOS|Mac(?: ?OS(?: ?X)?)?|OS ?X)(?! virtual machines?)\b/i.exec(desc);
+  if (platform && platform[1] !== "MAC") problems.push("it names the platform");
+  if (/\.$/.test(desc) && !desc.endsWith("etc.")) problems.push("it ends with a full stop");
+  if (/\p{So}/u.test(desc)) problems.push("it contains a symbol or emoji");
+  if ([...desc].length > 80) problems.push("it is longer than 80 characters");
+  return problems;
+}
+
 function block(lines: string[], indent: string, d: Download) {
   lines.push(`${indent}sha256 ${rubyString(d.sha256)}`, `${indent}url ${rubyString(d.url)}`);
 }

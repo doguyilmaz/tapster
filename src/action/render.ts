@@ -3,17 +3,26 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { type ChecksumLine, parseChecksums, sha256 } from "../checksums";
 import { type PackageConfig, type Platform, parseTag, versionOf } from "../config";
-import { TapsterError } from "../errors";
-import { GitHub } from "../github";
+import { GitHubError, TapsterError } from "../errors";
+import { GitHub, type Release } from "../github";
 import { commitToHub } from "../hubcommit";
 import { readSecret } from "../mask";
-import { type Download, caskPath, downloadUrl, renderCask, renderScoop, scoopPath } from "../render";
+import { type Download, caskPath, descProblems, downloadUrl, renderCask, renderScoop, scoopPath } from "../render";
 import { failure, record } from "../report";
-import { childEnv, run, runPath } from "../run";
+import { childEnv, excerpt, run, runPath } from "../run";
 import { STATE_PATH, latestPublished, parseState, serializeState, upsert } from "../state";
 import type { Context } from "./context";
 
 const readIfExists = (path: string) => readFile(path, "utf8").catch(() => null);
+
+async function readable(gh: GitHub, repo: string, id: number): Promise<Release | null> {
+  try {
+    return await gh.getRelease(repo, id);
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 404) return null;
+    throw e;
+  }
+}
 
 export function buildDownloads(pkg: PackageConfig, tag: string, lines: ChecksumLine[]): Download[] {
   const version = versionOf(tag);
@@ -31,11 +40,12 @@ export async function headIsStale(ws: string): Promise<boolean> {
   return last > 0 && Date.now() / 1000 - last > 30 * 86400;
 }
 
-export async function renderNeeded(ctx: Context): Promise<boolean> {
+export async function renderNeeded(ctx: Context, skip: Set<string> = new Set()): Promise<boolean> {
   if (await headIsStale(ctx.workspace)) return true;
   const state = parseState(await readIfExists(join(ctx.workspace, STATE_PATH)));
-  if (Object.values(state.packages).some((list) => list.some((e) => e.status === "publishing"))) return true;
+  if (Object.entries(state.packages).some(([name, list]) => !skip.has(name) && list.some((e) => e.status === "publishing"))) return true;
   for (const pkg of ctx.config.packages) {
+    if (skip.has(pkg.name)) continue;
     const latest = latestPublished(state, pkg.name);
     if (!latest) continue;
     const cask = await readIfExists(join(ctx.workspace, caskPath(pkg.name)));
@@ -44,8 +54,25 @@ export async function renderNeeded(ctx: Context): Promise<boolean> {
   return false;
 }
 
-async function audit(ws: string, tap: string, casks: { name: string; online: boolean }[]): Promise<void> {
-  if (casks.length === 0) return;
+export async function auditEach(names: string[], check: (name: string) => Promise<void>): Promise<Map<string, unknown>> {
+  const failed = new Map<string, unknown>();
+  for (const name of names) {
+    try {
+      await check(name);
+    } catch (e) {
+      failed.set(name, e);
+    }
+  }
+  return failed;
+}
+
+async function brewCheck(brew: string, env: Record<string, string>, args: string[]): Promise<void> {
+  const res = await runPath(brew, "brew", args, { env, allowFail: true });
+  if (res.code !== 0) throw new TapsterError(`brew ${args[0]} found problems`, excerpt(`${res.stdout}\n${res.stderr}`, 8) || "No output.");
+}
+
+async function audit(ws: string, tap: string, casks: { name: string; online: boolean }[]): Promise<Map<string, unknown>> {
+  if (casks.length === 0) return new Map();
   const brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].find((p) => existsSync(p));
   if (!brew) throw new TapsterError("Homebrew is not installed on this runner", "Run the render job on macos-15.");
   const env = childEnv({ PATH: `${dirname(brew)}:/usr/bin:/bin`, HOMEBREW_NO_AUTO_UPDATE: "1", HOMEBREW_NO_ANALYTICS: "1", HOMEBREW_NO_ENV_HINTS: "1" });
@@ -54,10 +81,14 @@ async function audit(ws: string, tap: string, casks: { name: string; online: boo
   await run("git", ["-C", ws, "-c", "user.name=tapster", "-c", "user.email=tapster@localhost", "commit", "-q", "--allow-empty", "-m", "tapster audit"]);
   await runPath(brew, "brew", ["tap", local, ws], { env });
   try {
-    for (const c of casks) {
-      await runPath(brew, "brew", ["style", "--cask", `${local}/${c.name}`], { env });
-      await runPath(brew, "brew", ["audit", "--cask", ...(c.online ? ["--online"] : []), `${local}/${c.name}`], { env });
-    }
+    const online = new Map(casks.map((c) => [c.name, c.online]));
+    return await auditEach(
+      casks.map((c) => c.name),
+      async (name) => {
+        await brewCheck(brew, env, ["style", "--cask", `${local}/${name}`]);
+        await brewCheck(brew, env, ["audit", "--cask", ...(online.get(name) ? ["--online"] : []), `${local}/${name}`]);
+      },
+    );
   } finally {
     await runPath(brew, "brew", ["untap", local], { env, allowFail: true });
   }
@@ -73,8 +104,8 @@ export async function renderMode(ctx: Context): Promise<void> {
     if (!pkg) continue;
     for (const e of entries.filter((x) => x.status === "publishing")) {
       try {
-        const r = await gh.getRelease(pkg.repo, e.releaseId);
-        if (r.draft) continue;
+        const r = await readable(gh, pkg.repo, e.releaseId);
+        if (!r || r.draft) continue;
         const sums = r.assets.find((a) => a.name === "checksums.txt");
         if (sums && sha256(await gh.downloadAsset(pkg.repo, sums.id)) === e.checksums) state = upsert(state, name, { ...e, status: "published" });
         else record({ item: `${name} ${e.tag}`, result: "skipped", detail: "published, but checksums.txt differs from what tapster recorded; not rendered" });
@@ -90,7 +121,11 @@ export async function renderMode(ctx: Context): Promise<void> {
     const latest = latestPublished(state, pkg.name);
     if (!latest || parseTag(latest.tag) === null) continue;
     try {
-      const r = await gh.getRelease(pkg.repo, latest.releaseId);
+      const r = await readable(gh, pkg.repo, latest.releaseId);
+      if (!r) {
+        record({ item: pkg.name, result: "skipped", detail: `the hub cannot read ${pkg.repo}; casks need public projects` });
+        continue;
+      }
       const sums = r.assets.find((a) => a.name === "checksums.txt");
       if (!sums) throw new TapsterError(`${latest.tag} has no checksums.txt`, "Check the release.");
       const data = await gh.downloadAsset(pkg.repo, sums.id);
@@ -105,6 +140,8 @@ export async function renderMode(ctx: Context): Promise<void> {
         homepage: pkg.homepage ?? repo.html_url,
         license: pkg.license ?? null,
       };
+      const problems = descProblems(input.description, pkg.name);
+      if (problems.length) throw new TapsterError(`Homebrew rejects the description of ${pkg.repo} because ${problems.join(" and ")}`, "Set description in tapster.yml.");
       const cask = renderCask(input);
       if ((await readIfExists(join(ws, caskPath(pkg.name)))) !== cask) changes.push({ path: caskPath(pkg.name), content: cask });
       const scoop = renderScoop(input);
@@ -123,7 +160,12 @@ export async function renderMode(ctx: Context): Promise<void> {
     await writeFile(join(ws, c.path), c.content);
   }
   const casks = changes.filter((c) => c.path.startsWith("Casks/")).map((c) => basename(c.path, ".rb"));
-  await audit(ws, ctx.config.tap, casks.map((name) => ({ name, online: online.get(name) ?? true })));
+  const failed = await audit(ws, ctx.config.tap, casks.map((name) => ({ name, online: online.get(name) ?? true })));
+  for (const [name, err] of failed) failure(name, err);
+  const kept = changes.filter((c) => !failed.has(basename(c.path).replace(/\.(rb|json)$/, "")));
+  changes.length = 0;
+  changes.push(...kept);
+  if (changes.length === 0 && !stateChanged && !heartbeat) return;
   const all = [
     ...changes,
     ...(stateChanged ? [{ path: STATE_PATH, content: stateText }] : []),

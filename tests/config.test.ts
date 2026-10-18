@@ -33,6 +33,7 @@ test.each([
   ["bad name", good.replace("name: aims", "name: Aims")],
   ["dotdot binary", good.replace("binaries: [aims]", "binaries: [../aims]")],
   ["quote in zap", `${good}\n    cask: { zap: { trash: ["~/x\\"y"] } }`],
+  ["description Homebrew rejects", good.replace("scoop: true", "scoop: true\n    description: A tool for macOS")],
 ])("rejects %s", (_, text) => {
   expect(() => parseConfig(text, "doguyilmaz")).toThrow(TapsterError);
 });

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildDownloads, renderNeeded } from "../src/action/render";
+import { auditEach, buildDownloads, renderNeeded } from "../src/action/render";
 import { signMode } from "../src/action/sign";
 import { parseConfig } from "../src/config";
 import { serializeState, upsert, emptyState } from "../src/state";
@@ -49,4 +49,23 @@ test("review focus 3: a release with nothing to sign passes without reading cred
   await saveManifest({ items: [{ package: "aims", tag: "v1.0.0", releaseId: 1, resume: false, before: [], checksums: [], archives: [], status: "fetched" }] });
   await signMode({ hub: "o/homebrew-tap", owner: "o", config: cfg, workspace: "/tmp" });
   expect((await loadManifest()).items[0]!.status).toBe("signed");
+});
+
+test("private packages never make render run", async () => {
+  const ws = mkdtempSync(join(tmpdir(), "ws-"));
+  mkdirSync(join(ws, ".tapster"), { recursive: true });
+  writeFileSync(join(ws, ".tapster/state.json"), serializeState(upsert(emptyState(), "aims", { tag: "v1.0.0", releaseId: 1, checksums: "b".repeat(64), status: "published" })));
+  const ctx = { hub: "o/homebrew-tap", owner: "o", config: cfg, workspace: ws };
+  expect(await renderNeeded(ctx)).toBe(true);
+  expect(await renderNeeded(ctx, new Set(["aims"]))).toBe(false);
+});
+
+test("one cask failing its audit leaves the others", async () => {
+  const seen: string[] = [];
+  const failed = await auditEach(["a", "b", "c"], async (name) => {
+    seen.push(name);
+    if (name === "b") throw new Error("style");
+  });
+  expect(seen).toEqual(["a", "b", "c"]);
+  expect([...failed.keys()]).toEqual(["b"]);
 });
