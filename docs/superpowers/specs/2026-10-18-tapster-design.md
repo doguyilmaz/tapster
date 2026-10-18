@@ -83,7 +83,7 @@ project repo (tag v1.2.3)                        hub: doguyilmaz/homebrew-tap
                                                    fetch    macos   env tapster, App key only
                                                    sign     macos   env tapster, Apple keys only
                                                    publish  macos   env tapster, App key only
-                                                   render   ubuntu  NO environment, GITHUB_TOKEN only
+                                                   render   macos   NO environment, GITHUB_TOKEN only
 ```
 
 The five stages run as separate jobs or as separate steps with separate `env:`, so no stage holds a credential it
@@ -95,7 +95,7 @@ does not use:
 | fetch | macOS | App key | Downloads, verifies checksums and attestations, unpacks safely, collects the Mach-O files. |
 | sign | macOS (same job as fetch, its own step) | Apple keys | Signs and notarizes the collected Mach-O files. Touches nothing else. |
 | publish | macOS (same job, its own step) | App key | Repacks, replaces assets with staging and rename, publishes, records state, attests its own outputs. |
-| render | ubuntu | none (job `GITHUB_TOKEN`, `contents: write`) | Renders casks and Scoop manifests from published releases in state, runs `brew style`/`audit`, commits through the Git Data API. |
+| render | macOS (native Homebrew for casks) | none (job `GITHUB_TOKEN`, `contents: write`) | Renders casks and Scoop manifests from published releases in state, runs `brew style`/`audit`, commits through the Git Data API. |
 
 Render holds no secret because Ruby (Homebrew) and network content run there (§12.5).
 
@@ -184,6 +184,8 @@ packages:
 - **`description` and `homepage`:** default to the repository's description and URL.
 - **`kind`:** `go` (the default) or `bun`.
 - **`attestation`:** `auto` (the default) or `off`.
+- **`workflow`:** the project workflow file that builds and attests releases, `release.yml` by default. Attestations
+  must come from it.
 - **`entitlements`:** adds to the preset of `kind`.
 - Unknown keys are errors.
 
@@ -240,7 +242,7 @@ Each work item is isolated: one failing never stops the others.
 16. Attest the repacked archives in the hub (`actions/attest-build-provenance`), so the signed outputs have provenance
     of their own.
 
-### render (ubuntu, no environment)
+### render (macOS, no environment; runs only when check reports work, a `publishing` entry, or a cask behind the state)
 
 17. For each package, take the newest stable release recorded in the state as `published`. Releases published any other way are
     never rendered; the summary reports them.
@@ -418,7 +420,7 @@ values (§10).
 
 | Mode | Behaviour |
 | --- | --- |
-| `auto` | **Public repository:** each archive must pass `gh attestation verify <file> --repo <repo> --signer-workflow <repo>/.github/workflows/release.yml --source-ref refs/tags/<tag> --deny-self-hosted-runners`. Failing stops the item. **Private repository** where the API reports attestations unavailable: warn and continue. |
+| `auto` | **Public repository:** each archive must pass `gh attestation verify <file> --repo <repo> --signer-workflow <repo>/.github/workflows/<workflow> --source-ref refs/tags/<tag> --deny-self-hosted-runners`. Failing stops the item. **Private repository** where the API reports attestations unavailable: warn and continue. |
 | `off` | No check. The summary says so on every release. |
 
 ### 12.7 Archive safety
