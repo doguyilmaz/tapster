@@ -13,6 +13,7 @@ env:
     CANARY-key-id-55aa
     CANARY-issuer-0c4a72
     CANARY-github-token-91df3e
+    ghs_CANARYinstallation0token0for0leak0test
 jobs:
   plain:
     runs-on: macos-15
@@ -46,6 +47,81 @@ jobs:
         uses: ./
         with: { mode: render, config: tests/leak/hub/tapster.yml }
         env: { GITHUB_TOKEN: CANARY-github-token-91df3e }
+      - if: always()
+        uses: ./
+        with: { mode: cleanup }
+  plain-api:
+    runs-on: macos-15
+    permissions: { contents: read }
+    outputs:
+      canaries: ${{ steps.key.outputs.canaries }}
+    env: { GITHUB_TOKEN: CANARY-github-token-91df3e, TAPSTER_APP_ID: "12345" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with: { bun-version: 1.4.3 }
+      - name: stand in for api.github.com and uploads.github.com
+        run: |
+          d="$RUNNER_TEMP/stub" && mkdir -p "$d"
+          /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -keyout "$d/key.pem" -out "$d/cert.pem" -days 1 -subj "/CN=tapster leak stub" \
+            -addext "subjectAltName=DNS:api.github.com,DNS:uploads.github.com" 2>/dev/null
+          echo "127.0.0.1 api.github.com uploads.github.com" | sudo tee -a /etc/hosts >/dev/null
+          sudo nohup "$(command -v bun)" tests/leak/stub.ts "$d/cert.pem" "$d/key.pem" 443 > "$d/stub.log" 2>&1 &
+          for i in $(seq 1 40); do curl -sf --cacert "$d/cert.pem" https://api.github.com/__mode/ok >/dev/null && break; sleep 0.5; done
+          echo "NODE_EXTRA_CA_CERTS=$d/cert.pem" >> "$GITHUB_ENV"
+          echo "STUB_CA=$d/cert.pem" >> "$GITHUB_ENV"
+      - id: key
+        name: a fresh RSA key as the App key canary
+        run: |
+          k=$(/usr/bin/openssl genrsa 2048 2>/dev/null)
+          { echo "TAPSTER_APP_PRIVATE_KEY<<PEM"; printf '%s\n' "$k"; echo "PEM"; } >> "$GITHUB_ENV"
+          echo "canaries=$(printf '%s\n' "$k" | grep -v '^-----' | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+      - id: check
+        name: check through the stub
+        continue-on-error: true
+        uses: ./
+        with: { mode: check, config: tests/leak/hub/stub.yml }
+      - name: fetch through the stub
+        continue-on-error: true
+        uses: ./
+        with: { mode: fetch, config: tests/leak/hub/stub.yml, work: "${{ steps.check.outputs.work }}" }
+      - name: sign (nothing to sign)
+        continue-on-error: true
+        uses: ./
+        with: { mode: sign, config: tests/leak/hub/stub.yml }
+      - name: publish through the stub
+        continue-on-error: true
+        uses: ./
+        with: { mode: publish, config: tests/leak/hub/stub.yml }
+      - name: publish again (already published)
+        continue-on-error: true
+        uses: ./
+        with: { mode: publish, config: tests/leak/hub/stub.yml }
+      - name: render through the stub
+        continue-on-error: true
+        uses: ./
+        with: { mode: render, config: tests/leak/hub/stub.yml }
+      - run: curl -sf --cacert "$STUB_CA" https://api.github.com/__mode/500 >/dev/null
+      - name: check during an outage
+        continue-on-error: true
+        uses: ./
+        with: { mode: check, config: tests/leak/hub/stub.yml }
+      - run: curl -sf --cacert "$STUB_CA" https://api.github.com/__mode/404 >/dev/null
+      - name: check without an installation
+        continue-on-error: true
+        uses: ./
+        with: { mode: check, config: tests/leak/hub/stub.yml }
+      - run: curl -sf --cacert "$STUB_CA" https://api.github.com/__mode/422 >/dev/null
+      - name: check with a rejected token request
+        continue-on-error: true
+        uses: ./
+        with: { mode: check, config: tests/leak/hub/stub.yml }
+      - run: curl -sf --cacert "$STUB_CA" https://api.github.com/__mode/drop >/dev/null || true
+      - name: check with dropped connections
+        continue-on-error: true
+        uses: ./
+        with: { mode: check, config: tests/leak/hub/stub.yml }
       - if: always()
         uses: ./
         with: { mode: cleanup }
@@ -87,7 +163,7 @@ jobs:
         uses: ./
         with: { mode: cleanup }
   scan:
-    needs: [plain, masked]
+    needs: [plain, plain-api, masked]
     if: always()
     runs-on: ubuntu-24.04
     permissions: { actions: read, contents: read }
@@ -99,4 +175,10 @@ jobs:
       - run: bun tests/leak/run-scan.ts
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECT_STAGES: '{"plain":["tapster: failed (openssl exited with"],"masked":["fixture v0.0.1: failed ("]}'
+          EXTRA_CANARIES: ${{ needs.plain-api.outputs.canaries }}
+          EXPECT_STAGES: >-
+            {"plain":["tapster: failed (openssl exited with"],
+            "masked":["fixture v0.0.1: failed ("],
+            "plain-api":["fixture-linux v0.0.9: published",
+            "fixture-linux v0.0.9: failed (the release was published while tapster worked on it",
+            "returned 500", "returned 404", "returned 422", "network error"]}

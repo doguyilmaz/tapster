@@ -4,6 +4,9 @@ const repo = process.env.SCAN_REPO ?? process.env.GITHUB_REPOSITORY!;
 const run = process.env.SCAN_RUN_ID ?? process.env.GITHUB_RUN_ID!;
 const token = process.env.GH_TOKEN!;
 const canaries = (process.env.PLAIN_CANARIES ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+const extra = Buffer.from(process.env.EXTRA_CANARIES ?? "", "base64").toString("utf8").split("\n").map((s) => s.trim()).filter(Boolean);
+canaries.push(...extra);
+if (process.env.EXTRA_CANARIES !== undefined && extra.length === 0) throw new Error("the plain-api job passed no canaries");
 const stages = JSON.parse(process.env.EXPECT_STAGES ?? "{}") as Record<string, string[]>;
 const api = (path: string, accept = "application/vnd.github+json") =>
   fetch(`https://api.github.com${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: accept, "X-GitHub-Api-Version": "2022-11-28" } });
