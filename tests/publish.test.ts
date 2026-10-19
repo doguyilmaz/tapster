@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { attestDecision } from "../src/action/publish";
 import { assertRecorded, makeLatest, resumeSwap, sameAssets, stageAndSwap, waitDownloadable } from "../src/publish";
 import type { Asset, GitHub, Release } from "../src/github";
 import { TapsterError } from "../src/errors";
@@ -121,4 +122,11 @@ test("resume of a fully swapped draft that no longer matches fails without touch
 test("a published checksums.txt must be the one tapster recorded", () => {
   expect(() => assertRecorded(Buffer.from(signedSums), sha256(Buffer.from(signedSums)))).not.toThrow();
   expect(() => assertRecorded(Buffer.from("other"), sha256(Buffer.from(signedSums)))).toThrow(TapsterError);
+});
+
+test("a private hub publishes without asking for attestations and says why", () => {
+  expect(attestDecision(true, false)).toEqual({ attest: true, note: null });
+  expect(attestDecision(false, false)).toEqual({ attest: false, note: null });
+  expect(attestDecision(true, true).attest).toBe(false);
+  expect(attestDecision(true, true).note).toContain("private");
 });

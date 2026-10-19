@@ -30,7 +30,7 @@ jobs:
           done
           cd out && sha256sum *.tar.gz > checksums.txt
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        continue-on-error: ${{ github.event.repository.private }}
+        if: ${{ !github.event.repository.private }}
         with: { subject-checksums: out/checksums.txt }
       - name: Hand the draft to the tapster hub
         env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" }
