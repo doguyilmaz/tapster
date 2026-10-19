@@ -4,17 +4,17 @@ cask "aims" do
   on_macos do
     on_arm do
       sha256 "1111111111111111111111111111111111111111111111111111111111111111"
-      url "https://github.com/o/aims/releases/download/v0.1.5/aims_0.1.5_darwin_arm64.tar.gz"
+      url "https://github.com/o/aims/releases/download/v#{version}/aims_#{version}_darwin_arm64.tar.gz"
     end
     on_intel do
       sha256 "2222222222222222222222222222222222222222222222222222222222222222"
-      url "https://github.com/o/aims/releases/download/v0.1.5/aims_0.1.5_darwin_amd64.tar.gz"
+      url "https://github.com/o/aims/releases/download/v#{version}/aims_#{version}_darwin_amd64.tar.gz"
     end
   end
   on_linux do
     on_intel do
       sha256 "3333333333333333333333333333333333333333333333333333333333333333"
-      url "https://github.com/o/aims/releases/download/v0.1.5/aims_0.1.5_linux_amd64.tar.gz"
+      url "https://github.com/o/aims/releases/download/v#{version}/aims_#{version}_linux_amd64.tar.gz"
     end
   end
 

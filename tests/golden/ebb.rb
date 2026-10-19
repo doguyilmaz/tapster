@@ -4,7 +4,7 @@ cask "ebb" do
   on_macos do
     sha256 "4444444444444444444444444444444444444444444444444444444444444444"
 
-    url "https://github.com/o/ebb/releases/download/v0.1.1/ebb_0.1.1_darwin_universal.tar.gz"
+    url "https://github.com/o/ebb/releases/download/v#{version}/ebb_#{version}_darwin_universal.tar.gz"
   end
 
   name "ebb"

@@ -71,12 +71,17 @@ async function brewCheck(brew: string, env: Record<string, string>, args: string
   if (res.code !== 0) throw new TapsterError(`brew ${args[0]} found problems`, excerpt(`${res.stdout}\n${res.stderr}`, 8) || "No output.");
 }
 
+const AUDIT_TARGETS: Record<string, string[]> = {
+  "darwin-arm64": ["--arch", "arm"],
+  "darwin-amd64": ["--arch", "intel"],
+  "darwin-universal": [],
+  "linux-arm64": ["--os", "linux", "--arch", "arm"],
+  "linux-amd64": ["--os", "linux", "--arch", "intel"],
+};
+
 export function auditArgs(local: string, name: string, online: boolean, platforms: string[]): string[][] {
   const base = ["audit", "--cask", ...(online ? ["--online"] : [])];
-  const runs: string[][] = [];
-  if (platforms.some((p) => p.startsWith("darwin"))) runs.push([...base, `${local}/${name}`]);
-  if (platforms.some((p) => p.startsWith("linux"))) runs.push([...base, "--os", "linux", `${local}/${name}`]);
-  return runs;
+  return platforms.filter((p) => p in AUDIT_TARGETS).map((p) => [...base, ...AUDIT_TARGETS[p]!, `${local}/${name}`]);
 }
 
 async function audit(ws: string, tap: string, casks: { name: string; online: boolean; platforms: string[] }[]): Promise<Map<string, unknown>> {

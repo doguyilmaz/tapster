@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import type { PackageConfig, Platform } from "./config";
+import { TapsterError } from "./errors";
 
 export function rubyString(s: string): string {
   let out = '"';
@@ -43,27 +44,35 @@ export function descProblems(desc: string, name: string): string[] {
   return problems;
 }
 
-function block(lines: string[], indent: string, d: Download) {
-  lines.push(`${indent}sha256 ${rubyString(d.sha256)}`, `${indent}url ${rubyString(d.url)}`);
+const SAFE = /^[A-Za-z0-9._\/-]+$/;
+
+function caskUrl(pkg: PackageConfig, d: Download): string {
+  const template = pkg.assets[d.platform];
+  if (!template || !SAFE.test(pkg.repo) || !SAFE.test(template.replaceAll("{version}", ""))) throw new TapsterError(`${pkg.name}: no safe asset name for ${d.platform}`, "Check assets in tapster.yml.");
+  return `"https://github.com/${pkg.repo}/releases/download/v#{version}/${template.replaceAll("{version}", "#{version}")}"`;
 }
 
-function os(lines: string[], name: "macos" | "linux", downloads: Download[]) {
+function block(lines: string[], indent: string, pkg: PackageConfig, d: Download) {
+  lines.push(`${indent}sha256 ${rubyString(d.sha256)}`, `${indent}url ${caskUrl(pkg, d)}`);
+}
+
+function os(lines: string[], name: "macos" | "linux", pkg: PackageConfig, downloads: Download[]) {
   const pick = (p: string) => downloads.find((d) => d.platform === `${name === "macos" ? "darwin" : "linux"}-${p}`);
   const universal = name === "macos" ? downloads.find((d) => d.platform === "darwin-universal") : undefined;
   const arm = pick("arm64");
   const intel = pick("amd64");
   if (!universal && !arm && !intel) return;
   lines.push(`  on_${name} do`);
-  if (universal) lines.push(`    sha256 ${rubyString(universal.sha256)}`, "", `    url ${rubyString(universal.url)}`);
+  if (universal) lines.push(`    sha256 ${rubyString(universal.sha256)}`, "", `    url ${caskUrl(pkg, universal)}`);
   else {
     if (arm) {
       lines.push("    on_arm do");
-      block(lines, "      ", arm);
+      block(lines, "      ", pkg, arm);
       lines.push("    end");
     }
     if (intel) {
       lines.push("    on_intel do");
-      block(lines, "      ", intel);
+      block(lines, "      ", pkg, intel);
       lines.push("    end");
     }
   }
@@ -73,8 +82,8 @@ function os(lines: string[], name: "macos" | "linux", downloads: Download[]) {
 export function renderCask(i: RenderInput): string {
   const { pkg } = i;
   const lines = [`cask ${rubyString(pkg.name)} do`, `  version ${rubyString(i.version)}`, ""];
-  os(lines, "macos", i.downloads);
-  os(lines, "linux", i.downloads);
+  os(lines, "macos", pkg, i.downloads);
+  os(lines, "linux", pkg, i.downloads);
   lines.push(
     "",
     `  name ${rubyString(pkg.name)}`,

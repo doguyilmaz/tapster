@@ -71,10 +71,11 @@ test("one cask failing its audit leaves the others", async () => {
 });
 
 test("each cask is audited for the systems it ships for", () => {
-  expect(auditArgs("o/tapster-audit", "a", true, ["darwin-arm64", "linux-amd64"])).toEqual([
-    ["audit", "--cask", "--online", "o/tapster-audit/a"],
-    ["audit", "--cask", "--online", "--os", "linux", "o/tapster-audit/a"],
+  expect(auditArgs("o/tapster-audit", "a", true, ["darwin-arm64", "darwin-amd64", "linux-amd64"])).toEqual([
+    ["audit", "--cask", "--online", "--arch", "arm", "o/tapster-audit/a"],
+    ["audit", "--cask", "--online", "--arch", "intel", "o/tapster-audit/a"],
+    ["audit", "--cask", "--online", "--os", "linux", "--arch", "intel", "o/tapster-audit/a"],
   ]);
-  expect(auditArgs("o/tapster-audit", "b", false, ["linux-amd64"])).toEqual([["audit", "--cask", "--os", "linux", "o/tapster-audit/b"]]);
+  expect(auditArgs("o/tapster-audit", "b", false, ["linux-arm64"])).toEqual([["audit", "--cask", "--os", "linux", "--arch", "arm", "o/tapster-audit/b"]]);
   expect(auditArgs("o/tapster-audit", "c", false, ["darwin-universal", "windows-amd64"])).toEqual([["audit", "--cask", "o/tapster-audit/c"]]);
 });
