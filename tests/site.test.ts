@@ -40,9 +40,8 @@ test("the docs follow the writing rules: no em dash and no comma before and or o
   expect(found).toEqual([]);
 });
 
-test("every tutorial page shows its progress and the next step", () => {
+test("every tutorial page shows where it is in the tutorial", () => {
   for (const { f, text } of pages.filter((p) => p.f.startsWith("tutorial/"))) {
     expect({ f, progress: text.includes("<TutorialProgress step={") }).toEqual({ f, progress: true });
-    expect({ f, next: text.includes("<NextStep step={") }).toEqual({ f, next: true });
   }
 });

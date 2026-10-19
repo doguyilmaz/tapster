@@ -11,9 +11,13 @@ export default defineConfig({
       description: "Sign, notarize and publish the releases of all your projects from one Homebrew tap.",
       logo: { src: "./src/assets/logo-128.webp", alt: "" },
       favicon: "/favicon-32.png",
-      head: [{ tag: "link", attrs: { rel: "apple-touch-icon", href: "/apple-touch-icon.png" } }],
+      head: [
+        { tag: "link", attrs: { rel: "apple-touch-icon", href: "/apple-touch-icon.png" } },
+        { tag: "link", attrs: { rel: "preload", href: "/fonts/geist.woff2", as: "font", type: "font/woff2", crossorigin: "" } },
+        { tag: "link", attrs: { rel: "preload", href: "/fonts/geist-mono.woff2", as: "font", type: "font/woff2", crossorigin: "" } },
+      ],
       social: [{ icon: "github", label: "tapster on GitHub", href: "https://github.com/doguyilmaz/tapster" }],
-      customCss: ["@fontsource-variable/geist", "@fontsource-variable/geist-mono", "./src/styles/theme.css"],
+      customCss: ["./src/styles/theme.css"],
       components: { Hero: "./src/components/Hero.astro" },
       sidebar: [
         { label: "Tutorial", items: [{ autogenerate: { directory: "tutorial" } }] },

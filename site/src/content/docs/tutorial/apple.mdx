@@ -4,11 +4,9 @@ description: "Export a Developer ID certificate and create an App Store Connect 
 sidebar:
   order: 2
   label: "2. Get your Apple credentials"
-next: false
 ---
 import { Steps } from "@astrojs/starlight/components";
 import TutorialProgress from "../../../components/TutorialProgress.astro";
-import NextStep from "../../../components/NextStep.astro";
 
 <TutorialProgress step={2} />
 
@@ -81,5 +79,3 @@ A file named `AuthKey_<KEYID>.p8`, a Key ID such as `2X9R4HXF34` and an Issuer I
 Keep both files on your Mac for the next step. tapster reads each one once and stores it as a secret of your own hub.
 They go nowhere else. Keep a backup somewhere offline: GitHub never shows a secret again.
 :::
-
-<NextStep step={2} />

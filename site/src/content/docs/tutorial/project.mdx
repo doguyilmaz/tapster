@@ -4,11 +4,9 @@ description: "Run tapster add in a project to prepare its release workflow, prot
 sidebar:
   order: 4
   label: "4. Add a project"
-next: false
 ---
 import { Steps } from "@astrojs/starlight/components";
 import TutorialProgress from "../../../components/TutorialProgress.astro";
-import NextStep from "../../../components/NextStep.astro";
 
 <TutorialProgress step={4} />
 
@@ -101,5 +99,3 @@ tapster commits nothing. When it ends with
 The project holds no keys. If it still has old release secrets such as `MACOS_*` or `HOMEBREW_TAP_*`, tapster lists
 them. Delete them once the hub has published a release.
 :::
-
-<NextStep step={4} />

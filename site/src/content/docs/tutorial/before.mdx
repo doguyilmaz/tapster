@@ -4,11 +4,9 @@ description: "What you need to set up a tapster hub and what you will have at th
 sidebar:
   order: 1
   label: "1. Before you start"
-next: false
 ---
 import { Steps } from "@astrojs/starlight/components";
 import TutorialProgress from "../../../components/TutorialProgress.astro";
-import NextStep from "../../../components/NextStep.astro";
 
 <TutorialProgress step={1} />
 
@@ -70,5 +68,3 @@ the protected environment that holds your keys. A private hub needs GitHub Pro. 
 tapster has no server. Your keys go from your computer to your own GitHub repository. If you add the doorbell, one key
 also goes to your own Cloudflare account. No one else, including tapster's author, ever receives them.
 :::
-
-<NextStep step={1} />

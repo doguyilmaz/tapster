@@ -4,11 +4,9 @@ description: "Push a tag, watch the hub sign and publish it, then install it wit
 sidebar:
   order: 5
   label: "5. Ship the first release"
-next: false
 ---
 import { Steps } from "@astrojs/starlight/components";
 import TutorialProgress from "../../../components/TutorialProgress.astro";
-import NextStep from "../../../components/NextStep.astro";
 
 <TutorialProgress step={5} />
 
@@ -100,5 +98,3 @@ bunx @doguyilmaz/tapster doctor
 - [Faster releases](/guides/doorbell/): start the hub within a minute of each release.
 - [apt and dnf](/guides/linux/): publish Linux packages too.
 - [Mac apps with Sparkle](/guides/sparkle/): sign, notarize and update Mac apps.
-
-<NextStep step={5} />
