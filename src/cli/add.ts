@@ -240,30 +240,28 @@ export function appWorkflow(b: AppBuild, pins: Pins): string {
     .replace("__RING__\n", `${ringStep(6)}\n`);
 }
 
-export async function protectProject(gh: GitHub, repo: string, deployKeys = false): Promise<string> {
+export async function protectProject(gh: GitHub, repo: string, deployKeys = false, dependabot = false): Promise<string> {
   const branch = (await gh.getRepo(repo)).default_branch;
-  const result = await createProtection(gh, repo, branch, deployKeys);
+  const result = await createProtection(gh, repo, branch, deployKeys, dependabot);
   if (result === "exists") return `- ${repo} is already protected: only an admin can create, move or delete its branches and tags`;
   if (result === "created") {
-    return [
-      `- protected ${repo}: only you can create, move or delete branches and tags; workflows and Apps, the hub's included, cannot. Push release tags yourself.`,
-      "  Bots that open pull requests from their own branches here (Dependabot) need to be added as bypass actors to the ruleset \"tapster branches\" in the repository settings.",
-    ].join("\n");
+    return `- protected ${repo}: only you can create, move or delete branches and tags; workflows and Apps, the hub's included, cannot. Push release tags yourself.${dependabot ? " Branches named dependabot/... stay open, so Dependabot can open pull requests." : ""}`;
   }
   return `- GitHub does not enforce rulesets on ${repo} (private repositories need a paid plan for them), so a stolen App key could tag code the hub would sign. Make it public, use a paid plan, or set protection: off for this package in the hub's tapster.yml to accept that; until then the hub refuses it.`;
 }
 
-type AddOptions = { hub: string | null; force: boolean; workflow: string; autoTag: boolean };
+type AddOptions = { hub: string | null; force: boolean; workflow: string; autoTag: boolean; dependabot: boolean };
 
 export function addOptions(args: string[]): AddOptions {
-  const opts: AddOptions = { hub: null, force: false, workflow: "release.yml", autoTag: false };
+  const opts: AddOptions = { hub: null, force: false, workflow: "release.yml", autoTag: false, dependabot: false };
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (a === "--force") opts.force = true;
     else if (a === "--auto-tag") opts.autoTag = true;
+    else if (a === "--allow-dependabot") opts.dependabot = true;
     else if (a === "--hub" && args[i + 1]) opts.hub = hubName(args[++i]!);
     else if (a === "--workflow" && args[i + 1] && /^[A-Za-z0-9._-]+\.ya?ml$/.test(args[i + 1]!)) opts.workflow = args[++i]!;
-    else throw new TapsterError(`unknown option ${a}`, "Use tapster add [--hub owner/repo] [--workflow file.yml] [--auto-tag] [--force].");
+    else throw new TapsterError(`unknown option ${a}`, "Run tapster add --help for the options.");
   }
   return opts;
 }
@@ -377,7 +375,11 @@ export async function add(args: string[]): Promise<void> {
   const gh = await userGitHub();
   const hub = await resolveHub(dir, opts.hub);
   const branch = (await gh.getRepo(repo)).default_branch;
-  console.log(await protectProject(gh, repo, opts.autoTag));
+  console.log(await protectProject(gh, repo, opts.autoTag, opts.dependabot));
+  if (!opts.dependabot && [".github/dependabot.yml", ".github/dependabot.yaml"].some((f) => existsSync(join(dir, f)))) {
+    console.log("- Dependabot cannot open pull requests here now: GitHub does not let personal repositories exempt it from the rules.");
+    console.log("  To keep it, run tapster add --allow-dependabot. Branches named dependabot/... then stay open to anything with write access, the hub's App included, so a stolen App key could run your workflows on its own code there.");
+  }
   if (opts.autoTag) console.log(await setupAutoTag(gh, repo, branch));
   let { entry, reason } = prepared;
   if (prepared.kind === "go") ({ entry, reason } = goEntry(name, repo, prepared.goreleaser, await latestDraftOrRelease(gh, repo)));

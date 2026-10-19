@@ -26,8 +26,9 @@ release workflow then builds and attests the attacker's code and the hub signs i
   - **branches:** target `branch`, all branches (`~ALL`); creation, update, deletion and non-fast-forward restricted.
   The owner (admin) keeps pushing and tagging as before. The App, `GITHUB_TOKEN` and other bots cannot create or move
   any tag or branch, so they cannot start a project workflow on code of their own (a push to a new branch would run
-  every workflow without a branch filter). Bots that open pull requests from branches in the same repository
-  (Dependabot) stop working unless the owner adds them as bypass actors; `add` says so.
+  every workflow without a branch filter). GitHub refuses Dependabot as a bypass actor on personal repositories
+  (verified, 422), so `add --allow-dependabot` excludes `refs/heads/dependabot/**` from the branch ruleset instead and
+  says what that opens; `check` accepts that one exclusion and no other.
 - Before planning a package, `check` reads the project's rulesets with the installation token (metadata read is
   enough): `GET /rulesets?targets=tag` and `?targets=branch`, then each ruleset. It refuses the package ("failed",
   with the `tapster add` command that fixes it) unless a tag ruleset and a branch ruleset are active, cover

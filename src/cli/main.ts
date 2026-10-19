@@ -33,11 +33,12 @@ const help: Record<string, string> = {
                                rewrite the hub workflow, pinned to this tapster`,
   add: `tapster add: prepare this project clone and propose it to the hub
 
-  tapster add [--hub owner/repo] [--workflow file.yml] [--auto-tag] [--force]
-    --hub       the hub that publishes this project (remembered in git config)
-    --workflow  the workflow that runs GoReleaser, if not release.yml
-    --auto-tag  let the project's release workflow push tags with a deploy key
-    --force     replace an existing release workflow`,
+  tapster add [--hub owner/repo] [--workflow file.yml] [--auto-tag] [--allow-dependabot] [--force]
+    --hub               the hub that publishes this project (remembered in git config)
+    --workflow          the workflow that runs GoReleaser, if not release.yml
+    --auto-tag          let the project's release workflow push tags with a deploy key
+    --allow-dependabot  leave branches named dependabot/... open so Dependabot can open pull requests
+    --force             replace an existing release workflow`,
   doctor: `tapster doctor: check the hub's setup on GitHub and name the command that fixes each finding
 
   tapster doctor`,

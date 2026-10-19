@@ -127,8 +127,24 @@ test("add says what the protection changes, or why GitHub refused it", async () 
   const withRepo = Object.assign(gh, { getRepo: async () => ({ default_branch: "main" }) }) as GitHub;
   const said = await protectProject(withRepo, "o/p");
   expect(said).toContain("only you can create, move or delete branches and tags");
-  expect(said).toContain("Dependabot");
+  expect(said).not.toContain("bypass actors");
   expect(await protectProject(withRepo, "o/p")).toContain("already protected");
   const refused = Object.assign(fake([], []).gh, { getRepo: async () => ({ default_branch: "main" }) }) as GitHub;
   expect(await protectProject(refused, "o/p")).toContain("protection: off");
+});
+
+test("letting Dependabot open branches excludes only its branch names", async () => {
+  const { rulesetBodies } = await import("../src/rulesets");
+  const [, branches] = rulesetBodies(false, true);
+  expect(branches.conditions.ref_name.exclude).toEqual(["refs/heads/dependabot/**"]);
+  const relaxed = branch({ conditions: { ref_name: { include: ["~ALL"], exclude: ["refs/heads/dependabot/**"] } } });
+  expect(await protectionProblems(fake([tags(), relaxed]).gh, "o/p", "main", "app")).toEqual([]);
+  const wider = branch({ conditions: { ref_name: { include: ["~ALL"], exclude: ["refs/heads/feature/**"] } } });
+  expect((await protectionProblems(fake([tags(), wider]).gh, "o/p", "main", "app")).join()).toMatch(/every branch/);
+});
+
+test("a repository where GitHub offers no rulesets gets the plan explained", async () => {
+  const { GitHubError } = await import("../src/errors");
+  const gh = { json: async () => { throw new GitHubError("GitHub GET /repos/o/p/rulesets returned 403", "", 403); } } as unknown as GitHub;
+  expect((await protectionProblems(gh, "o/p", "main", "app")).join()).toContain("paid plan");
 });

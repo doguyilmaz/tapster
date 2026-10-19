@@ -22,9 +22,12 @@ export const BRANCH_RULESET = {
   rules: [{ type: "creation" }, { type: "update" }, { type: "deletion" }, { type: "non_fast_forward" }],
 };
 
-export function rulesetBodies(deployKeys: boolean): [typeof TAG_RULESET, typeof BRANCH_RULESET] {
+export const DEPENDABOT_BRANCHES = "refs/heads/dependabot/**";
+
+export function rulesetBodies(deployKeys: boolean, dependabot = false): [typeof TAG_RULESET, typeof BRANCH_RULESET] {
   const bypass_actors = deployKeys ? [...ADMIN_ONLY, DEPLOY_KEYS] : ADMIN_ONLY;
-  return [{ ...TAG_RULESET, bypass_actors }, { ...BRANCH_RULESET, bypass_actors }];
+  const conditions = { ref_name: { include: ["~ALL"], exclude: dependabot ? [DEPENDABOT_BRANCHES] : [] } };
+  return [{ ...TAG_RULESET, bypass_actors }, { ...BRANCH_RULESET, bypass_actors, conditions }];
 }
 
 type Ruleset = {
@@ -46,10 +49,17 @@ function bypassable(r: Ruleset, viewer: Viewer): boolean {
 }
 
 async function kind(gh: GitHub, repo: string, target: "tag" | "branch", wanted: string[], viewer: Viewer): Promise<{ problems: string[]; ok: boolean }> {
-  const list = await gh.json<Ruleset[]>("GET", `/repos/${repo}/rulesets?targets=${target}`);
+  let list: Ruleset[];
+  try {
+    list = await gh.json<Ruleset[]>("GET", `/repos/${repo}/rulesets?targets=${target}`);
+  } catch (e) {
+    if (e instanceof GitHubError && (e.status === 403 || e.status === 404)) return { problems: ["GitHub offers no rulesets on this repository; private repositories need a paid plan for them"], ok: false };
+    throw e;
+  }
   const active = await Promise.all(list.filter((r) => r.target === target && r.enforcement === "active").map((r) => gh.json<Ruleset>("GET", `/repos/${repo}/rulesets/${r.id}`)));
   if (active.length === 0) return { problems: [`no active ${target} ruleset protects every ${target}`], ok: false };
-  const covering = active.filter((r) => (r.conditions?.ref_name?.include ?? []).includes("~ALL") && (r.conditions?.ref_name?.exclude ?? []).length === 0);
+  const allowed = target === "branch" ? [DEPENDABOT_BRANCHES] : [];
+  const covering = active.filter((r) => (r.conditions?.ref_name?.include ?? []).includes("~ALL") && (r.conditions?.ref_name?.exclude ?? []).every((x) => allowed.includes(x)));
   if (covering.length === 0) return { problems: [`no active ${target} ruleset covers every ${target} (~ALL) without exclusions`], ok: false };
   const problems = covering.filter((r) => bypassable(r, viewer)).map((r) => `the App or another actor can bypass ${r.name}`);
   const held = new Set(covering.filter((r) => !bypassable(r, viewer)).flatMap((r) => (r.rules ?? []).map((x) => x.type)));
@@ -73,14 +83,16 @@ export async function protectionProblems(gh: GitHub, repo: string, branch: strin
   return [...found.tag, ...found.branch];
 }
 
-export async function createProtection(gh: GitHub, repo: string, branch: string, deployKeys = false): Promise<"created" | "exists" | "unavailable"> {
+export async function createProtection(gh: GitHub, repo: string, branch: string, deployKeys = false, dependabot = false): Promise<"created" | "exists" | "unavailable"> {
   const before = await assess(gh, repo, branch, "admin");
+  if (before.tag.concat(before.branch).some((p) => p.includes("offers no rulesets"))) return "unavailable";
   const existing = await gh.json<Ruleset[]>("GET", `/repos/${repo}/rulesets`);
-  if (before.tag.length + before.branch.length === 0 && !deployKeys) return "exists";
-  const [tagBody, branchBody] = rulesetBodies(deployKeys);
+  const rewrite = deployKeys || dependabot;
+  if (before.tag.length + before.branch.length === 0 && !rewrite) return "exists";
+  const [tagBody, branchBody] = rulesetBodies(deployKeys, dependabot);
   try {
     for (const [body, problems] of [[tagBody, before.tag], [branchBody, before.branch]] as const) {
-      if (problems.length === 0 && !deployKeys) continue;
+      if (problems.length === 0 && !rewrite) continue;
       const same = existing.find((r) => r.name === body.name);
       if (same) await gh.json("PUT", `/repos/${repo}/rulesets/${same.id}`, body);
       else await gh.json("POST", `/repos/${repo}/rulesets`, body);

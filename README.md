@@ -72,7 +72,8 @@ bunx @doguyilmaz/tapster add
 `add` asks once which hub publishes the project and remembers it. It then:
 
 1. protects the project so that only you can create, move or delete its branches and tags (a stolen App key could
-   otherwise tag code that the hub would sign; bots like Dependabot then need a bypass entry);
+   otherwise tag code that the hub would sign). GitHub does not let personal repositories exempt Dependabot, so
+   `--allow-dependabot` leaves its `dependabot/...` branches open instead;
 2. opens a pull request on the hub with the project's entry, checked the way the hub checks it;
 3. installs the hub's App on the project or opens the install page with the project selected;
 4. points the release workflow at the doorbell, if the hub has one.
