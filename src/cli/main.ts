@@ -7,17 +7,12 @@ import { TAPSTER } from "../version";
 
 const usage = `tapster: publish your projects' releases from one Homebrew tap
 
-  tapster init                 set up this hub clone (run once)
-  tapster init --sparkle <label> [--account <account>]
-                               store a Sparkle key from the login keychain
-  tapster init --doorbell      deploy the Worker that starts the hub when a project releases
-  tapster init --linux         make the key for the apt and dnf repositories
-  tapster init --workflow [--tapster <commit>]
-                               rewrite the hub workflow, pinned to this tapster
-  tapster init --rotate app|certificate|notary|doorbell|linux
-  tapster add                  prepare this project clone for the hub
-  tapster doctor               check the hub's setup
-  tapster --version            show this tapster and the commit it pins hubs to`;
+  tapster init        set up this hub clone; run it again to finish or repair the setup
+  tapster add         prepare this project clone and propose it to the hub
+  tapster doctor      check the hub's setup and name the fix for each finding
+  tapster --version   show this tapster and the commit it pins hubs to
+
+Run tapster <command> --help for the options: Sparkle and Linux keys, the doorbell, rotations and more.`;
 
 const help: Record<string, string> = {
   init: `tapster init: set up the hub in this clone; every step can run again and skips what is done
