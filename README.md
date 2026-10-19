@@ -5,7 +5,8 @@ projects. Each project only builds and opens a draft release. It holds no signin
 tap token.
 
 It covers command line tools written in Go (with GoReleaser) or Bun. Releases get Developer ID signatures, Apple
-notarization, a Homebrew cask and, with Windows builds, a Scoop manifest.
+notarization, a Homebrew cask and, with Windows builds, a Scoop manifest. It also covers macOS apps that update
+through Sparkle: the hub signs every piece of code in the app, builds and notarizes the DMG and signs the update feed.
 
 ## How it works
 
@@ -25,7 +26,8 @@ project (push tag v1.2.3)              hub: you/homebrew-tap
    the hub.
 
 The design, including the security model, is in
-[docs/superpowers/specs/2026-10-18-tapster-design.md](docs/superpowers/specs/2026-10-18-tapster-design.md).
+[docs/superpowers/specs/2026-10-18-tapster-design.md](docs/superpowers/specs/2026-10-18-tapster-design.md). Apps are in
+[docs/superpowers/specs/2026-10-19-tapster-phase2-design.md](docs/superpowers/specs/2026-10-19-tapster-phase2-design.md).
 
 ## Set up a hub
 
@@ -58,6 +60,39 @@ bunx @doguyilmaz/tapster add
 `add` changes local files only and explains each change. It prints the entry to paste into the hub's `tapster.yml`.
 Commit, push and tag a release.
 
+## Apps
+
+An app project builds the app in its own workflow and signs it ad hoc. It hands the app over as
+`<App>-<version>.app.tar.gz` in a draft release. `tapster add` finds an XcodeGen `project.yml` or an `Info.plist`
+with `SUFeedURL`, writes that workflow and prints the hub entry. The build job can only read the repository. A second
+job attests the archive and opens the draft.
+
+The hub then:
+
+1. checks the app before anything is signed: both version keys equal the tag, the bundle id, the feed address, the
+   pinned public key, the embedded Sparkle version and every nested bundle's identifier and name;
+2. signs every piece of code inside out with identifiers and entitlements it chooses itself (`code` in `tapster.yml`);
+3. builds the DMG without Finder, then signs, notarizes and staples it;
+4. signs the DMG and the appcast with the app's Sparkle key;
+5. publishes the DMG, the feed and `checksums.txt`, removes the unsigned archive and writes the cask.
+
+The app must ask Sparkle for signed feeds. Set both keys in its `Info.plist`:
+
+```xml
+<key>SURequireSignedFeed</key><true/>
+<key>SUVerifyUpdateBeforeExtraction</key><true/>
+```
+
+Store each Sparkle key once, from the Mac that holds it in its login keychain:
+
+```sh
+bunx @doguyilmaz/tapster init --sparkle <label> --account <keychain account>
+```
+
+It reads the key without showing it, checks it against the public key pinned in `tapster.yml`, asks you to confirm an
+offline backup and stores it as the `SPARKLE_KEY_<LABEL>` secret. Apps that share a key share a label. Files that must
+stay in every release unchanged, such as a frozen feed for old builds, go under `carry` with their digest.
+
 ## Check the setup
 
 ```sh
@@ -79,6 +114,8 @@ bunx @doguyilmaz/tapster doctor
   work is done.
 - **Only checked builds are signed.** Every file must match `checksums.txt`. Public projects must attest their
   archives in their own release workflow. The hub verifies that before signing.
+- **Sparkle keys stay in the hub.** Only the step that signs the feed sees them. The key never reaches a command line
+  or a file. The hub refuses a key whose public half differs from the one installed copies trust.
 - **Rendering holds no credential.** The job that runs Homebrew to check the casks has only the hub's own workflow
   token.
 
