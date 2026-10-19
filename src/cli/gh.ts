@@ -21,8 +21,8 @@ export async function currentRepo(dir = process.cwd()): Promise<string> {
   return m[1]!;
 }
 
-export async function setEnvSecret(repo: string, name: string, value: string): Promise<void> {
-  await runPath(ghPath(), "gh", ["secret", "set", name, "--env", "tapster", "--repo", repo], { env: userEnv(), stdin: value });
+export async function setEnvSecret(repo: string, name: string, value: string, env = "tapster"): Promise<void> {
+  await runPath(ghPath(), "gh", ["secret", "set", name, "--env", env, "--repo", repo], { env: userEnv(), stdin: value });
 }
 
 export async function setEnvVariable(repo: string, name: string, value: string): Promise<void> {

@@ -1,9 +1,11 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { isMap, isSeq, parse, parseDocument, type Scalar, YAMLMap } from "yaml";
 import { BUNDLE_ID } from "../config";
-import { TapsterError } from "../errors";
+import { GitHubError, TapsterError } from "../errors";
+import { run, runPath } from "../run";
 import type { GitHub } from "../github";
 import { parsePlist } from "../plist";
 import { createProtection } from "../rulesets";
@@ -11,7 +13,9 @@ import { ringStep } from "./doorbell";
 import pinsJson from "../../templates/pins.json";
 import appTemplate from "../../templates/project/app-release.yml" with { type: "text" };
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
-import { currentRepo, userGitHub } from "./gh";
+import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
+import { autoTagSteps, binName, bunEntry, goEntry, hubName, installOnProject, proposeEntry } from "./hubpr";
+import { ask } from "./prompt";
 
 type Pins = typeof pinsJson;
 
@@ -81,6 +85,27 @@ export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag:
 }
 
 
+export function addRingStep(text: string): string | null {
+  let doc;
+  try {
+    doc = parseDocument(text);
+  } catch {
+    return null;
+  }
+  const jobs = doc.get("jobs");
+  if (!isMap(jobs)) return null;
+  for (const job of jobs.items) {
+    const steps = jobMap(job).get("steps");
+    if (!isSeq(steps)) continue;
+    const drafts = steps.items.some((st) => isMap(st) && /gh release create[^\n]*--draft/.test(String(st.get("run") ?? "")));
+    if (!drafts) continue;
+    if (steps.items.some((st) => isMap(st) && st.get("name") === RING_NAME)) return text;
+    steps.items.push(doc.createNode((parse(ringStep(0)) as unknown[])[0]) as never);
+    return doc.toString();
+  }
+  return null;
+}
+
 export function bunWorkflow(name: string, entry: string, pins: Pins): string {
   return bunTemplate
     .replaceAll("__CHECKOUT_SHA__", pins["actions/checkout"].sha)
@@ -92,30 +117,6 @@ export function bunWorkflow(name: string, entry: string, pins: Pins): string {
     .replaceAll("__NAME__", name)
     .replaceAll("__ENTRY__", entry)
     .replace("__RING__\n", `${ringStep(6)}\n`);
-}
-
-const PLATFORM: Record<string, string> = {
-  darwin_universal: "darwin-universal",
-  darwin_all: "darwin-universal",
-  darwin_arm64: "darwin-arm64",
-  darwin_amd64: "darwin-amd64",
-  linux_arm64: "linux-arm64",
-  linux_amd64: "linux-amd64",
-  windows_amd64: "windows-amd64",
-  windows_arm64: "windows-arm64",
-};
-
-export function inferEntry(name: string, repo: string, assets: string[], version: string, kind: "go" | "bun"): string {
-  const lines = [`  - name: ${name}`, `    repo: ${repo}`, ...(kind === "bun" ? ["    kind: bun"] : []), `    binaries: [${name}]`, "    assets:"];
-  let windows = false;
-  for (const a of assets) {
-    const key = Object.keys(PLATFORM).find((k) => a.includes(k));
-    if (!key) continue;
-    lines.push(`      ${PLATFORM[key]}: "${a.replaceAll(version, "{version}")}"`);
-    if (key.startsWith("windows")) windows = true;
-  }
-  if (windows) lines.push("    scoop: true");
-  return lines.join("\n");
 }
 
 export type FoundApp = { name: string; bundleId: string | null; feed: string; publicKey: string | null; universal: boolean; build: string | null; appPath: string | null };
@@ -234,27 +235,9 @@ export function appWorkflow(b: AppBuild, pins: Pins): string {
     .replace("__RING__\n", `${ringStep(6)}\n`);
 }
 
-async function addApp(dir: string, repo: string, name: string, app: FoundApp, force: boolean): Promise<void> {
-  const flow = join(dir, ".github/workflows/release.yml");
-  if (existsSync(flow) && !force) {
-    throw new TapsterError(".github/workflows/release.yml already exists", "Move it aside and run tapster add again. To replace it, run tapster add --force.");
-  }
-  const build = app.build ?? `echo "Set the build command in .github/workflows/release.yml" && exit 1`;
-  const appPath = app.appPath ?? `build/${app.name}.app`;
-  await mkdir(join(dir, ".github/workflows"), { recursive: true });
-  await writeFile(flow, appWorkflow({ build, appPath, runner: "macos-15", carry: [] }, pinsJson));
-  console.log(`- wrote .github/workflows/release.yml (build with "${build}", pack ${appPath}, attest, draft)`);
-  if (!app.build || !app.appPath) console.log("- set the build command and the app path in that file; the build must sign the app ad hoc");
-  console.log("- the app must set SURequireSignedFeed and SUVerifyUpdateBeforeExtraction to true and stamp both version keys with the tag");
-  console.log("- to attach files the hub carries unchanged, add cp lines to the release job and list them under carry in tapster.yml");
-  console.log("\nAdd this to the hub's tapster.yml under packages:\n");
-  console.log(appEntry(name, repo, app));
-  console.log(`\nThen store the Sparkle key in the hub with tapster init --sparkle ${name.replace(/[^a-z0-9]/g, "")}.`);
-}
-
-export async function protectProject(gh: GitHub, repo: string): Promise<string> {
+export async function protectProject(gh: GitHub, repo: string, deployKeys = false): Promise<string> {
   const branch = (await gh.getRepo(repo)).default_branch;
-  const result = await createProtection(gh, repo, branch);
+  const result = await createProtection(gh, repo, branch, deployKeys);
   if (result === "exists") return `- ${repo} is already protected: only an admin can create, move or delete its branches and tags`;
   if (result === "created") {
     return [
@@ -265,47 +248,145 @@ export async function protectProject(gh: GitHub, repo: string): Promise<string> 
   return `- GitHub does not enforce rulesets on ${repo} (private repositories need a paid plan for them), so a stolen App key could tag code the hub would sign. Make it public, use a paid plan, or set protection: off for this package in the hub's tapster.yml to accept that; until then the hub refuses it.`;
 }
 
-export async function add(args: string[]): Promise<void> {
-  const dir = process.cwd();
-  const repo = await currentRepo(dir);
-  const name = repo.split("/")[1]!.toLowerCase();
+type AddOptions = { hub: string | null; force: boolean; workflow: string; autoTag: boolean };
+
+export function addOptions(args: string[]): AddOptions {
+  const opts: AddOptions = { hub: null, force: false, workflow: "release.yml", autoTag: false };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === "--force") opts.force = true;
+    else if (a === "--auto-tag") opts.autoTag = true;
+    else if (a === "--hub" && args[i + 1]) opts.hub = hubName(args[++i]!);
+    else if (a === "--workflow" && args[i + 1] && /^[A-Za-z0-9._-]+\.ya?ml$/.test(args[i + 1]!)) opts.workflow = args[++i]!;
+    else throw new TapsterError(`unknown option ${a}`, "Use tapster add [--hub owner/repo] [--workflow file.yml] [--auto-tag] [--force].");
+  }
+  return opts;
+}
+
+async function writeTemplate(dir: string, file: string, text: string, force: boolean): Promise<string> {
+  const flow = join(dir, ".github/workflows", file);
+  if (existsSync(flow) && !force) {
+    const ringed = addRingStep(await readFile(flow, "utf8"));
+    if (ringed === null) throw new TapsterError(`.github/workflows/${file} already exists`, "Move it aside and run tapster add again. To replace it, run tapster add --force.");
+    await writeFile(flow, ringed);
+    return `- kept .github/workflows/${file}; it rings the hub after opening the draft`;
+  }
+  await mkdir(join(dir, ".github/workflows"), { recursive: true });
+  await writeFile(flow, text);
+  return `- wrote .github/workflows/${file} (build, attest, draft, ring the hub)`;
+}
+
+type Prepared = { kind: "go" | "bun" | "app"; entry: string | null; reason: string | null; notes: string[]; goreleaser: string | null };
+
+async function prepare(dir: string, repo: string, name: string, opts: AddOptions): Promise<Prepared> {
   const app = findApp(dir);
   if (app) {
-    await addApp(dir, repo, name, app, args.includes("--force"));
-    console.log(await protectProject(await userGitHub(), repo));
-    return;
+    const build = app.build ?? `echo "Set the build command in .github/workflows/release.yml" && exit 1`;
+    const appPath = app.appPath ?? `build/${app.name}.app`;
+    const notes = [await writeTemplate(dir, "release.yml", appWorkflow({ build, appPath, runner: "macos-15", carry: [] }, pinsJson), opts.force)];
+    if (!app.build || !app.appPath) notes.push("- set the build command and the app path in that file; the build must sign the app ad hoc");
+    notes.push("- the app must set SURequireSignedFeed and SUVerifyUpdateBeforeExtraction to true and stamp both version keys with the tag");
+    notes.push(`- store the Sparkle key in the hub with tapster init --sparkle ${name.replace(/[^a-z0-9]/g, "")} (add --new to create one)`);
+    return { kind: "app", entry: appEntry(name, repo, app), reason: null, notes, goreleaser: null };
   }
   const goreleaser = [".goreleaser.yaml", ".goreleaser.yml"].find((f) => existsSync(join(dir, f)));
-  const isBun = existsSync(join(dir, "package.json")) && (existsSync(join(dir, "bun.lock")) || existsSync(join(dir, "bun.lockb")));
-  let kind: "go" | "bun";
   if (goreleaser && existsSync(join(dir, "go.mod"))) {
-    kind = "go";
     const g = adaptGoreleaser(await readFile(join(dir, goreleaser), "utf8"));
     await writeFile(join(dir, goreleaser), g.text);
-    const flowPath = join(dir, ".github/workflows/release.yml");
-    if (!existsSync(flowPath)) throw new TapsterError("no .github/workflows/release.yml found", "tapster expects the release workflow at that path. For another file, set workflow: in the hub entry.");
+    const flowPath = join(dir, ".github/workflows", opts.workflow);
+    if (!existsSync(flowPath)) throw new TapsterError(`no .github/workflows/${opts.workflow} found`, "Name the workflow that runs GoReleaser with --workflow.");
     const w = adaptReleaseWorkflow(await readFile(flowPath, "utf8"), pinsJson["actions/attest-build-provenance"].sha, pinsJson["actions/attest-build-provenance"].tag);
     await writeFile(flowPath, w.text);
-    for (const n of [...g.notes, ...w.notes]) console.log(`- ${n}`);
-  } else if (isBun) {
-    kind = "bun";
-    const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8")) as { bin?: string | Record<string, string> };
-    const entry = typeof pkg.bin === "string" ? pkg.bin : Object.values(pkg.bin ?? {})[0];
-    if (!entry) throw new TapsterError("package.json has no bin entry", "Add the CLI entry file to bin in package.json.");
-    const flow = join(dir, ".github/workflows/release.yml");
-    if (existsSync(flow) && !args.includes("--force")) {
-      throw new TapsterError(".github/workflows/release.yml already exists", "Move it aside and run tapster add again. To replace it, run tapster add --force.");
-    }
-    await mkdir(join(dir, ".github/workflows"), { recursive: true });
-    await writeFile(flow, bunWorkflow(name, entry.replace(/^\.\//, ""), pinsJson));
-    console.log("- wrote .github/workflows/release.yml (build, attest, draft)");
-  } else {
-    throw new TapsterError("this project is not a GoReleaser-based Go CLI, a Bun CLI or an app with a Sparkle feed", "tapster add supports those three.");
+    return { kind: "go", entry: null, reason: null, notes: [...g.notes, ...w.notes].map((n) => `- ${n}`), goreleaser: g.text };
   }
+  if (existsSync(join(dir, "package.json")) && (existsSync(join(dir, "bun.lock")) || existsSync(join(dir, "bun.lockb")))) {
+    const found = binName(JSON.parse(await readFile(join(dir, "package.json"), "utf8")), name);
+    if (!found) throw new TapsterError("package.json has no bin entry", "Add the CLI entry file to bin in package.json.");
+    const note = await writeTemplate(dir, "release.yml", bunWorkflow(found.bin, found.entry, pinsJson), opts.force);
+    return { kind: "bun", entry: bunEntry(name, repo, found.bin), reason: null, notes: [note], goreleaser: null };
+  }
+  throw new TapsterError("this project is not a GoReleaser-based Go CLI, a Bun CLI or an app with a Sparkle feed", "tapster add supports those three.");
+}
+
+async function resolveHub(dir: string, flag: string | null): Promise<string> {
+  const saved = (await run("git", ["-C", dir, "config", "--get", "tapster.hub"], { allowFail: true })).stdout.trim();
+  const hub = flag ?? (saved ? hubName(saved) : hubName(await ask("Which hub publishes this project (owner/repo)? ")));
+  if (hub !== saved) await run("git", ["-C", dir, "config", "tapster.hub", hub]);
+  return hub;
+}
+
+async function setupAutoTag(gh: GitHub, repo: string, branch: string): Promise<string> {
+  const keys = await gh.json<{ title: string }[]>("GET", `/repos/${repo}/keys`);
+  if (keys.some((k) => k.title === "tapster tags")) return '- the tag key already exists; to replace it, delete the deploy key "tapster tags" and run this again';
+  try {
+    await gh.json("PUT", `/repos/${repo}/environments/release`, { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } });
+  } catch (e) {
+    if (e instanceof GitHubError && [403, 404, 422].includes(e.status)) {
+      throw new TapsterError(`GitHub refused environments on ${repo}`, "Automatic tags keep their key in an environment, which private repositories get with GitHub Pro. Make the project public or upgrade.");
+    }
+    throw e;
+  }
+  const policies = await gh.json<{ branch_policies: { name: string }[] }>("GET", `/repos/${repo}/environments/release/deployment-branch-policies`);
+  if (!policies.branch_policies.some((p) => p.name === branch)) {
+    await gh.json("POST", `/repos/${repo}/environments/release/deployment-branch-policies`, { name: branch, type: "branch" });
+  }
+  const dir = mkdtempSync(join(tmpdir(), "tapster-tag-"));
+  try {
+    await runPath("/usr/bin/ssh-keygen", "ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", `tapster tags for ${repo}`, "-f", join(dir, "key")]);
+    await setEnvSecret(repo, "TAPSTER_TAG_KEY", readFileSync(join(dir, "key"), "utf8"), "release");
+    await gh.json("POST", `/repos/${repo}/keys`, { title: "tapster tags", key: readFileSync(join(dir, "key.pub"), "utf8").trim(), read_only: false });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return [
+    `- automatic tags: a deploy key for ${repo} lives in its "release" environment, which only ${branch} may use, and the rulesets let deploy keys tag.`,
+    "  Push tags from your release workflow like this:",
+    autoTagSteps(pinsJson["actions/checkout"]),
+  ].join("\n");
+}
+
+async function hubDoorbell(gh: GitHub, hub: string): Promise<string | null> {
+  try {
+    return (await gh.json<{ value: string }>("GET", `/repos/${hub}/environments/tapster/variables/TAPSTER_DOORBELL`)).value;
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+async function latestDraftOrRelease(gh: GitHub, repo: string): Promise<{ assets: string[]; version: string } | null> {
+  const all = (await gh.listReleases(repo)).filter((r) => /^v\d/.test(r.tag_name)).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const r = all[0];
+  return r ? { assets: r.assets.map((a) => a.name), version: r.tag_name.slice(1) } : null;
+}
+
+export async function add(args: string[]): Promise<void> {
+  const opts = addOptions(args);
+  const dir = process.cwd();
+  const repo = await currentRepo(dir);
+  const name = repo.split("/")[1]!.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const prepared = await prepare(dir, repo, name, opts);
+  for (const n of prepared.notes) console.log(n);
   const gh = await userGitHub();
-  console.log(await protectProject(gh, repo));
-  const latest = await gh.json<{ tag_name: string; assets: { name: string }[] }>("GET", `/repos/${repo}/releases/latest`).catch(() => null);
-  console.log("\nAdd this to the hub's tapster.yml under packages:\n");
-  console.log(latest ? inferEntry(name, repo, latest.assets.map((a) => a.name), latest.tag_name.slice(1), kind) : `  - name: ${name}\n    repo: ${repo}\n    binaries: [${name}]\n    assets: {}   # fill after the first release`);
-  console.log("\nReview the changes with git diff, commit them, then tag a release.");
+  const hub = await resolveHub(dir, opts.hub);
+  const branch = (await gh.getRepo(repo)).default_branch;
+  console.log(await protectProject(gh, repo, opts.autoTag));
+  if (opts.autoTag) console.log(await setupAutoTag(gh, repo, branch));
+  let { entry, reason } = prepared;
+  if (prepared.kind === "go") ({ entry, reason } = goEntry(name, repo, prepared.goreleaser, await latestDraftOrRelease(gh, repo)));
+  if (entry) {
+    try {
+      console.log(`- proposed the hub entry in ${await proposeEntry(gh, hub, name, repo, entry)}; merge it to start publishing`);
+    } catch (e) {
+      if (!(e instanceof TapsterError)) throw e;
+      console.log(`- the hub entry was not proposed: ${e.reason}. ${e.fix}\n  The entry for ${hub}'s tapster.yml:\n${entry}`);
+    }
+  } else console.log(`- no hub entry yet: ${reason}`);
+  const bell = await hubDoorbell(gh, hub);
+  if (bell) {
+    await setRepoVariable(repo, "TAPSTER_DOORBELL", bell);
+    console.log("- the release workflow rings the hub's doorbell, so the hub publishes right after the draft opens");
+  }
+  console.log(await installOnProject(gh, hub, repo));
+  console.log("\nReview the changes with git diff, commit and push them, then push a tag to release.");
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { parse } from "yaml";
-import { add, adaptGoreleaser, adaptReleaseWorkflow, appEntry, appWorkflow, bunWorkflow, findApp, inferEntry } from "../src/cli/add";
+import { add, adaptGoreleaser, adaptReleaseWorkflow, appEntry, appWorkflow, bunWorkflow, findApp } from "../src/cli/add";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,13 +68,6 @@ test("bun workflow builds every target and drafts the release", () => {
   expect(attest.if).toBe("${{ !github.event.repository.private }}");
   expect(attest["continue-on-error"]).toBeUndefined();
   expect(flow).toContain('tar -C "$t" -czf "konvoy_${v}_${p/-/_}.tar.gz" konvoy');
-});
-
-test("the hub entry is inferred from the latest release", () => {
-  const entry = inferEntry("aims", "o/aims", ["aims_1.2.3_darwin_arm64.tar.gz", "aims_1.2.3_linux_amd64.tar.gz", "aims_1.2.3_windows_amd64.zip", "checksums.txt"], "1.2.3", "go");
-  expect(entry).toContain('darwin-arm64: "aims_{version}_darwin_arm64.tar.gz"');
-  expect(entry).toContain('windows-amd64: "aims_{version}_windows_amd64.zip"');
-  expect(entry).toContain("scoop: true");
 });
 
 const goFlow = `on: { push: { tags: ["v*"] } }
@@ -201,4 +194,15 @@ test("add finds a plain Info.plist with a feed when there is no project.yml", ()
   expect(found.feed).toBe("appcast.xml");
   expect(found.build).toBeNull();
   expect(appEntry("recesso", "o/recesso", found)).not.toContain("feed:");
+});
+
+test("a release workflow missing only the ring step gets it without --force", async () => {
+  const { addRingStep } = await import("../src/cli/add");
+  const full = bunWorkflow("tool", "src/cli.ts", pins);
+  const withoutRing = full.slice(0, full.indexOf("      - name: Ring the tapster hub"));
+  const fixed = addRingStep(withoutRing)!;
+  expect(fixed).not.toBeNull();
+  expect(parse(fixed).jobs.build.steps.at(-1).name).toBe("Ring the tapster hub");
+  expect(addRingStep(full)).toBe(full);
+  expect(addRingStep("mine\n")).toBeNull();
 });

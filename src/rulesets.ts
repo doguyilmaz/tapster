@@ -1,7 +1,8 @@
 import { GitHubError } from "./errors";
 import type { GitHub } from "./github";
 
-const ADMIN_ONLY = [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }];
+const ADMIN_ONLY: { actor_id: number | null; actor_type: string; bypass_mode: string }[] = [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }];
+const DEPLOY_KEYS = { actor_id: null, actor_type: "DeployKey", bypass_mode: "always" };
 
 export const TAG_RULESET = {
   name: "tapster tags",
@@ -20,6 +21,11 @@ export const BRANCH_RULESET = {
   conditions: { ref_name: { include: ["~ALL"], exclude: [] as string[] } },
   rules: [{ type: "creation" }, { type: "update" }, { type: "deletion" }, { type: "non_fast_forward" }],
 };
+
+export function rulesetBodies(deployKeys: boolean): [typeof TAG_RULESET, typeof BRANCH_RULESET] {
+  const bypass_actors = deployKeys ? [...ADMIN_ONLY, DEPLOY_KEYS] : ADMIN_ONLY;
+  return [{ ...TAG_RULESET, bypass_actors }, { ...BRANCH_RULESET, bypass_actors }];
+}
 
 type Ruleset = {
   id: number;
@@ -67,13 +73,14 @@ export async function protectionProblems(gh: GitHub, repo: string, branch: strin
   return [...found.tag, ...found.branch];
 }
 
-export async function createProtection(gh: GitHub, repo: string, branch: string): Promise<"created" | "exists" | "unavailable"> {
+export async function createProtection(gh: GitHub, repo: string, branch: string, deployKeys = false): Promise<"created" | "exists" | "unavailable"> {
   const before = await assess(gh, repo, branch, "admin");
-  if (before.tag.length + before.branch.length === 0) return "exists";
   const existing = await gh.json<Ruleset[]>("GET", `/repos/${repo}/rulesets`);
+  if (before.tag.length + before.branch.length === 0 && !deployKeys) return "exists";
+  const [tagBody, branchBody] = rulesetBodies(deployKeys);
   try {
-    for (const [body, problems] of [[TAG_RULESET, before.tag], [BRANCH_RULESET, before.branch]] as const) {
-      if (problems.length === 0) continue;
+    for (const [body, problems] of [[tagBody, before.tag], [branchBody, before.branch]] as const) {
+      if (problems.length === 0 && !deployKeys) continue;
       const same = existing.find((r) => r.name === body.name);
       if (same) await gh.json("PUT", `/repos/${repo}/rulesets/${same.id}`, body);
       else await gh.json("POST", `/repos/${repo}/rulesets`, body);
