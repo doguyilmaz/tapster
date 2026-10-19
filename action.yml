@@ -16,6 +16,10 @@ inputs:
     description: Limit the check to one package
     required: false
     default: ""
+  linux:
+    description: Rebuild the Linux repositories (check mode)
+    required: false
+    default: "false"
   config:
     description: Path of the hub config
     required: false

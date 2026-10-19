@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { missingAttestations } from "../attest";
 import { parseChecksums } from "../checksums";
-import { type AppPackage, isApp } from "../config";
+import { type AppPackage, type HubConfig, isApp } from "../config";
 import { GitHub, type Release } from "../github";
 import { readSecret, requireVar } from "../mask";
 import { type WorkItem, planPackage } from "../plan";
@@ -13,6 +13,11 @@ import { STATE_PATH, type State, parseState, recordedChecksums } from "../state"
 import { type InstallationToken, installationExists, installationToken } from "../token";
 import type { Context } from "./context";
 import { renderNeeded } from "./render";
+
+export function linuxNeeded(config: HubConfig, items: WorkItem[], asked: boolean): boolean {
+  const linux = new Set(config.packages.filter((p) => !isApp(p) && p.linux).map((p) => p.name));
+  return linux.size > 0 && (asked || items.some((i) => linux.has(i.package)));
+}
 
 export function feedWarning(latest: Release | null, state: State, pkg: AppPackage): string | null {
   if (!latest || !pkg.sparkle) return null;
@@ -75,4 +80,5 @@ export async function check(ctx: Context): Promise<void> {
   if (items.length > 50) record({ item: "hub", result: "waiting", detail: `${items.length - 50} more drafts wait for the next run` });
   core.setOutput("work", JSON.stringify(items.slice(0, 50)));
   core.setOutput("render", String(items.length > 0 || (await renderNeeded(ctx, privateRepos))));
+  core.setOutput("linux", String(linuxNeeded(ctx.config, items.slice(0, 50), core.getInput("linux") === "true")));
 }
