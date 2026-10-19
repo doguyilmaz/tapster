@@ -25,6 +25,7 @@ the build's `goos` list.
 
 ## 2. Make the signing key
 
+You need GnuPG (`brew install gnupg`). On Linux you also need `secret-tool`, so tapster can keep a copy of the key.
 In a clone of your hub:
 
 ```sh
@@ -54,7 +55,7 @@ and the repository metadata and publishes the site.
 bunx @doguyilmaz/tapster init --rotate linux
 ```
 
-The new key signs next to the old one, so users can fetch it before the old one stops. Once they had time to update,
+The new key signs next to the old one, so users can fetch it before the old one stops. Once they have had time to update,
 stop signing with the old key:
 
 ```sh

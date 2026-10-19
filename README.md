@@ -39,8 +39,9 @@ every step and shows what you should see.
 ## Your keys stay in your accounts
 
 tapster has no server. Your Apple certificate, notary key and App key are secrets of your hub's `tapster` environment,
-which only its `main` branch can open. Projects hold no keys. No one else, including tapster's author, ever receives
-them. Read the [security model](https://doguyilmaz.github.io/tapster/reference/security/).
+which only its `main` branch can open. Projects hold no signing keys. No one else, including tapster's author, ever
+receives them. tapster's own code uses them only inside your hub's runs, at the commit your hub workflow pins. Read the
+[security model](https://doguyilmaz.github.io/tapster/reference/security/).
 
 ## The Action
 

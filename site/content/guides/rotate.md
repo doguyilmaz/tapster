@@ -8,6 +8,9 @@ description: Replace a certificate or key that expires, leaked or is due for a c
 Each key has its own command. Run it in a clone of your hub. The old key keeps working until the new one is stored, so
 releases do not stop in between.
 
+> [!KEYS]
+> A new key goes the same way as the first: from your computer into your own hub or Cloudflare account, nowhere else.
+
 | Key | Command | When |
 | --- | --- | --- |
 | Developer ID certificate | `init --rotate certificate` | Before it expires. `doctor` warns 30 days ahead. |

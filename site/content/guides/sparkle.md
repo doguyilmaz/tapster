@@ -7,12 +7,12 @@ description: Let the hub sign, notarize and publish a Mac app that updates throu
 
 For a Mac app, the project builds the app and signs it ad hoc. The hub does the rest:
 
-1. it checks the app before anything is signed: both version keys must equal the tag. The bundle id, the feed address,
-   the Sparkle key and every nested bundle must be what `tapster.yml` says;
-2. it signs every piece of code inside out with identifiers and entitlements it chooses itself;
-3. it builds the DMG without Finder, then signs, notarizes and staples it;
-4. it signs the DMG and the update feed with the app's Sparkle key;
-5. it publishes the DMG, the feed and `checksums.txt` and writes the cask.
+1. it checks the app before anything is signed: both version keys must equal the tag;
+2. it checks that the bundle id, the feed address, the Sparkle key and every nested bundle are what `tapster.yml` says;
+3. it signs every piece of code inside out with identifiers and entitlements it chooses itself;
+4. it builds the DMG without Finder, then signs, notarizes and staples it;
+5. it signs the DMG and the update feed with the app's Sparkle key;
+6. it publishes the DMG, the feed and `checksums.txt` and writes the cask.
 
 ## What the app needs
 
@@ -47,20 +47,11 @@ bunx @doguyilmaz/tapster init --sparkle myapp --new
 Put that public key into the app's `SUPublicEDKey` now, before step 2. tapster then asks you to confirm an offline copy
 of the key and stores it in the hub.
 
-**An app that already ships with a key** keeps it. Sparkle's `generate_keys` saved it in your login keychain. Store it
-after step 2, once the app's entry is in the hub:
-
-```sh
-git pull
-bunx @doguyilmaz/tapster init --sparkle myapp --account ed25519
-```
-
-`ed25519` is the account `generate_keys` uses unless you named another. macOS asks whether tapster may read the key;
-choose **Allow**. tapster checks that the key matches the public key the app ships with.
+**An app that already ships with a key** keeps it. You store it after step 2.
 
 > [!KEYS]
-> The Sparkle key becomes a secret of the hub's `tapster` environment. Only the step that signs the feed sees it. A key
-> that tapster makes also stays in your login keychain. If the key is lost, installed copies can never update again,
+> The Sparkle key becomes a secret of the hub's `tapster` environment and goes nowhere else. Only the step that signs the
+> feed sees it. A key that tapster makes also stays in your login keychain. If the key is lost, installed copies can never update again,
 > so keep an offline copy, for example in your password manager.
 
 Both commands change one line in the hub's workflow. Commit and push it.
@@ -93,6 +84,19 @@ The hub entry it proposes looks like this:
 
 If tapster could not find the bundle id or the public key, the entry holds a placeholder and is printed instead of
 proposed. Fill it in and add it to the hub's `tapster.yml` yourself. Then follow [Add a project](/tutorial/project#your-turn).
+
+**For an app that already ships with a key**, store that key once the entry is merged and before the first tag. In a
+clone of your hub:
+
+```sh
+git pull
+bunx @doguyilmaz/tapster init --sparkle myapp --account ed25519
+```
+
+`ed25519` is the account Sparkle's `generate_keys` uses unless you named another. macOS asks whether tapster may read
+the key; choose **Allow**. tapster checks that the key's public half matches `sparkle.public_key` in `tapster.yml`, then
+asks `Do you keep an offline backup of this key? Type yes to store it in the hub:`. Commit and push the workflow line it
+changes.
 
 ## Nested code and entitlements
 

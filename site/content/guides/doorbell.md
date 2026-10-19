@@ -5,7 +5,7 @@ order: 5
 description: Deploy the doorbell so the hub starts within a minute of each release.
 ---
 
-The hub looks for new drafts every 10 minutes. GitHub runs these schedules on a best effort basis, so a release can wait
+The hub looks for new drafts every 10 minutes. GitHub runs these schedules best-effort, so a release can wait
 longer. The **doorbell** starts the hub as soon as a project opens its draft. It is a small Cloudflare Worker on the free
 plan, deployed to your own Cloudflare account.
 
@@ -17,14 +17,16 @@ plan, deployed to your own Cloudflare account.
 
 ## Deploy it
 
-In a clone of your hub:
+In an up-to-date clone of your hub, so tapster sees every project in `tapster.yml`:
 
 ```sh
+git pull
 bunx @doguyilmaz/tapster init --doorbell
 ```
 
 1. If Wrangler is not signed in, Cloudflare's sign-in page opens. Sign in and allow Wrangler.
-2. tapster opens a page that explains the **doorbell App**, a second GitHub App that may only start the hub's workflow.
+2. tapster opens a page that explains the **doorbell App**, a second GitHub App that may only start the hub's workflow
+   and turn it back on.
    Click **Continue to GitHub**, then **Create GitHub App**.
 3. On the install page, choose **Only select repositories** and pick the hub, only the hub. Click **Install**.
 
@@ -42,8 +44,8 @@ address.
 > `The doorbell answers at https://tapster-doorbell.<subdomain>.workers.dev. Projects ring it after opening a draft.`
 
 > [!KEYS]
-> The doorbell App's private key is a secret of the Worker in your Cloudflare account. The Worker uses it only to start
-> the hub's workflow.
+> The doorbell App's private key goes from your terminal to the Worker in your own Cloudflare account and nowhere else.
+> The Worker uses it only to start the hub's workflow and to turn it back on when GitHub pauses it.
 
 ## How a project rings it
 

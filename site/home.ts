@@ -46,7 +46,7 @@ export function homePage(nav: NavItem[]): string {
 <section class="hero">
 <div>
 <h1>Sign, notarize and publish every release from your Homebrew tap</h1>
-<p>Your projects build their files and open a draft release. Your tap signs them, has Apple notarize them and publishes the release with its Homebrew cask. Your signing keys live in one place: your own repository.</p>
+<p>Your projects build their files and open a draft release. Your tap signs them, has Apple notarize them and publishes the release with its Homebrew cask. Your signing keys stay in your own accounts.</p>
 <div class="actions"><a class="button" href="${at(first.id)}">Start the tutorial</a><a href="${at("reference/security")}">How your keys are kept</a></div>
 </div>
 <img src="${LOGO_URI}" alt="">
@@ -61,7 +61,7 @@ export function homePage(nav: NavItem[]): string {
 <section class="trust">
 <h2>Your keys stay in your accounts</h2>
 <ul>
-<li><strong>No tapster server</strong>tapster is a command you run and a GitHub Action that runs in your hub. Nothing else exists.</li>
+<li><strong>No tapster server</strong>tapster is a command you run and a GitHub Action that runs in your hub. The optional doorbell runs in your own Cloudflare account.</li>
 <li><strong>One place for keys</strong>Your Apple certificate, notary key and App key are secrets of your hub. Only its main branch can open them.</li>
 <li><strong>A stolen key is not enough</strong>Only you can create or move tags in your projects. The hub signs only drafts that your project's own workflow built.</li>
 </ul>
@@ -71,7 +71,7 @@ export function homePage(nav: NavItem[]): string {
 <h2>What it publishes</h2>
 <ul class="covers">
 <li><strong>Go tools</strong><span>built with GoReleaser</span></li>
-<li><strong>Bun tools</strong><span>compiled for every platform</span></li>
+<li><strong>Bun tools</strong><span>compiled for five platforms</span></li>
 <li><strong>Mac apps</strong><span>with Sparkle updates and a DMG</span></li>
 <li><strong>apt and dnf</strong><span>from your hub's GitHub Pages</span></li>
 <li><strong>Scoop</strong><span>for Windows builds</span></li>

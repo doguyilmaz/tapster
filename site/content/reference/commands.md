@@ -9,14 +9,13 @@ Run each command with `bunx @doguyilmaz/tapster <command>`. Every command takes 
 
 ## tapster init
 
-Run it in a clone of your hub. It sets the hub up. Each option below adds or changes one part of it. Each step can
-run again and skips what is done, so if `init` stops halfway, run it again. Every run also rewrites the hub workflow for
-the tapster that runs it; review the diff before you push.
+Run it in a clone of your hub. Each option below adds or changes one part of it. `init` and `init --workflow` also
+rewrite the hub workflow for the tapster that runs them; review the diff before you push.
 
 | Command | What it does |
 | --- | --- |
-| `init` | Protects the hub, creates its App, stores your Apple credentials and writes `tapster.yml`, the workflow and a README. See [Create the hub](/tutorial/hub). |
-| `init --every <minutes>` | Sets how often the hub looks for drafts. The default is 10 minutes for a public hub and 60 for a private one. |
+| `init` | Protects the hub, creates its App, stores your Apple credentials and writes `tapster.yml`, the workflow and a README. Each step can run again and skips what is done. See [Create the hub](/tutorial/hub). |
+| `init --every <minutes>` | Sets how often the hub looks for drafts: 5, 6, 10, 12, 15, 20 or 30 minutes. Longer intervals must be 60 minutes times a divisor of 24. The default is 10 for a public hub and 60 for a private one. |
 | `init --workflow` | Rewrites the hub workflow, pinned to the tapster that runs the command. See [Upgrade tapster](/guides/upgrade). |
 | `init --tapster <commit>` | Pins the workflow to a specific tapster commit. Goes with `init` or `init --workflow`. |
 | `init --sparkle <label> [--account <account>]` | Stores a Sparkle key from your login keychain in the hub. See [Mac apps with Sparkle](/guides/sparkle). |
@@ -26,7 +25,7 @@ the tapster that runs it; review the diff before you push.
 | `init --rotate app` | Stores a new private key for the hub's App. |
 | `init --rotate certificate` | Stores a new Developer ID certificate. |
 | `init --rotate notary` | Stores a new App Store Connect API key. |
-| `init --rotate doorbell` | Gives the doorbell a new key and redeploys it with the hub's version and schedule. |
+| `init --rotate doorbell` | Gives the doorbell a new key and redeploys it with the tapster you run and the hub's schedule. |
 | `init --rotate linux` | Makes a new Linux key. The old one keeps signing next to it. |
 | `init --rotate linux --finish` | Stops signing with the previous Linux key. |
 

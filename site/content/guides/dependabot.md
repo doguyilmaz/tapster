@@ -17,7 +17,10 @@ bunx @doguyilmaz/tapster add --allow-dependabot
 ```
 
 The rules then leave branches named `dependabot/...` open. The hub entry gets `protection: dependabot`, so the hub
-accepts that opening only where you wrote it down.
+accepts that opening only where you wrote it down. If the project is already in the hub, add `protection: dependabot` to its entry in
+`tapster.yml` yourself. Otherwise the hub refuses the project.
+
+Running `tapster add` again later keeps these branches open.
 
 > [!WARN]
 > Those branches are open to anything with write access to the project, the hub's App included. Someone with a stolen

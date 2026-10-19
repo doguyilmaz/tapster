@@ -18,16 +18,24 @@ command again.
 
 ## 1. The hub is protected
 
-tapster creates a `tapster` environment in the hub that only the `main` branch can open. It adds a ruleset that keeps
-`main` from being deleted or force-pushed, by anyone including you. Your keys go into that environment. Nothing to
-answer here.
+Nothing to answer here. tapster:
+
+- creates a `tapster` environment that only the `main` branch can open. Your keys go into it;
+- adds a ruleset that keeps `main` from being deleted or force-pushed, by anyone including you;
+- lets the hub's workflows run only GitHub's own actions and tapster's, each pinned by commit;
+- makes the workflows' default token read-only.
+
+> [!WARN]
+> Bringing an existing tap? Its other workflows stop running if they use actions from anyone else, such as the
+> `tests.yml` and `publish.yml` that `brew tap-new` writes. The hub does not need them; delete them.
 
 ## 2. macOS or not
 
 > [!SEE]
 > `Will this hub sign software for macOS (Mac apps or CLI tools with macOS builds)? [Y/n]`
 
-Press Enter for yes. Answer `n` if you skipped the Apple step. tapster then leaves out the Apple parts below.
+Press Enter for yes. Answer `n` if you skipped the Apple step. tapster then leaves out the Apple parts below, and
+`tapster add` later leaves the macOS builds out of each project's entry.
 
 ## 3. The App is created
 

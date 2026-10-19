@@ -15,9 +15,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-> [!SEE]
-> GitHub accepts the tag and notes **Bypassed rule violations**. That is your admin right at work: the project's rules
-> let only you tag.
+GitHub accepts the tag with the note you saw in [step 4](/tutorial/project#2-the-project-is-protected).
 
 ## 2. The project opens a draft
 
@@ -73,13 +71,8 @@ codesign -dv --verbose=2 "$(command -v my-tool)" 2>&1 | grep Authority
 
 ## If the hub does not publish
 
-When the hub refuses a draft, its run turns red once and the reason appears at the top of the draft's release notes:
-
-> [!SEE]
-> **tapster will not publish this draft:** followed by the reason.
-
-Fix the cause. If the files themselves are wrong, delete the draft and run the project's release workflow again. A
-draft that only waits, for example for an upload or an attestation, gets a note after an hour. See [Troubleshooting](/reference/troubleshooting) for each reason.
+The hub writes the reason at the top of the draft's release notes. See [Troubleshooting](/reference/troubleshooting#on-a-draft)
+for each reason.
 
 Then check the whole setup:
 

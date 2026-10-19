@@ -52,7 +52,8 @@ and have no release yet, tapster cannot guess the names: run `tapster add` again
    [Add a project](/tutorial/project).
 2. Push the next tag. GoReleaser opens a draft and the hub publishes it.
 3. The hub writes `Casks/mytool.rb`. If GoReleaser wrote the cask to the same tap before, the hub's version replaces
-   it. Users notice nothing but a new version.
+   it. If GoReleaser wrote a formula (`brews`), delete `Formula/mytool.rb` from the tap: Homebrew installs a formula
+   before a cask of the same name.
 4. Once the release is published, delete the secrets the project no longer needs. `tapster add` lists them:
 
    ```sh

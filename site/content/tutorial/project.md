@@ -41,8 +41,9 @@ Every release workflow also gets a step named **Ring the tapster hub**. It does 
 > included, cannot. Push release tags yourself; GitHub then notes "Bypassed rule violations", which is your admin
 > right at work.`
 
-This is what makes a stolen App key useless: it cannot tag code for your hub to sign. Two kinds of projects need an
-option here:
+This keeps a stolen App key from tagging code for your hub to sign. The rules cover every branch too: only you can push
+to the project now, so every push of yours shows the same note. Collaborators and bots such as Renovate or
+release-please can no longer push branches. Two cases have an option:
 
 - A workflow that pushes its own release tags needs `--auto-tag`. See [Releases tagged by a workflow](/guides/auto-tag).
 - Dependabot opens its pull requests from branches, which the rules now close. See [Dependabot](/guides/dependabot).

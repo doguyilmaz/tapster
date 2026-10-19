@@ -51,10 +51,9 @@ the protected environment that holds your keys. A private hub needs GitHub Pro. 
 
 ## Where things run
 
-There are only two places:
-
 1. **Your computer** runs the `tapster` command while you set things up.
 2. **Your hub's GitHub Actions** run tapster for each release.
+3. **Your Cloudflare account** runs the optional [doorbell](/guides/doorbell), which only starts the hub.
 
 > [!KEYS]
 > tapster has no server. Your keys go from your computer to your own GitHub repository. If you add the doorbell, one key

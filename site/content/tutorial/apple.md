@@ -53,5 +53,5 @@ The certificate and its private key are now in your login keychain.
 > `57246542-96fe-1a63-e053-0824d011072a`.
 
 > [!KEYS]
-> Keep both files on your Mac for the next step. tapster reads each one once and stores it as a secret of your hub. Keep
-> a backup somewhere offline: GitHub never shows a secret again.
+> Keep both files on your Mac for the next step. tapster reads each one once and stores it as a secret of your own hub.
+> They go nowhere else. Keep a backup somewhere offline: GitHub never shows a secret again.

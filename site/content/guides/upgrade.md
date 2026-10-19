@@ -45,9 +45,9 @@ bunx @doguyilmaz/tapster@<version> doctor
 ```
 
 > [!SEE]
-> Every check reports ok. A finding names the command that fixes it.
+> Every check reports `ok`.
 
 ## Coming from a version before 1.0
 
 Since 1.0 the hub refuses a project until its branches and tags are protected. Run `tapster add` once in a clone of each
-project. It only adds what is missing.
+project. It only adds what is missing and keeps what an earlier `--auto-tag` or `--allow-dependabot` opened.

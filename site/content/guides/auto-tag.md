@@ -5,9 +5,9 @@ order: 6
 description: Let a project's own workflow push release tags while its tags stay protected.
 ---
 
-`tapster add` protects each project so that only you can create or move its tags. That stops a stolen App key from
-tagging code for your hub to sign. It also stops a workflow that tags releases by itself, for example one that picks
-the next version after each merge to `main`.
+[`tapster add` protects each project](/tutorial/project#2-the-project-is-protected) so that only you can create or
+move its tags. That also stops a workflow that tags releases by itself, for example one that picks the next version
+after each merge to `main`.
 
 `--auto-tag` gives such a project one key that may push tags. Only its default branch can use it.
 
@@ -24,7 +24,7 @@ tapster then:
 1. creates a `release` environment in the project that only the default branch may use;
 2. makes an SSH key, stores its private half as the `TAPSTER_TAG_KEY` secret of that environment and adds the public
    half as a deploy key named `tapster tags`;
-3. lets deploy keys pass the project's tag rules.
+3. lets deploy keys pass the project's rules for tags and branches.
 
 > [!KEYS]
 > The tag key lives only in the project's `release` environment. tapster makes it in a temporary folder and deletes the
@@ -32,7 +32,7 @@ tapster then:
 
 > [!NOTE]
 > Environments need a public project or GitHub Pro. If the project already has other deploy keys with write access,
-> tapster names them: they can now tag too. Remove the ones you do not need.
+> tapster names them: they can now tag and push to any branch too. Remove the ones you do not need.
 
 ## Push tags with the key
 
@@ -54,3 +54,5 @@ A tag pushed with this key starts the project's release workflow, which a tag pu
 
 To replace the key, delete the deploy key `tapster tags` in the project's settings and run `tapster add --auto-tag`
 again.
+
+Running `tapster add` again later keeps this. You do not have to pass `--auto-tag` each time.

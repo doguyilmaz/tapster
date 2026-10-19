@@ -6,7 +6,7 @@ description: What the messages you are most likely to meet mean and what to do.
 ---
 
 tapster says what went wrong and, on the next line, what to do. This page adds the why for the messages people meet
-most. Start with `tapster doctor` in your hub clone: it checks the whole setup and names the fix for each finding.
+most. Start with [`tapster doctor`](/reference/commands#tapster-doctor) in your hub clone.
 
 ## In your terminal
 
@@ -34,6 +34,8 @@ These stop a whole run. The run's summary names them.
 | Message | What to do |
 | --- | --- |
 | `the hub changed in ways only you may change it: ...` | Someone else or a bot changed a file on `main` after your last push. Review those commits, revert what you did not make and push. Your push marks `main` as reviewed. If you did not expect them, rotate the App key. |
+| `the App is not installed on any of your repositories` | Install the App on your projects. `tapster add` prints the link for each. |
+| `GitHub shows no push by <you> to main` | Push a commit to the hub's `main` yourself. The hub runs only after a push of yours. |
 | `the App is installed on the hub` | Remove the hub from the App's repositories at [github.com/settings/installations](https://github.com/settings/installations). The App must reach your projects only. |
 | `tapster runs only from .github/workflows/tapster.yml on the hub's main branch` | Start the **tapster** workflow on `main`. Other workflows and branches never get the keys. |
 | `the hub workflow was written for another tapster version` | Run `tapster init --workflow` in the hub clone, then commit and push. |
@@ -46,7 +48,7 @@ These stop one project. The others still publish:
 | `you/project is not protected against a stolen App key: ...` | Run `tapster add` in the project. It restores the rules. |
 | `<name> ships macOS code, but this hub has no Apple credentials` | Run `tapster init --rotate certificate` and `tapster init --rotate notary`. |
 | `the Developer ID certificate expired on <date>` | Create a new certificate, then run `tapster init --rotate certificate`. |
-| `<name> is invalid: ...` | Fix the entry in `tapster.yml`. See [tapster.yml](/reference/config). |
+| `<name> is invalid: ...` or `<name>: ...` | Fix the entry in `tapster.yml`. See [tapster.yml](/reference/config). |
 
 ## On a draft
 

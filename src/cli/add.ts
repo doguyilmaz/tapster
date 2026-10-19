@@ -406,6 +406,7 @@ export async function add(args: string[]): Promise<void> {
     } catch (e) {
       if (!(e instanceof TapsterError)) throw e;
       console.log(`- the hub entry was not proposed: ${e.reason}. ${e.fix}\n  The entry for ${hub}'s tapster.yml:\n${entry}`);
+      if (opts.dependabot && e.reason.includes("is already in")) console.log("  Its existing entry needs protection: dependabot, or the hub refuses the project.");
     }
   } else console.log(`- no hub entry yet: ${reason}`);
   const bell = await hubDoorbell(gh, hub);
