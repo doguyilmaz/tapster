@@ -380,18 +380,22 @@ async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean)
     await runPath(gpg, "gpg", ["--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-gen-key", `${hub.split("/")[0]} tapster (${hub})`, "rsa4096", "sign", "never"], { env });
     const key = (await runPath(gpg, "gpg", ["--batch", "--armor", "--export-secret-keys"], { env })).stdout;
     const fingerprint = (await runPath(gpg, "gpg", ["--batch", "--with-colons", "--list-secret-keys"], { env })).stdout.split("\n").find((l) => l.startsWith("fpr:"))?.split(":")[9];
+    let old: string | null = null;
     if (rotate) {
       if (store.kind === "keychain") console.log("macOS asks whether tapster may read the previous key from your keychain; choose Allow.");
-      const old = await store.read(linuxRef(hub));
-      if (old) {
-        await replaceLocal(store, linuxRef(hub, true), old);
-        await setEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS", old);
-        console.log("The previous key keeps signing next to the new one, so apt and dnf users can fetch the new key. Once they have, run tapster init --rotate linux --finish.");
-      } else console.log("The previous key is not in your keychain, so apt and dnf users must fetch the new key before they can update.");
+      old = await store.read(linuxRef(hub));
     }
-    await replaceLocal(store, linuxRef(hub), key);
+    const pending = { ...linuxRef(hub), account: `${hub} new`, label: `tapster Linux key for ${hub} (new)` };
+    await store.remove(pending);
+    await store.save(pending, key);
     await setEnvSecret(hub, "TAPSTER_LINUX_KEY", key);
+    if (old) await setEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS", old);
+    if (old) await replaceLocal(store, linuxRef(hub, true), old);
+    await replaceLocal(store, linuxRef(hub), key);
+    await store.remove(pending);
     console.log(`Stored the Linux key (fingerprint ${fingerprint}) in the hub and in your ${store.kind === "keychain" ? "login keychain" : "keyring"} as "tapster-linux-key".`);
+    if (old) console.log("The previous key keeps signing next to the new one, so apt and dnf users can fetch the new key. Once they have, run tapster init --rotate linux --finish.");
+    else if (rotate) console.log("The previous key is not in your keychain, so apt and dnf users must fetch the new key before they can update.");
   } finally {
     await runPath(join(gpg, "..", "gpgconf"), "gpgconf", ["--kill", "all"], { env, allowFail: true }).catch(() => undefined);
     await rm(home, { recursive: true, force: true });
