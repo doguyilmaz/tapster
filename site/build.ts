@@ -36,7 +36,7 @@ function callouts(id: string, html: string): string {
   return html.replace(/<blockquote>\n<p>\[!([A-Z]+)\](?:<\/p>\n|\s*)([\s\S]*?)<\/blockquote>/g, (_, kind: string, rest: string) => {
     const c = CALLOUTS[kind];
     if (!c) throw new Error(`${id}: unknown callout ${kind}`);
-    return `<aside class="callout ${c[0]}"><span class="label">${c[1]}</span>${rest.startsWith("<") ? rest : `<p>${rest}`}</aside>`;
+    return `<aside class="callout ${c[0]}"><span class="label">${c[1]}</span>${/^<(p|pre|ul|ol|table|blockquote|h[1-6])[\s>]/.test(rest) ? rest : `<p>${rest}`}</aside>`;
   });
 }
 

@@ -16,6 +16,7 @@ test("marked quotes become callouts and unknown marks fail the build", () => {
   const [page] = renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "> [!SEE]\n> `tapster: done`\n")]);
   expect(page!.html).toContain('<aside class="callout see"><span class="label">You should see</span>');
   expect(page!.html).not.toContain("[!SEE]");
+  expect(page!.html).toContain('<span class="label">You should see</span><p><code>tapster: done</code></p>');
   expect(() => renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "> [!TIP]\n> x\n")])).toThrow("guides/a: unknown callout TIP");
 });
 
