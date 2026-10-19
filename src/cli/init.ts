@@ -378,7 +378,7 @@ async function createSparkleKey(dir: string, hub: string, label: string): Promis
   const config = hubConfig(dir, hub);
   const users = config.packages.filter(isApp).filter((p) => p.sparkle?.key === label || p.sparkle?.next_key === label);
   if (users.length) {
-    throw new TapsterError(`${users.map((p) => p.name).join(", ")} already sign with the Sparkle key ${label}`, "A new key needs a new label. To change an app's key, follow the Sparkle key change in the README.");
+    throw new TapsterError(`${users.map((p) => p.name).join(", ")} already sign with the Sparkle key ${label}`, "A new key needs a new label. To change an app's key, follow Rotate a Sparkle key in the tapster docs (Mac apps with Sparkle).");
   }
   const store = requireStore("the Sparkle key");
   const ref = { service: "https://sparkle-project.org", account: label, label: "Private key for signing Sparkle updates" };
