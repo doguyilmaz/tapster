@@ -1,0 +1,38 @@
+name: release
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]
+permissions: {}
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions: { contents: write, id-token: write, attestations: write }
+    steps:
+      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+        with: { persist-credentials: false }
+      - uses: oven-sh/setup-bun@__SETUP_BUN_SHA__ # __SETUP_BUN_TAG__
+        with: { bun-version: 1.4.3 }
+      - run: bun install --frozen-lockfile
+      - name: Build every target
+        env: { TAG: "${{ github.ref_name }}" }
+        run: |
+          set -euo pipefail
+          v="${TAG#v}"
+          mkdir -p dist
+          for t in darwin-arm64 darwin-x64 linux-arm64 linux-x64 windows-x64; do
+            exe=__NAME__; [ "${t%%-*}" = windows ] && exe=__NAME__.exe
+            bun build __ENTRY__ --compile --target="bun-$t" --outfile "dist/$t/$exe"
+          done
+          cd dist
+          for t in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
+            p="${t/x64/amd64}"
+            tar -C "$t" -czf "__NAME___${v}_${p/-/_}.tar.gz" __NAME__
+          done
+          (cd windows-x64 && zip -qX "../__NAME___${v}_windows_amd64.zip" __NAME__.exe)
+          sha256sum *.tar.gz *.zip > checksums.txt
+      - uses: actions/attest-build-provenance@__ATTEST_SHA__ # __ATTEST_TAG__
+        if: ${{ !github.event.repository.private }}
+        with: { subject-checksums: dist/checksums.txt }
+      - name: Hand the draft to the tapster hub
+        env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" }
+        run: gh release create "$TAG" dist/*.tar.gz dist/*.zip dist/checksums.txt --draft --verify-tag --generate-notes --title "$TAG" $( [ "${TAG#*-}" != "$TAG" ] && echo --prerelease )

@@ -1,0 +1,30 @@
+name: tapster
+description: Sign, notarize and publish releases from a Homebrew tap hub
+inputs:
+  mode:
+    description: check | fetch | sign | publish | render | cleanup
+    required: true
+  work:
+    description: Work list from the check job (JSON)
+    required: false
+    default: "[]"
+  package:
+    description: Limit the check to one package
+    required: false
+    default: ""
+  config:
+    description: Path of the hub config
+    required: false
+    default: tapster.yml
+outputs:
+  work:
+    description: Work list (JSON, check mode)
+  render:
+    description: "true when the render job has something to do (check mode)"
+  attest:
+    description: "true when publish wrote archives to attest"
+  attest-path:
+    description: Glob of the archives to attest
+runs:
+  using: node24
+  main: dist/index.js

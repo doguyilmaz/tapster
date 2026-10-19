@@ -1,0 +1,10 @@
+version: 1
+tap: doguyilmaz/tapster-test
+packages:
+  - name: fixture-linux
+    repo: doguyilmaz/tapster-fixture
+    binaries: [fixture]
+    attestation: "off"
+    description: Leak test fixture
+    assets:
+      linux-amd64: "fixture_{version}_linux_amd64.tar.gz"

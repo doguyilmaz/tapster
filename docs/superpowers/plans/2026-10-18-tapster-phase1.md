@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A GitHub Action plus CLI that makes the public hub `doguyilmaz/homebrew-tap` sign, notarize and publish the
-releases of Go and Bun CLIs from their draft releases, and write their casks and Scoop manifests. Project repositories
+releases of Go and Bun CLIs from their draft releases and write their casks and Scoop manifests. Project repositories
 hold no credentials.
 
 **Architecture:**
@@ -46,7 +46,7 @@ hold no credentials.
   it from `process.env`. Every derived secret value is passed to `register()` before use.
 - Action code never calls `console.*`. All logging goes through `src/report.ts`, which scrubs registered values. The
   CLI (`src/cli/`) may print, but never secrets.
-- Errors carry `reason` and `fix` (`TapsterError`). They never include request bodies, argv, URLs with query strings,
+- Errors carry `reason` and `fix` (`TapsterError`). They never include request bodies, argv, URLs with query strings
   or raw tool output that was not scrubbed.
 - The action refuses to run unless `RUNNER_ENVIRONMENT === "github-hosted"`.
 
@@ -63,11 +63,11 @@ code:
    Task 6.
 2. **Renamed assets.** GitHub renames assets with spaces or odd characters, so a configured name may never appear.
    The draft must be reported as waiting, with the missing name, never processed half-way. Task 10.
-3. **No macOS assets.** A package with only Linux or Windows assets has nothing to sign. Sign must skip notarization,
+3. **No macOS assets.** A package with only Linux or Windows assets has nothing to sign. Sign must skip notarization
    and publish must still swap `checksums.txt` and publish. Task 17.
 4. **More than 100 releases.** A drafted release must still be found, so pagination is needed. Task 7.
 5. **Notarization timeout.** A submission still "In Progress" after the timeout is a failure that leaves the draft
-   untouched, and the next run submits again. Task 13.
+   untouched and the next run submits again. Task 13.
 
 ## File Structure
 
@@ -127,7 +127,7 @@ leave a written record.
 
 **Interfaces:**
 - Produces: decisions later tasks read from `docs/spikes.md`: the Bun entitlement set, the staging prefix, the digest
-  field, `deployment: false`, Linux casks, `tap_migrations`, the manifest without a webhook, and the `.p12` re-wrap.
+  field, `deployment: false`, Linux casks, `tap_migrations`, the manifest without a webhook and the `.p12` re-wrap.
 
 - [ ] **Step 1: Create private scratch repositories**
 
@@ -156,7 +156,7 @@ codesign --force --options runtime --timestamp --entitlements ent.plist \
 ./a && codesign --verify --strict --verbose=2 a
 ```
 Expected: `{"ok":true,...}` and `valid on disk`. If the binary crashes, add `disable-executable-page-protection`, then
-the other keys one at a time, and record the smallest working set.
+the other keys one at a time and record the smallest working set.
 
 - [ ] **Step 3: Draft assets with staging names.** Use the user's token; the semantics match an App token with
   `contents: write`.
@@ -183,7 +183,7 @@ Record any difference. If GitHub rewrites the prefix, pick a prefix it keeps and
 - [ ] **Step 4: Environment with `deployment: false`.** In `doguyilmaz/tapster-spike`:
   - create environment `t` with a `main` branch policy and secret `S=hello`;
   - add a workflow that has one job with `environment: { name: t, deployment: false }` printing `[ -n "$S" ] && echo has-secret`;
-  - dispatch it on `main`, and on a branch `other`.
+  - dispatch it on `main` and on a branch `other`.
 
 ```bash
 gh api -X PUT repos/doguyilmaz/tapster-spike/environments/t -F 'deployment_branch_policy[protected_branches]=false' -F 'deployment_branch_policy[custom_branch_policies]=true'
@@ -256,7 +256,7 @@ gh repo delete doguyilmaz/tapster-spike --yes && gh repo delete doguyilmaz/homeb
   `.github/workflows/ci.yml`, `templates/pins.json`, `tests/smoke.test.ts`
 
 **Interfaces:**
-- Produces: the scripts `bun test`, `bun run typecheck` and `bun run build:action`, and the `dist/` check in CI.
+- Produces: the scripts `bun test`, `bun run typecheck` and `bun run build:action` and the `dist/` check in CI.
 
 - [ ] **Step 1: Create the GitHub repository and the package**
 
@@ -1271,7 +1271,7 @@ export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 const HINTS: Record<number, string> = {
   401: "The credential was rejected; rotate it with tapster init --rotate.",
   403: "Access denied: check the App's permissions and that it is installed on this repository.",
-  404: "Not found, or the App is not installed on this repository.",
+  404: "Not found or the App is not installed on this repository.",
   409: "GitHub reported a conflict; the next run retries.",
   422: "GitHub rejected the request.",
 };
@@ -2334,7 +2334,7 @@ export async function openKeychain(p12Base64: string, p12Password: string, expec
     const found = parseIdentities((await run("security", ["find-identity", "-v", "-p", "codesigning", path])).stdout);
     const id = found.find((i) => i.name.startsWith("Developer ID Application:"));
     if (!id) throw new TapsterError("the certificate holds no valid Developer ID Application identity", "Export the Developer ID Application certificate with its private key as .p12; tapster init --rotate certificate.");
-    if (id.teamId !== expectedTeamId) throw new TapsterError(`the certificate belongs to team ${id.teamId}, not ${expectedTeamId}`, "Use the team's certificate, or update TAPSTER_TEAM_ID with tapster init --rotate certificate.");
+    if (id.teamId !== expectedTeamId) throw new TapsterError(`the certificate belongs to team ${id.teamId}, not ${expectedTeamId}`, "Use the team's certificate or update TAPSTER_TEAM_ID with tapster init --rotate certificate.");
     return { path, identity: id.sha1, teamId: id.teamId, close };
   } catch (e) {
     await close();
@@ -2636,7 +2636,7 @@ export async function verifyAttestation(file: string, pkg: PackageConfig, tag: s
   if (outcome === "failed") {
     throw new TapsterError(
       `${basename(file)} has no valid build attestation from ${pkg.repo}/.github/workflows/${pkg.workflow} at ${tag}`,
-      "Attest the archives in the project's release workflow (tapster add sets it up), or set attestation: off for this package.",
+      "Attest the archives in the project's release workflow (tapster add sets it up) or set attestation: off for this package.",
     );
   }
   return outcome;
@@ -3907,7 +3907,7 @@ jobs:
 - [ ] **Step 12: Run the tests, build the bundle**
 
 Run: `bun test && bun run typecheck && bun run build:action`
-Expected: all tests PASS, no type errors, and `dist/index.js` is written. Then:
+Expected: all tests PASS, no type errors and `dist/index.js` is written. Then:
 `node -e "import('./dist/index.js')"` with `RUNNER_ENVIRONMENT` unset prints a "tapster runs only on GitHub-hosted
 runners" error and exits non-zero. That proves the bundle loads in plain Node.
 
@@ -4409,7 +4409,7 @@ export async function init(args: string[]): Promise<void> {
   if (rotate === "app") return createApp(hub.split("/")[0]!, hub, true);
   if (rotate === "certificate") return storeCertificate(hub);
   if (rotate === "notary") return storeNotary(hub);
-  if (args.length) throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, or tapster init --rotate app|certificate|notary.");
+  if (args.length) throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init or tapster init --rotate app|certificate|notary.");
   await protectHub(gh, hub);
   await createApp(hub.split("/")[0]!, hub, false);
   await storeCertificate(hub);
@@ -4678,7 +4678,7 @@ export async function add(_args: string[]): Promise<void> {
     const g = adaptGoreleaser(await readFile(join(dir, goreleaser), "utf8"));
     await writeFile(join(dir, goreleaser), g.text);
     const flowPath = join(dir, ".github/workflows/release.yml");
-    if (!existsSync(flowPath)) throw new TapsterError("no .github/workflows/release.yml found", "tapster expects the release workflow at that path, or set workflow: in the hub entry.");
+    if (!existsSync(flowPath)) throw new TapsterError("no .github/workflows/release.yml found", "tapster expects the release workflow at that path or set workflow: in the hub entry.");
     const w = adaptReleaseWorkflow(await readFile(flowPath, "utf8"), pinsJson["actions/attest-build-provenance"].sha, pinsJson["actions/attest-build-provenance"].tag);
     await writeFile(flowPath, w.text);
     for (const n of [...g.notes, ...w.notes]) console.log(`- ${n}`);
@@ -5052,7 +5052,7 @@ jobs:
 ```
 
 The `fetch` step on the fixture finds `v0.0.1` ready and `v0.0.2` invalid. For `v0.0.3`, the check marks it ready (the
-checksums match), and fetch rejects the archive. The masked run therefore covers the readiness, attestation (skipped,
+checksums match) and fetch rejects the archive. The masked run therefore covers the readiness, attestation (skipped,
 private), checksum and archive failure paths with a real token in play.
 
 `readSecret` registers each value with the runner, which then masks it exactly. The plain run therefore catches what
@@ -5069,11 +5069,11 @@ Run: `bun test tests/scan.test.ts`
 Expected: PASS.
 
 Then push the branch and open a pull request. Expected: in the `leak` workflow, `plain` and `masked` show failed
-steps (by design, with `continue-on-error`), and `scan` passes, printing `clean` for both jobs.
+steps (by design, with `continue-on-error`) and `scan` passes, printing `clean` for both jobs.
 
 - [ ] **Step 9: Prove the test can fail.** On a scratch branch, add `info(process.env.MACOS_SIGN_PASSWORD ?? "")` as
   the first line of `signMode` before `readSecret` is called. Push it. Expected: `scan` fails with
-  `LEAK plain line N: plain`, and with `LEAK masked line N: masked value printed`. Delete the branch.
+  `LEAK plain line N: plain` and with `LEAK masked line N: masked value printed`. Delete the branch.
 
 - [ ] **Step 10: Commit**
 
@@ -5101,7 +5101,7 @@ gh release create v0.1.0 --repo doguyilmaz/tapster --title v0.1.0 --notes "First
 ```
 
 - [ ] **Step 2: Test hub.** Create it and run `init` from the local checkout. The person clicks "Create GitHub App",
-  installs it on the two fixture projects from Step 3, and enters the real credentials.
+  installs it on the two fixture projects from Step 3 and enters the real credentials.
 
 ```bash
 gh repo create doguyilmaz/homebrew-tapster-test --private --clone ~/Developer/FORK/homebrew-tapster-test
@@ -5114,7 +5114,7 @@ private.
 
 - [ ] **Step 3: Fixture projects.**
   - **Go:** `doguyilmaz/tapster-e2e-go` has `main.go` printing its version, a `.goreleaser.yaml` building
-    darwin/linux/windows, and the standard release workflow.
+    darwin/linux/windows and the standard release workflow.
   - **Bun:** `doguyilmaz/tapster-e2e-bun` has `src/cli.ts` with a `bin` entry.
 
   In each clone run `bun ~/Developer/FORK/tapster/src/cli/main.ts add`, commit, push and tag `v0.0.1`. Paste the
@@ -5135,7 +5135,7 @@ gh api repos/doguyilmaz/homebrew-tapster-test/contents/Casks --jq '.[].name'
 Expected:
 - both releases are published;
 - `explicit requirement satisfied` and `source=Notarized Developer ID` for both binaries;
-- `Casks/` lists both casks, and `bucket/` holds the Go one.
+- `Casks/` lists both casks and `bucket/` holds the Go one.
 
 - [ ] **Step 5: Scan the real run's logs.**
 
@@ -5146,7 +5146,7 @@ Expected: every job `clean`.
 
 - [ ] **Step 6: Failure paths with real credentials.**
   - Set `MACOS_NOTARY_KEY_ID` in the test hub to a wrong value, tag `v0.0.2` on the Go fixture and run the hub.
-    Expected: the item fails with "notarization …" or a 401 reason, the `v0.0.2` draft is untouched, and Step 5's scan
+    Expected: the item fails with "notarization …" or a 401 reason, the `v0.0.2` draft is untouched and Step 5's scan
     is clean.
   - Restore the value with `init --rotate notary` and run again. Expected: `v0.0.2` publishes.
 
@@ -5156,12 +5156,12 @@ Expected: every job `clean`.
   3. cancel the run (`gh run cancel`) once `tapster-staging--` assets appear on the draft;
   4. dispatch again.
 
-  Expected: the second run resumes, publishes, and leaves no staging assets.
+  Expected: the second run resumes, publishes and leaves no staging assets.
 
 - [ ] **Step 8: Record and publish.**
   1. Write `docs/e2e.md` with each step's command, observed output (no secrets) and run links.
   2. Rewrite `README.md` for users: what tapster does, a link to the spec's diagram, `init`, `add`, `doctor`, the
-     security model in plain words, and the limits (signing needs macOS runners; casks cannot point at private
+     security model in plain words and the limits (signing needs macOS runners; casks cannot point at private
      projects).
   3. Make the repository public:
      ```bash
@@ -5180,7 +5180,7 @@ Expected: every job `clean`.
 ### Task 23: Migrate the projects
 
 **Files:**
-- Modify (in other repositories): the hub `doguyilmaz/homebrew-tap`, `aims`, `konvoy`, `dothaven`, and later `ebb`
+- Modify (in other repositories): the hub `doguyilmaz/homebrew-tap`, `aims`, `konvoy`, `dothaven` and later `ebb`
   and `lockstep`
 
 **Interfaces:**
@@ -5198,12 +5198,12 @@ Expected: every job `clean`.
 - [ ] **Step 2: aims** (Go, Scoop).
   1. In a clone, run `bunx @doguyilmaz/tapster add`.
   2. Review `git diff`: `notarize`, `homebrew_casks` and `scoops` are gone, `release.draft: true` is set, the
-     attestation step is added, and the secrets are removed from the workflow.
+     attestation step is added and the secrets are removed from the workflow.
   3. Keep the npm publish job as it is. It runs after GoReleaser and publishes the platform binaries. Point it at the
      release only after the hub publishes, by moving it to a workflow triggered `on: release: types: [published]`
      that downloads the signed archives with `gh release download`.
   4. Commit and push.
-  5. Paste the printed entry into the hub's `tapster.yml`, and add the existing `completions` and `description`.
+  5. Paste the printed entry into the hub's `tapster.yml` and add the existing `completions` and `description`.
   6. Release `v0.1.6`.
 
   Expected:
@@ -5216,7 +5216,7 @@ Expected: every job `clean`.
 - [ ] **Step 3: konvoy** (Bun).
   1. `tapster add` writes a fresh `release.yml`. konvoy's current workflow also builds the docs site and verifies
      itself.
-  2. Merge by hand: keep konvoy's verify and pages jobs, and replace only its build, sign and tap jobs with the
+  2. Merge by hand: keep konvoy's verify and pages jobs and replace only its build, sign and tap jobs with the
      template's single build job.
   3. The asset names change (versioned names). Paste the printed hub entry.
   4. Release `v0.5.1` and verify as in Step 2.
@@ -5237,7 +5237,7 @@ Expected: `doctor` all `ok` for these three.
 
 - [ ] **Step 6: ebb and lockstep, once the person has made them public.**
   1. Run Step 2 for each.
-  2. Their casks already exist from GoReleaser, and tapster takes them over from the first release it publishes.
+  2. Their casks already exist from GoReleaser and tapster takes them over from the first release it publishes.
   3. Then delete their old secrets as in Step 5.
 
 - [ ] **Step 7: Record.** Commit the hub changes. In the tapster repo, note the migration result in `docs/e2e.md`.
