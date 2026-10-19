@@ -131,7 +131,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
   linux-build:
     needs: [check, sign]
-    if: ${{ !cancelled() && needs.check.result == 'success' && needs.check.outputs.linux == 'true' }}
+    if: ${{ !cancelled() && needs.check.outputs.linux == 'true' }}
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     outputs:

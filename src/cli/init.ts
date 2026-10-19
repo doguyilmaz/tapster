@@ -2,7 +2,7 @@ import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type HubConfig, isApp, parseConfig } from "../config";
+import { type HubConfig, isApp, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import { GitHub } from "../github";
 import { decodeSparkleKey } from "../sparkle-key";
@@ -257,7 +257,7 @@ export function pinChange(before: string | null, after: string): string {
 }
 
 export function patchSparkleEnv(flow: string, labels: string[]): string {
-  const step = /(\n\s+with: \{ mode: sparkle \}\n\s+env: ).*\n/;
+  const step = /(\n\s+with: \{ mode: sparkle(?:, template: \d+)? \}\n\s+env: ).*\n/;
   if (!step.test(flow)) throw new TapsterError("the hub workflow has no sparkle step", "Run tapster init --workflow to rewrite it from the template.");
   return flow.replace(step, (_, head: string) => `${head}${sparkleEnv(labels)}\n`);
 }
@@ -265,7 +265,14 @@ export function patchSparkleEnv(flow: string, labels: string[]): string {
 function hubConfig(dir: string, hub: string): HubConfig {
   const path = join(dir, "tapster.yml");
   if (!existsSync(path)) throw new TapsterError("tapster.yml is missing", "Run tapster init in the hub first.");
-  return parseConfig(readFileSync(path, "utf8"), hub.split("/")[0]!);
+  const { config, invalid } = parseHub(readFileSync(path, "utf8"), hub.split("/")[0]!);
+  for (const i of invalid) console.log(`note: ${i.name} in tapster.yml is invalid and left out: ${i.reason}`);
+  return config;
+}
+
+export function hubLabels(dir: string, owner: string): string[] {
+  const path = join(dir, "tapster.yml");
+  return existsSync(path) ? sparkleLabels(parseHub(readFileSync(path, "utf8"), owner).config) : [];
 }
 
 const FLOW = ".github/workflows/tapster.yml";
@@ -418,7 +425,7 @@ async function writeFiles(gh: GitHub, dir: string, hub: string, flag: string | n
   await write("tapster.yml", `version: 1\ntap: ${tap}\npackages: []\n`);
   await write(".tapster/state.json", `${JSON.stringify({ version: 1, packages: {} }, null, 2)}\n`);
   await write("README.md", hubReadme.replaceAll("__TAP__", tap).replaceAll("__OWNER__", owner).replaceAll("__HUB__", hub));
-  await writeWorkflow(gh, dir, [], flag, schedule);
+  await writeWorkflow(gh, dir, hubLabels(dir, owner), flag, schedule);
 }
 
 async function askYes(question: string): Promise<boolean> {

@@ -56,3 +56,12 @@ test("rewriting the workflow names the old and the new pin", () => {
   expect(pinChange(null, next)).toBe("tapster v1.1.0 (bbbbbbb)");
   expect(pinChange(flow, flow)).toBe(`tapster v1.0.0 (${sha.slice(0, 7)}), unchanged`);
 });
+
+test("the sparkle step of the real template is found and patched", async () => {
+  const { fillWorkflow } = await import("../src/cli/init");
+  const pins = (await import("../templates/pins.json")).default;
+  const template = await Bun.file("templates/hub/tapster.yml").text();
+  const written = fillWorkflow(template, pins, { sha, tag: "v1.0.0" });
+  const patched = patchSparkleEnv(written, ["shared"]);
+  expect(patched).toBe(fillWorkflow(template, pins, { sha, tag: "v1.0.0" }, ["shared"]));
+});

@@ -41,8 +41,8 @@ test("a check that fails before writing outputs runs no later job", () => {
   const linux = flow.jobs["linux-build"]!;
   expect(sign!.if).toContain("needs.check.outputs.work != ''");
   expect(render!.if).toContain("needs.check.outputs.render == 'true'");
-  expect(linux.if).toContain("needs.check.result == 'success'");
   expect(linux.if).toContain("needs.check.outputs.linux == 'true'");
+  expect(linux.if).not.toContain("needs.check.result");
 });
 
 test("check gets a read-only token to see who changed the hub", () => {
