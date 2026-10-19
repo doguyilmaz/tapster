@@ -40,6 +40,16 @@ function callouts(id: string, html: string): string {
   });
 }
 
+function tableLabels(html: string): string {
+  return html.replace(/<table>[\s\S]*?<\/table>/g, (table) => {
+    const heads = [...table.matchAll(/<th(?:\s[^>]*)?>([\s\S]*?)<\/th>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, ""));
+    return table.replace(/<tr>([\s\S]*?)<\/tr>/g, (row, cells: string) => {
+      let i = 0;
+      return `<tr>${cells.replace(/<td(\s[^>]*)?>/g, (_, attrs = "") => `<td data-label="${escape(heads[i++] ?? "")}"${attrs}>`)}</tr>`;
+    });
+  });
+}
+
 function links(page: Page, html: string, anchors: Map<string, Set<string>>): string {
   return html.replace(/<a href="([^"]*)"/g, (_, raw: string) => {
     const url = raw.replace(/&amp;/g, "&");
@@ -61,7 +71,7 @@ export function navOf(pages: NavItem[]): NavItem[] {
 export function renderPages(sources: Source[]): { id: string; html: string }[] {
   const pages = sources.map(parsePage);
   const nav = navOf(pages).map(({ id, title, section, order, step }) => ({ id, title, section, order, step }));
-  const rendered = pages.map((p) => ({ page: p, html: callouts(p.id, Bun.markdown.html(p.body, { headings: { ids: true }, noHtmlBlocks: true, noHtmlSpans: true })) }));
+  const rendered = pages.map((p) => ({ page: p, html: tableLabels(callouts(p.id, Bun.markdown.html(p.body, { headings: { ids: true }, noHtmlBlocks: true, noHtmlSpans: true }))) }));
   const anchors = new Map<string, Set<string>>([["", new Set()]]);
   for (const r of rendered) anchors.set(r.page.id, new Set([...r.html.matchAll(/<h[1-6] id="([^"]+)"/g)].map((x) => x[1]!)));
   return rendered.map(({ page, html }) => ({

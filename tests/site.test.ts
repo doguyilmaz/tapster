@@ -36,6 +36,11 @@ test("links to a heading on the same page are checked too", () => {
   expect(() => renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "See [below](#nothing).\n")])).toThrow("guides/a: link to #nothing, which has no such heading");
 });
 
+test("table cells carry their column's name for narrow screens", () => {
+  const [page] = renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "| Key | What it is |\n| --- | --- |\n| `a` | the **first** |\n")]);
+  expect(page!.html).toContain('<td data-label="Key"><code>a</code></td><td data-label="What it is">the <strong>first</strong></td>');
+});
+
 test("raw HTML in content stays text", () => {
   const [page] = renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "A <script>alert(1)</script> line.\n")]);
   expect(page!.html).not.toContain("<script>");

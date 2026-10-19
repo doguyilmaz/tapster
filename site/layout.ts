@@ -30,6 +30,9 @@ const CSS = `
 .layout > div { min-width: 0; }
 .menu { display: none; }
 .doc { max-width: 44rem; min-width: 0; }
+.doc table { display: block; overflow-x: auto; }
+.doc td code, .doc th code { overflow-wrap: normal; }
+.doc h2, .doc h3 { scroll-margin-top: 5rem; }
 .eyebrow { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin: 0 0 0.5rem; }
 .progress { display: flex; gap: 6px; margin: 0 0 1.6rem; }
 .progress span { height: 4px; flex: 1; border-radius: 2px; background: var(--line); }
@@ -43,6 +46,13 @@ const CSS = `
 .pager .next { grid-column: 2; text-align: right; }
 .foot { border-top: 1px solid var(--line); color: var(--muted); font-size: 0.88rem; padding: 1.6rem clamp(16px, 3vw, 32px); text-align: center; }
 .foot p { margin: 0.2rem 0; }
+@media (max-width: 600px) {
+  .doc table, .doc tbody, .doc tr, .doc td { display: block; }
+  .doc thead { display: none; }
+  .doc tr { border-bottom: 1px solid var(--line); padding: 0.6rem 0; }
+  .doc td { border: 0; padding: 0.15rem 0; }
+  .doc td[data-label]:not(:first-child)::before { content: attr(data-label) ": "; color: var(--muted); font-size: 0.85rem; }
+}
 @media (max-width: 860px) {
   .layout { grid-template-columns: minmax(0, 1fr); padding-top: 1rem; }
   .side { display: none; }

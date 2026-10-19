@@ -13,25 +13,29 @@ cd homebrew-tap
 bunx @doguyilmaz/tapster init
 ```
 
-`init` walks through five parts. Each part can run again and skips what is done, so if anything stops it, run the same
+`init` walks through five parts. Each part can run again and skips what is done. If anything stops it, run the same
 command again.
 
-## 1. macOS or not
+## 1. The hub is protected
+
+tapster creates a `tapster` environment in the hub that only the `main` branch can open. It adds a ruleset that keeps
+`main` from being deleted or force-pushed, by anyone including you. Your keys go into that environment. Nothing to
+answer here.
+
+## 2. macOS or not
 
 > [!SEE]
 > `Will this hub sign software for macOS (Mac apps or CLI tools with macOS builds)? [Y/n]`
 
 Press Enter for yes. Answer `n` if you skipped the Apple step. tapster then leaves out the Apple parts below.
 
-## 2. The hub is protected
-
-tapster creates a `tapster` environment in the hub that only the `main` branch can open. It adds a ruleset that keeps
-`main` from being deleted or force-pushed. Your keys go into that environment. Nothing to answer here.
-
 ## 3. The App is created
 
 The hub needs a GitHub App to write releases to your projects. tapster opens a page in your browser that shows the App
 and the permissions it asks for.
+
+> [!WAIT]
+> `tapster waits up to 30 minutes until GitHub sends you back. If no page opened, open the address above. Ctrl+C stops it.`
 
 1. Read the page and click **Continue to GitHub**.
 2. GitHub shows the same App. Click **Create GitHub App**.
@@ -49,10 +53,10 @@ tapster then opens the App's install page:
 4. Click **Install**.
 
 > [!WAIT]
-> `Waiting until the App is installed; tapster continues by itself once you choose Install.`
+> `Waiting up to 10 minutes until the App is installed; tapster continues by itself once you choose Install.`
 >
-> tapster checks every few seconds for up to 10 minutes. If you close the page without installing, it says so and moves
-> on. `tapster add` links to the install page for each project too.
+> tapster checks every few seconds. If you close the page without installing, it says so after 10 minutes and moves on.
+> `tapster add` prints the install link for each project too.
 
 ## 4. Your Apple credentials
 

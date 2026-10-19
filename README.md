@@ -50,8 +50,19 @@ newer release, see [Upgrade tapster](https://doguyilmaz.github.io/tapster/guides
 ## Docs
 
 - [Tutorial](https://doguyilmaz.github.io/tapster/tutorial/before/): from an empty tap to an installed release
-- [Commands](https://doguyilmaz.github.io/tapster/reference/commands/)
-- [Security](https://doguyilmaz.github.io/tapster/reference/security/)
+- Guides: [GoReleaser](https://doguyilmaz.github.io/tapster/guides/goreleaser/),
+  [Bun](https://doguyilmaz.github.io/tapster/guides/bun/),
+  [Mac apps with Sparkle](https://doguyilmaz.github.io/tapster/guides/sparkle/),
+  [apt and dnf](https://doguyilmaz.github.io/tapster/guides/linux/),
+  [the doorbell](https://doguyilmaz.github.io/tapster/guides/doorbell/),
+  [workflow tags](https://doguyilmaz.github.io/tapster/guides/auto-tag/),
+  [Dependabot](https://doguyilmaz.github.io/tapster/guides/dependabot/),
+  [key rotation](https://doguyilmaz.github.io/tapster/guides/rotate/),
+  [upgrades](https://doguyilmaz.github.io/tapster/guides/upgrade/)
+- Reference: [Commands](https://doguyilmaz.github.io/tapster/reference/commands/),
+  [tapster.yml](https://doguyilmaz.github.io/tapster/reference/config/),
+  [Security](https://doguyilmaz.github.io/tapster/reference/security/),
+  [Troubleshooting](https://doguyilmaz.github.io/tapster/reference/troubleshooting/)
 
 The design documents are in [docs/superpowers/specs](docs/superpowers/specs).
 

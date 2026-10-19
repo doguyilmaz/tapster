@@ -10,7 +10,8 @@ Run each command with `bunx @doguyilmaz/tapster <command>`. Every command takes 
 ## tapster init
 
 Run it in a clone of your hub. It sets the hub up. Each option below adds or changes one part of it. Each step can
-run again and skips what is done, so if `init` stops halfway, run it again.
+run again and skips what is done, so if `init` stops halfway, run it again. Every run also rewrites the hub workflow for
+the tapster that runs it; review the diff before you push.
 
 | Command | What it does |
 | --- | --- |
