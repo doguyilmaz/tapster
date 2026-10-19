@@ -187,11 +187,18 @@ export async function proposeEntry(gh: GitHub, hub: string, name: string, repo: 
   return pr.html_url;
 }
 
-export async function hubAppSlug(gh: GitHub, hub: string): Promise<string> {
+export async function hubFacts(gh: GitHub, hub: string): Promise<{ slug: string; apple: boolean }> {
   const vars = await hubEnv(gh, hub, "variables");
   const slug = vars.find((v) => v.name === "TAPSTER_APP_SLUG")?.value;
   if (!slug) throw new TapsterError(`${hub} has no App yet`, "Run tapster init in a clone of the hub first.");
-  return slug;
+  return { slug, apple: vars.some((v) => v.name === "TAPSTER_TEAM_ID") };
+}
+
+export function withoutMac(entry: string): string | null {
+  const lines = entry.split("\n").filter((l) => !/^ {6}darwin-[a-z0-9]+: /.test(l));
+  const at = lines.findIndex((l) => /^ {4}assets:\s*$/.test(l));
+  if (at >= 0 && !/^ {6}\S/.test(lines[at + 1] ?? "")) return null;
+  return lines.join("\n");
 }
 
 export async function installOnProject(gh: GitHub, slug: string, repo: string): Promise<string> {

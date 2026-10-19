@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { autoTagSteps, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubName, installLink, releaseSecrets, withEntry } from "../src/cli/hubpr";
+import { autoTagSteps, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubName, installLink, releaseSecrets, withEntry, withoutMac } from "../src/cli/hubpr";
 import { parseHub } from "../src/config";
 import { rulesetBodies } from "../src/rulesets";
 
@@ -164,11 +164,21 @@ test("old release secrets are the ones the hub replaces", () => {
 });
 
 test("add stops before touching the project when the hub has no App", async () => {
-  const { hubAppSlug } = await import("../src/cli/hubpr");
+  const { hubFacts } = await import("../src/cli/hubpr");
   const { GitHubError } = await import("../src/errors");
   const withVars = (variables: unknown[]) => ({ json: async () => ({ variables }) }) as never;
-  expect(await hubAppSlug(withVars([{ name: "TAPSTER_APP_SLUG", value: "tapster-o-tap" }]), "o/hub")).toBe("tapster-o-tap");
-  await expect(hubAppSlug(withVars([]), "o/hub")).rejects.toThrow("o/hub has no App yet");
+  expect(await hubFacts(withVars([{ name: "TAPSTER_APP_SLUG", value: "tapster-o-tap" }, { name: "TAPSTER_TEAM_ID", value: "ABCDE12345" }]), "o/hub")).toEqual({ slug: "tapster-o-tap", apple: true });
+  expect(await hubFacts(withVars([{ name: "TAPSTER_APP_SLUG", value: "tapster-o-tap" }]), "o/hub")).toEqual({ slug: "tapster-o-tap", apple: false });
+  await expect(hubFacts(withVars([]), "o/hub")).rejects.toThrow("o/hub has no App yet");
   const missing = { json: async () => { throw new GitHubError("not found", "check it", 404); } } as never;
-  await expect(hubAppSlug(missing, "o/hub")).rejects.toThrow("o/hub has no tapster environment yet");
+  await expect(hubFacts(missing, "o/hub")).rejects.toThrow("o/hub has no tapster environment yet");
+});
+
+test("a hub without Apple credentials gets entries without macOS builds", () => {
+  const entry = bunEntry("tool", "o/tool", "tool");
+  const linuxOnly = withoutMac(entry)!;
+  expect(linuxOnly).not.toContain("darwin");
+  expect(linuxOnly).toContain("linux-amd64");
+  expect(valid(`version: 1\ntap: o/tap\npackages:\n${linuxOnly}\n`).packages).toHaveLength(1);
+  expect(withoutMac("  - name: t\n    repo: o/t\n    binaries: [t]\n    assets:\n      darwin-arm64: \"t.tar.gz\"\n    scoop: false")).toBeNull();
 });

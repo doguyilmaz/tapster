@@ -15,7 +15,7 @@ import appTemplate from "../../templates/project/app-release.yml" with { type: "
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
-import { autoTagSteps, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubAppSlug, hubName, installOnProject, proposeEntry, releaseEntry, releaseSecrets } from "./hubpr";
+import { autoTagSteps, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubFacts, hubName, installOnProject, proposeEntry, releaseEntry, releaseSecrets, withoutMac } from "./hubpr";
 import { ask } from "./prompt";
 
 type Pins = typeof pinsJson;
@@ -107,8 +107,9 @@ export function addRingStep(text: string): string | null {
   return null;
 }
 
-export function bunWorkflow(name: string, entry: string, pins: Pins): string {
-  return bunTemplate
+export function bunWorkflow(name: string, entry: string, pins: Pins, mac = true): string {
+  const template = mac ? bunTemplate : bunTemplate.replaceAll("darwin-arm64 darwin-x64 ", "");
+  return template
     .replaceAll("__CHECKOUT_SHA__", pins["actions/checkout"].sha)
     .replaceAll("__CHECKOUT_TAG__", pins["actions/checkout"].tag)
     .replaceAll("__SETUP_BUN_SHA__", pins["oven-sh/setup-bun"].sha)
@@ -283,8 +284,9 @@ async function writeTemplate(dir: string, file: string, text: string, force: boo
 
 type Prepared = { kind: "go" | "bun" | "app"; entry: string | null; reason: string | null; notes: string[]; goreleaser: string | null; bin?: string | null };
 
-export async function prepare(dir: string, repo: string, name: string, opts: AddOptions): Promise<Prepared> {
+export async function prepare(dir: string, repo: string, name: string, opts: AddOptions, mac = true): Promise<Prepared> {
   const app = findApp(dir);
+  if (app && !mac) throw new TapsterError("the hub has no Apple credentials, which a Mac app needs", "Run tapster init --rotate certificate and tapster init --rotate notary in the hub clone, then tapster add again.");
   if (app) {
     const build = app.build ?? `echo "Set the build command in .github/workflows/release.yml" && exit 1`;
     const appPath = app.appPath ?? `build/${app.name}.app`;
@@ -307,7 +309,7 @@ export async function prepare(dir: string, repo: string, name: string, opts: Add
   if (existsSync(join(dir, "package.json")) && (existsSync(join(dir, "bun.lock")) || existsSync(join(dir, "bun.lockb")))) {
     const found = binName(JSON.parse(await readFile(join(dir, "package.json"), "utf8")), name);
     if (!found) throw new TapsterError("package.json has no bin entry", "Add the CLI entry file to bin in package.json.");
-    const note = await writeTemplate(dir, "release.yml", bunWorkflow(found.bin, found.entry, pinsJson), opts.force);
+    const note = await writeTemplate(dir, "release.yml", bunWorkflow(found.bin, found.entry, pinsJson, mac), opts.force);
     const own = note.startsWith("- kept");
     return { kind: "bun", entry: own ? null : bunEntry(name, repo, found.bin), reason: null, notes: [note], goreleaser: null, bin: own ? found.bin : null };
   }
@@ -374,9 +376,9 @@ export async function add(args: string[]): Promise<void> {
   const name = repo.split("/")[1]!.toLowerCase().replace(/[^a-z0-9-]/g, "-");
   const gh = await userGitHub();
   const { hub, remember } = await resolveHub(dir, opts.hub);
-  const slug = await hubAppSlug(gh, hub);
+  const { slug, apple } = await hubFacts(gh, hub);
   await remember();
-  const prepared = await prepare(dir, repo, name, opts);
+  const prepared = await prepare(dir, repo, name, opts, apple);
   for (const n of prepared.notes) console.log(n);
   const project = await gh.getRepo(repo);
   console.log(await protectProject(gh, repo, opts.autoTag, opts.dependabot));
@@ -388,6 +390,12 @@ export async function add(args: string[]): Promise<void> {
   let { entry, reason } = prepared;
   if (prepared.kind === "go") ({ entry, reason } = goEntry(name, repo, prepared.goreleaser, await latestDraftOrRelease(gh, repo)));
   if (prepared.kind === "bun" && prepared.bin) ({ entry, reason } = releaseEntry(name, repo, "bun", [prepared.bin], await latestDraftOrRelease(gh, repo)));
+  if (entry && !apple) {
+    entry = withoutMac(entry);
+    if (entry) console.log("- the hub has no Apple credentials, so the entry leaves out the macOS builds");
+    else reason = "the hub has no Apple credentials and the project builds only for macOS; run tapster init --rotate certificate and tapster init --rotate notary in the hub, then tapster add again";
+    if (prepared.kind === "go" || prepared.bin) console.log(`  Remove the macOS builds from ${prepared.kind === "go" ? "the GoReleaser builds (goos: darwin)" : ".github/workflows/release.yml"} too: the hub refuses macOS code it cannot sign.`);
+  }
   if (entry) {
     entry = entryExtras(entry, { kind: prepared.kind, workflow: opts.workflow, dependabot: opts.dependabot });
     const desc = descriptionNote(project.description, name);
