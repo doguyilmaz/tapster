@@ -11,6 +11,7 @@ export type Release = {
   published_at: string | null;
   upload_url: string;
   author?: Account | null;
+  body?: string | null;
   assets: Asset[];
 };
 export type Repo = { id: number; private: boolean; description: string | null; html_url: string; default_branch: string };

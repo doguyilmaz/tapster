@@ -27,9 +27,11 @@ jobs:
       render: ${{ steps.check.outputs.render }}
       linux: ${{ steps.check.outputs.linux }}
     steps:
-      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+      - name: Check out the hub
+        uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
-      - id: check
+      - name: Check the projects for drafts
+        id: check
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: check, template: 2, package: "${{ inputs.package }}", linux: "${{ inputs.linux }}" }
         env:
@@ -48,14 +50,17 @@ jobs:
       attest: ${{ steps.publish.outputs.attest }}
       checksums: ${{ steps.publish.outputs.attest-checksums }}
     steps:
-      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+      - name: Check out the hub
+        uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
-      - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+      - name: Download the drafts and verify them
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: fetch, template: 2, work: "${{ needs.check.outputs.work }}" }
         env:
           TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
           TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
-      - if: ${{ !cancelled() }}
+      - name: Sign and notarize macOS code
+        if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: sign, template: 2 }
         env:
@@ -65,10 +70,12 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-      - if: ${{ !cancelled() }}
+      - name: Build the DMGs
+        if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: package, template: 2 }
-      - if: ${{ !cancelled() }}
+      - name: Sign, notarize and staple the DMGs
+        if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: seal, template: 2 }
         env:
@@ -78,11 +85,13 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-      - if: ${{ !cancelled() }}
+      - name: Sign the Sparkle feeds
+        if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: sparkle, template: 2 }
         env: __SPARKLE_ENV__
-      - id: publish
+      - name: Publish the signed releases
+        id: publish
         if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: publish, template: 2 }
@@ -90,7 +99,8 @@ jobs:
           TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
           TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
-      - if: always()
+      - name: Remove keychains and temporary files
+        if: always()
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: cleanup, template: 2 }
   attest:
@@ -111,9 +121,11 @@ jobs:
     runs-on: ubuntu-24.04
     permissions: { contents: write }
     steps:
-      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+      - name: Check out the hub
+        uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
-      - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+      - name: Write casks and the state
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: render, template: 2 }
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -125,12 +137,15 @@ jobs:
     outputs:
       changed: ${{ steps.build.outputs.changed }}
     steps:
-      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+      - name: Check out the hub
+        uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
-      - id: build
+      - name: Build the Linux packages
+        id: build
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: linux-build, template: 2 }
-      - if: ${{ steps.build.outputs.changed == 'true' }}
+      - name: Keep the Linux files for the next job
+        if: ${{ steps.build.outputs.changed == 'true' }}
         uses: actions/upload-artifact@__UPLOAD_SHA__ # __UPLOAD_TAG__
         with: { name: linux-unsigned, path: "${{ runner.temp }}/tapster-linux", if-no-files-found: error, retention-days: 1 }
   linux-sign:
@@ -142,15 +157,19 @@ jobs:
     steps:
       - name: Install the signing tools from Ubuntu
         run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends apt-utils rpm createrepo-c dpkg gnupg
-      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+      - name: Check out the hub
+        uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
-      - uses: actions/download-artifact@__DOWNLOAD_SHA__ # __DOWNLOAD_TAG__
+      - name: Download the Linux files
+        uses: actions/download-artifact@__DOWNLOAD_SHA__ # __DOWNLOAD_TAG__
         with: { name: linux-unsigned, path: "${{ runner.temp }}/tapster-linux" }
-      - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+      - name: Sign the Linux repositories
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: linux-sign, template: 2 }
         env:
           TAPSTER_LINUX_KEY: ${{ secrets.TAPSTER_LINUX_KEY }}
-      - uses: actions/upload-artifact@__UPLOAD_SHA__ # __UPLOAD_TAG__
+      - name: Keep the signed site for Pages
+        uses: actions/upload-artifact@__UPLOAD_SHA__ # __UPLOAD_TAG__
         with: { name: linux-site, path: "${{ runner.temp }}/tapster-linux", if-no-files-found: error, retention-days: 1 }
   linux-pages:
     needs: linux-sign
@@ -159,9 +178,12 @@ jobs:
     environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
     permissions: { pages: write, id-token: write }
     steps:
-      - uses: actions/download-artifact@__DOWNLOAD_SHA__ # __DOWNLOAD_TAG__
+      - name: Download the signed site
+        uses: actions/download-artifact@__DOWNLOAD_SHA__ # __DOWNLOAD_TAG__
         with: { name: linux-site, path: site }
-      - uses: actions/upload-pages-artifact@__PAGES_UPLOAD_SHA__ # __PAGES_UPLOAD_TAG__
+      - name: Hand the site to GitHub Pages
+        uses: actions/upload-pages-artifact@__PAGES_UPLOAD_SHA__ # __PAGES_UPLOAD_TAG__
         with: { path: site }
-      - id: deploy
+      - name: Deploy the Linux repositories
+        id: deploy
         uses: actions/deploy-pages@__PAGES_DEPLOY_SHA__ # __PAGES_DEPLOY_TAG__

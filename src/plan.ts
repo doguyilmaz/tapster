@@ -51,21 +51,24 @@ export type PlanOptions = {
   tagExists: (tag: string) => Promise<boolean>;
 };
 
-export async function planPackage(pkg: PackageConfig, releases: Release[], opts: PlanOptions): Promise<{ items: WorkItem[]; notes: string[] }> {
+export type Note = { tag: string; releaseId: number; kind: "waiting" | "invalid"; reason: string; since: string | null };
+
+export async function planPackage(pkg: PackageConfig, releases: Release[], opts: PlanOptions): Promise<{ items: WorkItem[]; notes: Note[] }> {
   const { checksumsOf, recorded = () => undefined } = opts;
   const items: WorkItem[] = [];
-  const notes: string[] = [];
+  const notes: Note[] = [];
+  const note = (r: Release, kind: Note["kind"], reason: string) => notes.push({ tag: r.tag_name, releaseId: r.id, kind, reason, since: r.created_at || null });
   const drafts = releases.filter((r) => r.draft);
   const byTag = new Map<string, Release[]>();
   for (const r of drafts) byTag.set(r.tag_name, [...(byTag.get(r.tag_name) ?? []), r]);
   const published = new Set(releases.filter((r) => !r.draft).map((r) => r.tag_name));
   for (const [tag, list] of byTag) {
     if (published.has(tag)) {
-      notes.push(`${tag}: a release for this tag is already published; delete the draft`);
+      for (const r of list) note(r, "invalid", "a release for this tag is already published; delete the draft");
       continue;
     }
     if (list.length > 1) {
-      notes.push(`${tag}: two drafts exist for this tag; delete one`);
+      for (const r of list) note(r, "invalid", "two drafts exist for this tag; delete one");
       continue;
     }
     const r = list[0]!;
@@ -75,22 +78,22 @@ export async function planPackage(pkg: PackageConfig, releases: Release[], opts:
       checksums = ready ? await checksumsOf(r) : null;
     } catch (e) {
       if (!(e instanceof TapsterError)) throw e;
-      notes.push(`${tag}: ${e.reason}`);
+      note(r, "invalid", e.reason);
       continue;
     }
     const status = draftStatus(r, pkg, checksums, recorded(r.id));
     if (status.kind === "waiting" || status.kind === "invalid") {
-      notes.push(`${tag}: ${status.reason}`);
+      note(r, status.kind, status.reason);
       continue;
     }
     if (status.kind === "ready") {
       const foreign = draftOrigin(r, opts.owner);
       if (foreign) {
-        notes.push(`${tag}: ${foreign}`);
+        note(r, "invalid", foreign);
         continue;
       }
       if (!(await opts.tagExists(tag))) {
-        notes.push(`${tag}: the tag is not pushed yet; tapster publishes only tags that exist`);
+        note(r, "waiting", "the tag is not pushed yet; tapster publishes only tags that exist");
         continue;
       }
     }

@@ -56,7 +56,8 @@ test("two drafts for one tag stop the package", async () => {
   const r2 = { ...release(full), id: 2 };
   const plan = await planPackage(cfg, [r1, r2], opts);
   expect(plan.items).toEqual([]);
-  expect(plan.notes[0]).toContain("two drafts");
+  expect(plan.notes.map((n) => n.kind)).toEqual(["invalid", "invalid"]);
+  expect(plan.notes[0]!.reason).toContain("two drafts");
 });
 
 test("published releases are not work", async () => {
@@ -71,7 +72,7 @@ test("an unreadable checksums.txt marks only its own draft", async () => {
     return sums;
   } });
   expect(plan.items.map((i) => i.tag)).toEqual(["v1.0.0"]);
-  expect(plan.notes).toEqual(["v0.0.2: checksums.txt line 1 is malformed"]);
+  expect(plan.notes.map((n) => [n.tag, n.kind, n.reason])).toEqual([["v0.0.2", "invalid", "checksums.txt line 1 is malformed"]]);
 });
 
 test("a fully swapped draft that tapster recorded resumes", () => {
@@ -89,7 +90,8 @@ test("planPackage passes the recorded digest per release", async () => {
 test("a draft for a tag that is already published is never work", async () => {
   const plan = await planPackage(cfg, [release(full, "v1.0.0", false), { ...release(full), id: 2 }], opts);
   expect(plan.items).toEqual([]);
-  expect(plan.notes[0]).toContain("already published");
+  expect(plan.notes[0]!.reason).toContain("already published");
+  expect(plan.notes[0]!.kind).toBe("invalid");
 });
 
 test("drafts made and filled by the project's workflow or the owner are trusted", () => {
@@ -110,10 +112,11 @@ test("a foreign upload makes the draft invalid and a missing tag makes it wait",
   const app = { login: "tapster-o-tap[bot]", type: "Bot" };
   const foreign = await planPackage(cfg, [{ ...release(full), author: app }], opts);
   expect(foreign.items).toEqual([]);
-  expect(foreign.notes[0]).toContain("created by tapster-o-tap[bot]");
+  expect(foreign.notes[0]!.reason).toContain("created by tapster-o-tap[bot]");
+  expect(foreign.notes[0]!.kind).toBe("invalid");
   const untagged = await planPackage(cfg, [release(full)], { ...opts, tagExists: async () => false });
   expect(untagged.items).toEqual([]);
-  expect(untagged.notes).toEqual(["v1.0.0: the tag is not pushed yet; tapster publishes only tags that exist"]);
+  expect(untagged.notes.map((n) => [n.tag, n.kind, n.reason])).toEqual([["v1.0.0", "waiting", "the tag is not pushed yet; tapster publishes only tags that exist"]]);
 });
 
 test("a draft the hub is already publishing is not judged by who uploaded its files", async () => {

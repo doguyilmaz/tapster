@@ -6,7 +6,8 @@ import { parseChecksums } from "../checksums";
 import { type AppPackage, type HubConfig, type InvalidPackage, type PackageConfig, isApp } from "../config";
 import { GitHub, type Release } from "../github";
 import { readSecret, requireVar } from "../mask";
-import { type WorkItem, planPackage } from "../plan";
+import { type Note, type WorkItem, planPackage } from "../plan";
+import { noteOutcome, withNote } from "../draftnote";
 import { failure, record, warn } from "../report";
 import { protectionProblems } from "../rulesets";
 import { GitHubError, TapsterError } from "../errors";
@@ -113,6 +114,11 @@ async function hubGate(ctx: Context, appId: string, pem: string): Promise<void> 
   if (inst.extra.length) warn(`the App can also write to ${inst.extra.join(", ")}, which tapster.yml does not list; remove them at https://github.com/settings/installations`);
 }
 
+async function writeNote(gh: GitHub, repo: string, release: Release, body: string): Promise<void> {
+  if (body === (release.body ?? "")) return;
+  await gh.json("PATCH", `/repos/${repo}/releases/${release.id}`, { body });
+}
+
 async function tagExists(gh: GitHub, repo: string, tag: string): Promise<boolean> {
   try {
     await gh.json("GET", `/repos/${repo}/git/ref/tags/${encodeURIComponent(tag)}`);
@@ -149,7 +155,8 @@ export async function check(ctx: Context): Promise<void> {
       const gh = new GitHub(tok.token);
       const repo = await gh.getRepo(pkg.repo);
       await protectionGate(gh, pkg, repo.default_branch);
-      const plan = await planPackage(pkg, await gh.listReleases(pkg.repo), {
+      const releases = await gh.listReleases(pkg.repo);
+      const plan = await planPackage(pkg, releases, {
         checksumsOf: async (r) => {
           const asset = r.assets.find((a) => a.name === "checksums.txt");
           return asset ? parseChecksums((await gh.downloadAsset(pkg.repo, asset.id)).toString("utf8")) : null;
@@ -159,14 +166,26 @@ export async function check(ctx: Context): Promise<void> {
         tagExists: (tag) => tagExists(gh, pkg.repo, tag),
       });
       if (repo.private) privateRepos.add(pkg.name);
+      const notes: Note[] = [...plan.notes];
       for (const item of plan.items) {
-        const release = pkg.attestation === "auto" && !repo.private && !item.resume ? await gh.getRelease(pkg.repo, item.releaseId) : null;
-        const attested = release?.assets.filter((a) => !(isApp(pkg) && Object.hasOwn(pkg.carry, a.name))) ?? [];
-        const missing = release ? await missingAttestations(pkg.repo, attested, tok.token) : [];
-        if (missing.length) record({ item: pkg.name, result: "waiting", detail: `${item.tag}: no attestation yet for ${missing.join(", ")}` });
-        else items.push(item);
+        const release = releases.find((r) => r.id === item.releaseId)!;
+        const judged = pkg.attestation === "auto" && !repo.private && !item.resume;
+        const attested = judged ? release.assets.filter((a) => !(isApp(pkg) && Object.hasOwn(pkg.carry, a.name))) : [];
+        const missing = judged ? await missingAttestations(pkg.repo, attested, tok.token) : [];
+        if (missing.length) {
+          notes.push({ tag: item.tag, releaseId: item.releaseId, kind: "waiting", reason: `no attestation yet for ${missing.join(", ")}`, since: release.created_at });
+          continue;
+        }
+        items.push(item);
+        if (!item.resume) await writeNote(gh, pkg.repo, release, withNote(release.body, null));
       }
-      for (const note of plan.notes) record({ item: pkg.name, result: "waiting", detail: note });
+      for (const n of notes) {
+        const release = releases.find((r) => r.id === n.releaseId);
+        const out = noteOutcome(n, release?.body, Date.now());
+        if (release && out.body !== null) await writeNote(gh, pkg.repo, release, out.body);
+        if (out.result === "failed") failure(pkg.name, new TapsterError(`${n.tag}: ${out.reason}`, "The hub wrote this on the draft too; fix the draft or delete it."));
+        else record({ item: pkg.name, result: out.result === "known" ? "skipped" : "waiting", detail: `${n.tag}: ${out.reason}${out.result === "known" ? " (reported on the draft)" : ""}` });
+      }
       const feed = isApp(pkg) ? feedWarning(await latestRelease(gh, pkg.repo), state, pkg) : null;
       if (feed) warn(feed);
     } catch (e) {

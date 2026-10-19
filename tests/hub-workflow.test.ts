@@ -73,3 +73,9 @@ test("sign runs on macOS only when check says this run signs macOS code", () => 
   expect(env.TAPSTER_CERT_EXPIRES).toBe("${{ vars.TAPSTER_CERT_EXPIRES }}");
   expect((flow.jobs.sign as unknown as { "runs-on": string })["runs-on"]).toBe("${{ needs.check.outputs.macos == 'false' && 'ubuntu-24.04' || 'macos-15' }}");
 });
+
+test("every step in the hub workflow says what it does", () => {
+  for (const [job, def] of Object.entries(flow.jobs)) {
+    for (const step of def.steps) expect((step as { name?: string }).name, `${job}: ${JSON.stringify(step).slice(0, 80)}`).toBeTruthy();
+  }
+});

@@ -316,7 +316,7 @@ async function resolveHub(dir: string, flag: string | null): Promise<string> {
 }
 
 async function setupAutoTag(gh: GitHub, repo: string, branch: string): Promise<string> {
-  const keys = await gh.json<{ title: string }[]>("GET", `/repos/${repo}/keys`);
+  const keys = await gh.json<{ title: string; read_only: boolean }[]>("GET", `/repos/${repo}/keys`);
   if (keys.some((k) => k.title === "tapster tags")) return '- the tag key already exists; to replace it, delete the deploy key "tapster tags" and run this again';
   try {
     await gh.json("PUT", `/repos/${repo}/environments/release`, { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } });
@@ -338,8 +338,10 @@ async function setupAutoTag(gh: GitHub, repo: string, branch: string): Promise<s
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+  const others = keys.filter((k) => !k.read_only).map((k) => k.title);
   return [
     `- automatic tags: a deploy key for ${repo} lives in its "release" environment, which only ${branch} may use, and the rulesets let deploy keys tag.`,
+    ...(others.length ? [`  Every deploy key with write access can now tag too: ${others.join(", ")}. Remove the ones you do not need in the repository settings.`] : []),
     "  Push tags from your release workflow like this:",
     autoTagSteps(pinsJson["actions/checkout"]),
   ].join("\n");
