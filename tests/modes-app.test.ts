@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { feedWarning } from "../src/action/check";
 import { packageMode } from "../src/action/package";
 import { appOutputs } from "../src/action/publish";
 import { sealMode } from "../src/action/seal";
@@ -15,6 +16,7 @@ import { fillWorkflow } from "../src/cli/init";
 import { type AppPackage, parseConfig } from "../src/config";
 import { resetMaskForTests } from "../src/mask";
 import { draftStatus } from "../src/plan";
+import { emptyState, upsert } from "../src/state";
 import { type Fetched, loadManifest, saveManifest } from "../src/workdir";
 
 afterEach(resetMaskForTests);
@@ -165,4 +167,14 @@ test("the hub workflow runs package, seal and sparkle with their own credentials
   expect(steps.find((s) => s.with?.mode === "sparkle")!.env!.SPARKLE_KEY_SHARED).toBe("${{ secrets.SPARKLE_KEY_SHARED }}");
   const none = parse(fillWorkflow(readFileSync("templates/hub/tapster.yml", "utf8"), pins, { sha: "f".repeat(40), tag: "v1.0.0" })) as { jobs: { sign: { steps: Step[] } } };
   expect(none.jobs.sign.steps.find((s) => s.with?.mode === "sparkle")!.env).toEqual({});
+});
+
+test("check warns when an app's latest release did not come from the hub", () => {
+  const rel = (id: number, tag: string) => ({ id, tag_name: tag, draft: false, prerelease: false, created_at: "", published_at: "", upload_url: "", assets: [] });
+  const state = upsert(emptyState(), "hafifpix", { tag: "v1.3.1", releaseId: 7, checksums: "b".repeat(64), status: "published", app: { macos: "sequoia", identifiers: [] } });
+  expect(feedWarning(rel(7, "v1.3.1"), state, app)).toBeNull();
+  expect(feedWarning(null, state, app)).toBeNull();
+  expect(feedWarning(rel(9, "v1.3.2"), state, app)).toBe(
+    "hafifpix: the latest release v1.3.2 did not come from the hub; installed copies read its appcast-2.xml, so check who published it",
+  );
 });
