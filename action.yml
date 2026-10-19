@@ -1,5 +1,9 @@
-name: tapster
-description: Sign, notarize and publish releases from a Homebrew tap hub
+name: Tapster Release Hub
+description: Sign, notarize and publish the releases of all your projects from one Homebrew tap
+author: Dogu Yilmaz
+branding:
+  icon: package
+  color: orange
 inputs:
   mode:
     description: check | fetch | sign | package | seal | sparkle | publish | render | cleanup
