@@ -2,7 +2,7 @@ name: docs
 on:
   push:
     branches: [main]
-    paths: [README.md, "site/**"]
+    paths: ["site/**", "src/ui/**"]
   workflow_dispatch:
 permissions: {}
 concurrency: { group: docs, cancel-in-progress: false }

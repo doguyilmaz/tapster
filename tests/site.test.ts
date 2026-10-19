@@ -1,36 +1,86 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { page, renderReadme } from "../site/page";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildSite, parsePage, renderPages, type Source } from "../site/build";
 
-const BASE = "https://github.com/o/tapster/blob/main/";
+const src = (id: string, head: string, body: string): Source => ({ id, text: `---\n${head}\n---\n${body}` });
 
-test("headings get ids and raw HTML stays text", () => {
-  const html = renderReadme("# tapster\n\n## Set up a hub\n\nA <script>alert(1)</script> line with `code` and **bold**.\n", BASE);
-  expect(html).toContain('<h1 id="tapster">tapster</h1>');
-  expect(html).toContain('<h2 id="set-up-a-hub">Set up a hub</h2>');
-  expect(html).not.toContain("<script>");
-  expect(html).toContain("&lt;script&gt;");
-  expect(html).toContain("<code>code</code>");
+test("a page needs a title and a known section", () => {
+  expect(parsePage(src("guides/a", "title: A\nsection: Guides\norder: 1", "Hi")).title).toBe("A");
+  expect(() => parsePage(src("guides/a", "section: Guides\norder: 1", "Hi"))).toThrow("guides/a: no title");
+  expect(() => parsePage(src("guides/a", "title: A\nsection: Blog\norder: 1", "Hi"))).toThrow("guides/a: unknown section Blog");
 });
 
-test("relative links point at GitHub and unsafe links are dropped", () => {
-  const html = renderReadme("See [the spec](docs/a.md), [top](#tapster), [web](https://example.com/x) and [bad](javascript:alert(1)).", BASE);
-  expect(html).toContain(`<a href="${BASE}docs/a.md">the spec</a>`);
-  expect(html).toContain('<a href="#tapster">top</a>');
-  expect(html).toContain('<a href="https://example.com/x">web</a>');
-  expect(html).not.toContain("javascript:");
-  expect(html).toContain("bad");
+test("marked quotes become callouts and unknown marks fail the build", () => {
+  const [page] = renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "> [!SEE]\n> `tapster: done`\n")]);
+  expect(page!.html).toContain('<aside class="callout see"><span class="label">You should see</span>');
+  expect(page!.html).not.toContain("[!SEE]");
+  expect(() => renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "> [!TIP]\n> x\n")])).toThrow("guides/a: unknown callout TIP");
 });
 
-test("the real README builds into a page without scripts", () => {
-  const html = page("tapster", renderReadme(readFileSync("README.md", "utf8"), BASE));
-  expect(html.startsWith("<!doctype html>")).toBe(true);
-  expect(html).not.toMatch(/<script|javascript:|\son[a-z]+=/i);
-  expect(html).toContain('<h2 id="apps">Apps</h2>');
+test("links to pages become relative and broken ones fail the build", () => {
+  const a = src("guides/a", "title: A\nsection: Guides\norder: 1", "See [B](/reference/b#the-part) and [web](https://example.com).\n");
+  const b = src("reference/b", "title: B\nsection: Reference\norder: 1", "## The part\n");
+  const [pa] = renderPages([a, b]);
+  expect(pa!.html).toContain('<a href="../../reference/b/#the-part">B</a>');
+  expect(pa!.html).toContain('<a href="https://example.com">web</a>');
+  expect(() => renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "[x](/guides/missing)")])).toThrow("guides/a: link to /guides/missing, which is not a page");
+  expect(() => renderPages([a, src("reference/b", "title: B\nsection: Reference\norder: 1", "## Other\n")])).toThrow("guides/a: link to /reference/b#the-part, which has no such heading");
+  expect(() => renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "[x](javascript:alert(1)) [y](other.md)")])).toThrow("guides/a: link to javascript:alert(1)");
 });
 
-test("links with a title are rewritten too", () => {
-  const html = renderReadme('[a](javascript:alert(1) "t") and [b](docs/x.md "t")', BASE);
-  expect(html).not.toContain("javascript:");
-  expect(html).toContain(`<a href="${BASE}docs/x.md"`);
+test("links to a heading on the same page are checked too", () => {
+  const [page] = renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "See [below](#the-part).\n\n## The part\n")]);
+  expect(page!.html).toContain('<a href="#the-part">below</a>');
+  expect(() => renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "See [below](#nothing).\n")])).toThrow("guides/a: link to #nothing, which has no such heading");
+});
+
+test("raw HTML in content stays text", () => {
+  const [page] = renderPages([src("guides/a", "title: A\nsection: Guides\norder: 1", "A <script>alert(1)</script> line.\n")]);
+  expect(page!.html).not.toContain("<script>");
+});
+
+test("tutorial pages count their steps and every page links to its neighbours", () => {
+  const pages = renderPages([
+    src("tutorial/two", "title: Two\nsection: Tutorial\norder: 2\nstep: 2", "x"),
+    src("tutorial/one", "title: One\nsection: Tutorial\norder: 1\nstep: 1", "x"),
+    src("guides/g", "title: G\nsection: Guides\norder: 1", "x"),
+  ]);
+  const two = pages.find((p) => p.id === "tutorial/two")!;
+  expect(two.html).toContain("Step 2 of 2");
+  expect(two.html).toContain('<a class="prev" href="../../tutorial/one/">');
+  expect(two.html).toContain('<a class="next" href="../../guides/g/">');
+  expect(two.html).toContain('aria-current="page"');
+});
+
+test("the real site builds without scripts or broken links", () => {
+  const out = mkdtempSync(join(tmpdir(), "tapster-site-"));
+  try {
+    const ids = buildSite(join(import.meta.dir, "..", "site", "content"), out);
+    expect(ids).toContain("tutorial/hub");
+    for (const id of ["", ...ids]) {
+      const html = readFileSync(join(out, id, "index.html"), "utf8");
+      expect(html.startsWith("<!doctype html>")).toBe(true);
+      expect(html).not.toMatch(/<script|javascript:|\son[a-z]+=/i);
+    }
+    expect(readFileSync(join(out, "404.html"), "utf8")).toContain("Not found");
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test("every full tapster.yml in the docs is one the hub accepts", async () => {
+  const { parseHub } = await import("../src/config");
+  const { readdirSync } = await import("node:fs");
+  const dir = join(import.meta.dir, "..", "site", "content");
+  let seen = 0;
+  for (const f of readdirSync(dir, { recursive: true, encoding: "utf8" }).filter((n) => n.endsWith(".md"))) {
+    for (const block of readFileSync(join(dir, f), "utf8").split("```yaml\n").slice(1).map((b) => b.split("```")[0]!)) {
+      if (!block.startsWith("version: 1")) continue;
+      seen++;
+      expect({ f, invalid: parseHub(block, "you").invalid }).toEqual({ f, invalid: [] });
+    }
+  }
+  expect(seen).toBeGreaterThan(0);
 });

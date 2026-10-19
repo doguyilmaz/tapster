@@ -32,7 +32,7 @@ h2 { font-size: 1.35rem; margin: 2.4rem 0 0.6rem; }
 h3 { font-size: 1.08rem; margin: 1.8rem 0 0.4rem; }
 p, ul, ol, dl, table { margin: 0 0 1rem; }
 li { margin: 0.2rem 0; }
-code { font: 0.88em/1.5 var(--mono); background: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: 0.08em 0.35em; }
+code { font: 0.88em/1.5 var(--mono); background: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: 0.08em 0.35em; overflow-wrap: anywhere; }
 pre { background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem 1rem; overflow-x: auto; margin: 0 0 1.1rem; }
 pre code { background: none; border: 0; padding: 0; font-size: 0.86rem; }
 table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
