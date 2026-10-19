@@ -29,7 +29,7 @@ export function checkPlan(items: CodeItem[], pkg: AppPackage): string[] {
   const ids = items.map((i) => identifierFor(i, pkg));
   const seen = new Set<string>();
   for (const id of ids) {
-    if (seen.has(id.toLowerCase())) throw new TapsterError(`two pieces of code in the app would be signed as ${id}`, "Rename one of them, or set its identifier under code.");
+    if (seen.has(id.toLowerCase())) throw new TapsterError(`two pieces of code in the app would be signed as ${id}`, "Rename one of them or set its identifier under code.");
     seen.add(id.toLowerCase());
   }
   return ids;

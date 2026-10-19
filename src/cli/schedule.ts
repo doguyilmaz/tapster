@@ -6,7 +6,7 @@ export function cronFor(minutes: number): string {
   if (minutes === 60) return "7 * * * *";
   const hours = minutes / 60;
   if (Number.isInteger(hours) && hours > 1 && hours <= 24 && 24 % hours === 0) return `7 */${hours} * * *`;
-  throw new TapsterError(`${minutes} minutes is not an interval tapster can schedule`, "Use 5, 10, 15, 20 or 30 minutes, or 60 minutes times a divisor of 24.");
+  throw new TapsterError(`${minutes} minutes is not an interval tapster can schedule`, "Use 5, 10, 15, 20 or 30 minutes. Longer intervals must be 60 minutes times a divisor of 24.");
 }
 
 export function everyFromFlow(text: string): number | null {

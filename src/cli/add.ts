@@ -248,7 +248,7 @@ export async function protectProject(gh: GitHub, repo: string, deployKeys = fals
   if (result === "created") {
     return `- protected ${repo}: only you can create, move or delete branches and tags; workflows and Apps, the hub's included, cannot. Push release tags yourself; GitHub then notes "Bypassed rule violations", which is your admin right at work.${dependabot ? " Branches named dependabot/... stay open, so Dependabot can open pull requests; the hub accepts that only with protection: dependabot in its entry." : ""}`;
   }
-  return `- GitHub does not enforce rulesets on ${repo} (private repositories need a paid plan for them), so a stolen App key could tag code the hub would sign. Make it public, use a paid plan, or set protection: off for this package in the hub's tapster.yml to accept that; until then the hub refuses it.`;
+  return `- GitHub does not enforce rulesets on ${repo} (private repositories need a paid plan for them). A stolen App key could tag code the hub would sign. Make it public or use a paid plan. To accept the risk, set protection: off for this package in the hub's tapster.yml; until then the hub refuses it.`;
 }
 
 type AddOptions = { hub: string | null; force: boolean; workflow: string; autoTag: boolean; dependabot: boolean };
@@ -345,7 +345,7 @@ async function setupAutoTag(gh: GitHub, repo: string, branch: string): Promise<s
   }
   const others = keys.filter((k) => !k.read_only).map((k) => k.title);
   return [
-    `- automatic tags: a deploy key for ${repo} lives in its "release" environment, which only ${branch} may use, and the rulesets let deploy keys tag.`,
+    `- automatic tags: a deploy key for ${repo} lives in its "release" environment, which only ${branch} may use. The rulesets let deploy keys tag.`,
     ...(others.length ? [`  Every deploy key with write access can now tag too: ${others.join(", ")}. Remove the ones you do not need in the repository settings.`] : []),
     "  Push tags from your release workflow like this:",
     autoTagSteps(pinsJson["actions/checkout"]),

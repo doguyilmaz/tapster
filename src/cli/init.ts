@@ -130,7 +130,7 @@ async function checkInstallation(appId: string, pem: string, owner: string, hub:
     return;
   }
   const onHub = await app.json("GET", `/repos/${hub}/installation`).then(() => true, () => false);
-  if (onHub) console.log(`The App is installed on ${hub}; remove ${hub} from it at https://github.com/settings/installations/${found}, or the hub refuses to run.`);
+  if (onHub) console.log(`The App is installed on ${hub}. Remove ${hub} from it at https://github.com/settings/installations/${found}; the hub refuses to run until you do.`);
 }
 
 async function createApp(owner: string, hub: string): Promise<void> {
@@ -152,7 +152,7 @@ async function createApp(owner: string, hub: string): Promise<void> {
   await setEnvVariable(hub, "TAPSTER_APP_SLUG", created.slug);
   await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", created.pem);
   console.log("Stored the App and its key in the hub. Now install it: choose \"Only select repositories\" and pick the projects tapster should publish.");
-  console.log(`Never pick ${hub}: the App can write to every repository it is installed on, and the hub holds your signing keys. tapster add can also install it on a project later.`);
+  console.log(`Never pick ${hub}: the App can write to every repository it is installed on. The hub holds your signing keys. tapster add can also install it on a project later.`);
   openUrl(`https://github.com/apps/${created.slug}/installations/new`);
   await checkInstallation(String(created.id), created.pem, owner, hub, created.slug);
 }
@@ -196,7 +196,7 @@ async function storeCertificate(hub: string): Promise<void> {
   const data = await readInput(path, "the .p12 file");
   const password = await ask(".p12 password: ", true);
   const certs = await run("openssl", ["pkcs12", "-in", path, "-passin", "env:TAPSTER_P12", "-nokeys", "-clcerts"], { env: { TAPSTER_P12: password }, allowFail: true });
-  if (certs.code !== 0 || !certs.stdout.includes("BEGIN CERTIFICATE")) throw new TapsterError("the .p12 could not be opened with that password", "Check the password you set when exporting it, or export it again.");
+  if (certs.code !== 0 || !certs.stdout.includes("BEGIN CERTIFICATE")) throw new TapsterError("the .p12 could not be opened with that password", "Check the password you set when exporting it or export it again.");
   const info = await run("openssl", ["x509", "-noout", "-subject", "-enddate", "-nameopt", "RFC2253"], { stdin: certs.stdout });
   const subject = /^subject=\s*(.*)$/m.exec(info.stdout)?.[1]?.trim() ?? "";
   const notAfter = /^notAfter=(.*)$/m.exec(info.stdout)?.[1]?.trim() ?? "";
@@ -205,7 +205,7 @@ async function storeCertificate(hub: string): Promise<void> {
   await setEnvSecret(hub, "MACOS_SIGN_PASSWORD", password);
   await setEnvVariable(hub, "TAPSTER_TEAM_ID", team);
   await setEnvVariable(hub, "TAPSTER_CERT_EXPIRES", expires);
-  console.log(`Certificate stored for team ${team}; it expires on ${expires}, and the hub warns 30 days before.`);
+  console.log(`Certificate stored for team ${team}. It expires on ${expires}; the hub warns 30 days before.`);
 }
 
 async function checkNotary(path: string, keyId: string, issuer: string): Promise<void> {
@@ -271,7 +271,7 @@ export async function protectHub(gh: GitHub, hub: string, isPrivate: boolean): P
 export async function tapsterPin(gh: GitHub, build: typeof TAPSTER, flag: string | null): Promise<{ sha: string; tag: string }> {
   if (flag === null) {
     if (build.sha) return { sha: build.sha, tag: `v${build.version}` };
-    throw new TapsterError("this tapster was built from a checkout, so it does not know which tapster the hub should run", "Pass --tapster <commit> with a full commit SHA from tapster's main, or use a released tapster.");
+    throw new TapsterError("this tapster was built from a checkout, so it does not know which tapster the hub should run", "Pass --tapster <commit> with a full commit SHA from tapster's main or use a released tapster.");
   }
   if (!/^[0-9a-f]{40}$/.test(flag)) throw new TapsterError(`${flag} is not a full commit SHA`, "Pass all 40 characters of the commit.");
   const cmp = await gh.json<{ status: string }>("GET", `/repos/doguyilmaz/tapster/compare/${flag}...main`);
@@ -364,11 +364,11 @@ async function createSparkleKey(dir: string, hub: string, label: string): Promis
   const store = requireStore("the Sparkle key");
   const ref = { service: "https://sparkle-project.org", account: label, label: "Private key for signing Sparkle updates" };
   if (await store.exists(ref)) {
-    throw new TapsterError(`your keychain already has a Sparkle key for the account ${label}`, `Store that one with tapster init --sparkle ${label} --account ${label}, or pick another label.`);
+    throw new TapsterError(`your keychain already has a Sparkle key for the account ${label}`, `Store that one with tapster init --sparkle ${label} --account ${label} or pick another label.`);
   }
   const key = newSparkleKey();
   await store.save({ ...ref, comment: `Public key (SUPublicEDKey value) for this key is: ${key.publicKey}` }, key.seed);
-  console.log(`Saved a new Sparkle key in your ${store.kind === "keychain" ? "login keychain" : "keyring"} under the account ${label}; Sparkle's own tools find it there, and macOS asks you before any app reads it.`);
+  console.log(`Saved a new Sparkle key in your ${store.kind === "keychain" ? "login keychain" : "keyring"} under the account ${label}. Sparkle's own tools find it there. macOS asks you before any app reads it.`);
   console.log(`Its public key is ${key.publicKey}. Put it in the app as SUPublicEDKey and in tapster.yml as sparkle.public_key.`);
   console.log("If this key is lost, installed copies can never update again. Keep an offline copy too, for example in your password manager:");
   console.log(store.kind === "keychain" ? `  security find-generic-password -s https://sparkle-project.org -a ${label} -w   (macOS asks you first)` : `  secret-tool lookup service https://sparkle-project.org account ${label}`);

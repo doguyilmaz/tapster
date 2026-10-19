@@ -137,7 +137,7 @@ function checkPackage(p: PackageConfig, top: Omit<HubConfig, "packages">, hubOwn
     }
   }
   if (isApp(p) || !p.linux) return;
-  if (!Object.keys(p.assets).some((k) => k.startsWith("linux-"))) throw new TapsterError(`${p.name}: linux needs a Linux asset`, "Map linux-amd64 or linux-arm64, or remove linux: true.");
+  if (!Object.keys(p.assets).some((k) => k.startsWith("linux-"))) throw new TapsterError(`${p.name}: linux needs a Linux asset`, "Map linux-amd64 or linux-arm64. Otherwise remove linux: true.");
   if (!top.linux) throw new TapsterError(`${p.name} ships Linux packages, but tapster.yml names no linux.maintainer`, 'Add linux: { maintainer: "Name <address>" } at the top of tapster.yml.');
 }
 
@@ -234,7 +234,7 @@ function checkApp(p: AppPackage): void {
   }
   p.dmg.volume ??= p.app.replace(/\.app$/, "").slice(0, 27);
   if (p.sparkle && (p.sparkle.next_key === undefined) !== (p.sparkle.next_public_key === undefined)) {
-    throw new TapsterError(`${p.name}: a rotation needs both sparkle.next_key and next_public_key`, "Set both, or neither.");
+    throw new TapsterError(`${p.name}: a rotation needs both sparkle.next_key and next_public_key`, "Set both or neither.");
   }
   for (const [path, c] of Object.entries(p.code)) {
     if (c.identifier && !c.identifier.startsWith(`${p.bundle_id}.`)) {

@@ -12,7 +12,7 @@ export function cliGh(candidates?: string[]): string {
   try {
     return ghPath(candidates);
   } catch {
-    throw new TapsterError("the GitHub CLI (gh) is not installed", "Install it (brew install gh, or see https://cli.github.com), sign in with gh auth login, then run this again.");
+    throw new TapsterError("the GitHub CLI (gh) is not installed", "Install it (brew install gh or see https://cli.github.com), sign in with gh auth login, then run this again.");
   }
 }
 
