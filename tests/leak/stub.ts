@@ -9,7 +9,7 @@ type Release = { id: number; tag_name: string; draft: boolean; prerelease: boole
 
 const [certPath, keyPath, portArg] = process.argv.slice(2);
 const REPO = "doguyilmaz/tapster-fixture";
-const TOKEN = "ghs_CANARYinstallation0token0for0leak0test";
+const TOKEN = "ghs_CANARYq7Zx81mPkW3vT9yLr2dNf5bHj4";
 let mode = "ok";
 let nextId = 1000;
 const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
