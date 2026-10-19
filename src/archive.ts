@@ -46,6 +46,7 @@ function parsePax(data: Buffer): Record<string, string> {
 
 const PATH_MAX = 1024;
 const MAX_ENTRIES = 200_000;
+const MAX_HEADER = 64 * 1024;
 const PRINTABLE = /^[\x20-\x5b\x5d-\x7e]+$/;
 
 function safeName(raw: string): string {
@@ -84,6 +85,7 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
     const size = octal(h, 124, 12);
     if (size > limits.entryBytes) throw bad("holds a file larger than allowed");
     const type = String.fromCharCode(h[156]!);
+    if ("LKxg".includes(type) && size > MAX_HEADER) throw bad("has an oversized extended header");
     const start = off + 512;
     if (start + size > tar.length) throw bad("is truncated");
     const data = tar.subarray(start, start + size);

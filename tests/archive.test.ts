@@ -124,3 +124,9 @@ test("an archive built to make the symlink checks slow finishes quickly", () => 
   }
   expect(Date.now() - started).toBeLessThan(3000);
 });
+
+test("oversized long-name and extended headers are refused before they are read", () => {
+  const huge = "a".repeat(200_000);
+  expect(() => readTarGz(rawTarGz([{ name: "././@LongLink", type: "L", data: huge }, { name: "x", data: "1" }]))).toThrow(TapsterError);
+  expect(() => readTarGz(rawTarGz([{ name: "PaxHeader", type: "x", data: paxRecord("comment", huge) }, { name: "x", data: "1" }]))).toThrow(TapsterError);
+});
