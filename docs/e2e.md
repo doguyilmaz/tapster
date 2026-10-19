@@ -8,13 +8,13 @@ This runs once with real credentials before the first migration. It needs the te
 1. Make a small Sparkle app in a new public repository `doguyilmaz/tapster-sparkle-fixture`: one window, Sparkle 2.9
    or newer from Swift Package Manager, `SUFeedURL` set to
    `https://github.com/doguyilmaz/tapster-sparkle-fixture/releases/latest/download/appcast.xml`, `SUPublicEDKey` set
-   to a new test key and both `SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction` set to true.
-2. Create the test key with Sparkle's `generate_keys --account tapster-e2e`. Export a backup with `generate_keys
-   --account tapster-e2e -x <file>` and keep the file until the test is done.
-3. Run `bunx @doguyilmaz/tapster add` in the fixture. Commit the workflow it writes and paste the entry into the test
-   hub's `tapster.yml` with the label `e2e`.
-4. In the test hub run `bunx @doguyilmaz/tapster init --sparkle e2e --account tapster-e2e`, commit the workflow change
-   and push.
+   to the test key of step 2 and both `SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction` set to true.
+2. In the test hub run `bunx @doguyilmaz/tapster init --sparkle e2e --new`. It keeps the key in the login keychain
+   (Sparkle's account `e2e`), prints the public key for `SUPublicEDKey` and, once you confirm a backup, stores it in
+   the hub and wires the sparkle step. Commit the workflow change and push.
+3. Run `bunx @doguyilmaz/tapster add --hub doguyilmaz/homebrew-tapster-test` in the fixture. It protects the fixture,
+   writes the workflow and opens a pull request on the hub with the entry; set `sparkle.key: e2e` and the public key in
+   it if they differ, then merge it. Commit and push the workflow.
 
 ## 2. A release through the hub
 
@@ -46,7 +46,7 @@ This runs once with real credentials before the first migration. It needs the te
 ## 4. Clean up
 
 Delete the fixture repository, its releases and the `SPARKLE_KEY_E2E*` secrets, remove the keys from the login
-keychain and delete the backup files.
+keychain (`security delete-generic-password -s https://sparkle-project.org -a e2e`) and delete the backup files.
 
 # End to end test for the doorbell and Linux packages
 
@@ -72,4 +72,5 @@ keychain and delete the backup files.
 ## 7. Clean up
 
 If the test hub keeps no doorbell, delete the doorbell App, the `tapster-doorbell` Worker and the `TAPSTER_DOORBELL*`
-variables. If it keeps no Linux packages, delete the `TAPSTER_LINUX_KEY` secret.
+variables. If it keeps no Linux packages, delete the `TAPSTER_LINUX_KEY` secret and the keychain copy
+(`security delete-generic-password -s tapster-linux-key -a doguyilmaz/homebrew-tapster-test`).
