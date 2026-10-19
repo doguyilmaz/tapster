@@ -41,3 +41,9 @@ test("publishing entries are never trimmed away", () => {
   expect(s.packages.aims!.some((e) => e.releaseId === 1000)).toBe(true);
   expect(s.packages.aims!.filter((e) => e.status === "published").length).toBe(20);
 });
+
+test("app facts ride along in a state entry", () => {
+  const s = upsert(parseState(null), "hafifpix", { tag: "v1.3.1", releaseId: 5, checksums: sum, status: "published", app: { macos: "sequoia", identifiers: ["com.o.HafifPix"] } });
+  expect(parseState(serializeState(s)).packages.hafifpix![0]!.app).toEqual({ macos: "sequoia", identifiers: ["com.o.HafifPix"] });
+  expect(() => parseState(serializeState(upsert(parseState(null), "x", { tag: "v1.0.0", releaseId: 1, checksums: sum, status: "published" })))).not.toThrow();
+});

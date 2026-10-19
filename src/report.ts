@@ -6,11 +6,12 @@ export type Row = { item: string; result: "published" | "rendered" | "skipped" |
 
 const rows: Row[] = [];
 
-export const info = (msg: string) => core.info(scrub(msg));
-export const warn = (msg: string) => core.warning(scrub(msg));
+const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ");
+export const info = (msg: string) => core.info(oneLine(scrub(msg)));
+export const warn = (msg: string) => core.warning(oneLine(scrub(msg)));
 
 export function record(row: Row): void {
-  const clean = { ...row, item: scrub(row.item), detail: scrub(row.detail) };
+  const clean = { ...row, item: oneLine(scrub(row.item)), detail: oneLine(scrub(row.detail)) };
   rows.push(clean);
   info(`${clean.item}: ${clean.result}${clean.detail ? ` (${clean.detail})` : ""}`);
 }
@@ -24,7 +25,7 @@ export function failure(item: string, err: unknown): void {
           "Re-run the workflow; if it fails again, open an issue with the run link.",
         );
   record({ item, result: "failed", detail: `${e.reason}. ${e.fix}` });
-  core.error(scrub(`${item}: ${e.reason}`));
+  core.error(oneLine(scrub(`${item}: ${e.reason}`)));
 }
 
 export async function writeSummary(): Promise<void> {

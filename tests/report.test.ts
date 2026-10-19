@@ -23,3 +23,8 @@ test("tapster errors print reason and fix", () => {
   failure("aims", new TapsterError("notarization invalid", "Fix the build."));
   expect(rowsForTests()[0]!.detail).toBe("notarization invalid. Fix the build.");
 });
+
+test("text from a project cannot start a workflow command on its own line", () => {
+  record({ item: "aims v1.0.0", result: "failed", detail: "version 1\n::stop-commands::x\r\n::add-mask::y" });
+  expect(rowsForTests()[0]!.detail).toBe("version 1 ::stop-commands::x ::add-mask::y");
+});

@@ -2,15 +2,16 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { type ChecksumLine, parseChecksums, sha256 } from "../checksums";
-import { type PackageConfig, type Platform, parseTag, versionOf } from "../config";
+import { dmgName } from "../appcheck";
+import { type AppPackage, type CliPackage, type Platform, isApp, parseTag, versionOf } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import { GitHub, type Release } from "../github";
 import { commitToHub } from "../hubcommit";
 import { readSecret } from "../mask";
-import { type Download, caskPath, descProblems, downloadUrl, renderCask, renderScoop, scoopPath } from "../render";
+import { type AppRenderInput, type Download, caskPath, descProblems, downloadUrl, renderAppCask, renderCask, renderScoop, scoopPath } from "../render";
 import { failure, record } from "../report";
 import { childEnv, excerpt, run, runPath } from "../run";
-import { STATE_PATH, latestPublished, parseState, serializeState, upsert } from "../state";
+import { STATE_PATH, type StateEntry, latestPublished, parseState, serializeState, upsert } from "../state";
 import type { Context } from "./context";
 
 const readIfExists = (path: string) => readFile(path, "utf8").catch(() => null);
@@ -24,7 +25,7 @@ async function readable(gh: GitHub, repo: string, id: number): Promise<Release |
   }
 }
 
-export function buildDownloads(pkg: PackageConfig, tag: string, lines: ChecksumLine[]): Download[] {
+export function buildDownloads(pkg: CliPackage, tag: string, lines: ChecksumLine[]): Download[] {
   const version = versionOf(tag);
   return (Object.entries(pkg.assets) as [Platform, string][]).map(([platform, template]) => {
     const name = template.replaceAll("{version}", version);
@@ -32,6 +33,14 @@ export function buildDownloads(pkg: PackageConfig, tag: string, lines: ChecksumL
     if (!line) throw new TapsterError(`${name} is not in the published checksums.txt`, "Check assets in tapster.yml.");
     return { platform, url: downloadUrl(pkg.repo, tag, name), sha256: line.sha256 };
   });
+}
+
+export function appCaskInput(pkg: AppPackage, entry: StateEntry, lines: ChecksumLine[], text: { description: string; homepage: string }): AppRenderInput {
+  if (!entry.app) throw new TapsterError(`${entry.tag} has no app facts in the state`, "Publish the next release with this tapster version.");
+  const version = versionOf(entry.tag);
+  const line = lines.find((l) => l.name === dmgName(pkg, version));
+  if (!line) throw new TapsterError(`${dmgName(pkg, version)} is not in the published checksums.txt`, "Check dmg.name in tapster.yml.");
+  return { pkg, version, sha256: line.sha256, macos: entry.app.macos, ...text };
 }
 
 export async function headIsStale(ws: string): Promise<boolean> {
@@ -146,16 +155,17 @@ export async function renderMode(ctx: Context): Promise<void> {
       if (sha256(data) !== latest.checksums) throw new TapsterError(`${latest.tag}: checksums.txt changed after tapster published it`, "tapster renders only what it published; check the release.");
       const repo = await gh.getRepo(pkg.repo);
       online.set(pkg.name, !repo.private);
-      const input = {
-        pkg,
-        version: versionOf(latest.tag),
-        downloads: buildDownloads(pkg, latest.tag, parseChecksums(data.toString("utf8"))),
-        description: pkg.description ?? repo.description ?? pkg.name,
-        homepage: pkg.homepage ?? repo.html_url,
-        license: pkg.license ?? null,
-      };
-      const problems = descProblems(input.description, pkg.name);
+      const text = { description: pkg.description ?? repo.description ?? pkg.name, homepage: pkg.homepage ?? repo.html_url };
+      const problems = descProblems(text.description, pkg.name);
       if (problems.length) throw new TapsterError(`Homebrew rejects the description of ${pkg.repo} because ${problems.join(" and ")}`, "Set description in tapster.yml.");
+      const lines = parseChecksums(data.toString("utf8"));
+      if (isApp(pkg)) {
+        const cask = renderAppCask(appCaskInput(pkg, latest, lines, text));
+        if ((await readIfExists(join(ws, caskPath(pkg.name)))) !== cask) changes.push({ path: caskPath(pkg.name), content: cask });
+        rendered.push(`${pkg.name} ${latest.tag}`);
+        continue;
+      }
+      const input = { pkg, version: versionOf(latest.tag), downloads: buildDownloads(pkg, latest.tag, lines), ...text, license: pkg.license ?? null };
       const cask = renderCask(input);
       if ((await readIfExists(join(ws, caskPath(pkg.name)))) !== cask) changes.push({ path: caskPath(pkg.name), content: cask });
       const scoop = renderScoop(input);

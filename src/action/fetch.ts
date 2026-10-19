@@ -1,18 +1,29 @@
 import * as core from "@actions/core";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { appFacts, carryCheck, checkArchiveRoot, systemPlist } from "../appcheck";
 import { isMachO, readTarGz } from "../archive";
 import { verifyAttestation } from "../attest";
 import { macCodeIn } from "../maccode";
 import { parseChecksums, sha256 } from "../checksums";
-import { type Platform, assetName, versionOf } from "../config";
+import { type AppPackage, type Platform, assetName, isApp, versionOf } from "../config";
 import { TapsterError } from "../errors";
 import { GitHub } from "../github";
+import { writeTree } from "../extract";
 import { readSecret, requireVar } from "../mask";
 import { failure, warn } from "../report";
 import { type InstallationToken, installationToken } from "../token";
 import { type Fetched, type Manifest, saveManifest, workdir } from "../workdir";
 import { type Context, parseWork } from "./context";
+
+async function unpackApp(ctx: Context, pkg: AppPackage, tag: string, archive: Buffer, dir: string, created: string): Promise<Fetched["app"]> {
+  const entries = readTarGz(archive);
+  checkArchiveRoot(entries, pkg);
+  await writeTree(entries, join(dir, "app"));
+  const appDir = join(dir, "app", pkg.app);
+  const facts = await appFacts(appDir, pkg, ctx.config.packages, tag, systemPlist);
+  return { dir: appDir, facts, created, identifiers: [], dmg: null, feed: null };
+}
 
 export async function fetchMode(ctx: Context): Promise<void> {
   const appId = requireVar("TAPSTER_APP_ID");
@@ -41,6 +52,8 @@ export async function fetchMode(ctx: Context): Promise<void> {
         if (!sums) throw new TapsterError("checksums.txt disappeared from the draft", "The next run checks again.");
         fetched.checksums = parseChecksums((await gh.downloadAsset(pkg.repo, sums.id)).toString("utf8"));
         const version = versionOf(item.tag);
+        if (isApp(pkg)) carryCheck(release.assets, fetched.checksums, pkg, version);
+        const carried = (name: string) => isApp(pkg) && Object.hasOwn(pkg.carry, name);
         const signedHere = new Set((Object.keys(pkg.assets) as Platform[]).filter((p) => p.startsWith("darwin")).map((p) => assetName(pkg, p, version)!));
         for (const a of release.assets) {
           if (a.name === "checksums.txt") continue;
@@ -50,14 +63,17 @@ export async function fetchMode(ctx: Context): Promise<void> {
             throw new TapsterError(`${a.name} does not match checksums.txt`, "Rebuild the release; the files changed after the checksums were written.");
           }
           const unsigned = signedHere.has(a.name) ? null : macCodeIn(a.name, data);
-          if (unsigned) throw new TapsterError(unsigned, "Map every macOS archive in tapster.yml so tapster signs it, or stop attaching the file.");
+          if (unsigned) throw new TapsterError(unsigned, "Map every macOS archive in tapster.yml so tapster signs it or stop attaching the file.");
           const file = join(dir, "assets", a.name);
           await writeFile(file, data, { mode: 0o600 });
-          if ((await verifyAttestation(file, pkg, item.tag, repo.private, tok.token)) === "skipped") {
+          if (!carried(a.name) && (await verifyAttestation(file, pkg, item.tag, repo.private, tok.token)) === "skipped") {
             warn(`${pkg.name} ${item.tag}: ${a.name} has no attestation; ${pkg.repo} is private, so this is allowed`);
           }
         }
-        for (const platform of (Object.keys(pkg.assets) as Platform[]).filter((p) => p.startsWith("darwin"))) {
+        if (isApp(pkg)) {
+          const name = assetName(pkg, Object.keys(pkg.assets)[0] as Platform, version)!;
+          fetched.app = await unpackApp(ctx, pkg, item.tag, await readFile(join(dir, "assets", name)), dir, release.created_at);
+        } else for (const platform of (Object.keys(pkg.assets) as Platform[]).filter((p) => p.startsWith("darwin"))) {
           const name = assetName(pkg, platform, version)!;
           const binDir = join(dir, "bin", name);
           const found: string[] = [];

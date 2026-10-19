@@ -1,10 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { parseConfig } from "../config";
+import { type HubConfig, parseConfig } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { currentRepo, userGitHub } from "./gh";
+import { sparkleLabels } from "./init";
 
 export type Check = { name: string; ok: boolean; fix: string };
 const ok = (name: string): Check => ({ name, ok: true, fix: "" });
@@ -40,10 +41,20 @@ export function otherWorkflowsCheck(files: Record<string, string>): Check {
   return offenders.length === 0 ? ok(name) : bad(name, `Remove the tapster environment from ${offenders.join(", ")}.`);
 }
 
+export function sparkleCheck(config: HubConfig, secrets: string[], workflow: string): Check {
+  const name = "every Sparkle key is stored and passed to the sparkle step";
+  const labels = sparkleLabels(config);
+  const unstored = labels.filter((l) => !secrets.includes(`SPARKLE_KEY_${l.toUpperCase()}`));
+  if (unstored.length) return bad(name, unstored.map((l) => `Run tapster init --sparkle ${l}.`).join(" "));
+  const unwired = labels.filter((l) => !workflow.includes(`SPARKLE_KEY_${l.toUpperCase()}: "\${{ secrets.SPARKLE_KEY_${l.toUpperCase()} }}"`));
+  if (unwired.length) return bad(name, `The workflow does not pass ${unwired.map((l) => `SPARKLE_KEY_${l.toUpperCase()}`).join(", ")}. Run tapster init --workflow.`);
+  return ok(name);
+}
+
 const SECRETS = ["MACOS_SIGN_P12", "MACOS_SIGN_PASSWORD", "MACOS_NOTARY_KEY", "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER_ID", "TAPSTER_APP_PRIVATE_KEY"];
 const VARIABLES = ["TAPSTER_APP_ID", "TAPSTER_APP_SLUG", "TAPSTER_TEAM_ID"];
 
-async function apiChecks(gh: GitHub, hub: string, repos: string[]): Promise<Check[]> {
+async function apiChecks(gh: GitHub, hub: string, repos: string[], config: HubConfig | null, workflow: string): Promise<Check[]> {
   const checks: Check[] = [];
   const env = await gh.json<{ deployment_branch_policy: { custom_branch_policies: boolean } | null }>("GET", `/repos/${hub}/environments/tapster`).catch(() => null);
   if (!env) return [bad("the tapster environment exists", "Run tapster init.")];
@@ -56,6 +67,7 @@ async function apiChecks(gh: GitHub, hub: string, repos: string[]): Promise<Chec
   const secrets = (await gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${hub}/environments/tapster/secrets`)).secrets.map((s) => s.name);
   const missing = SECRETS.filter((s) => !secrets.includes(s));
   checks.push(missing.length ? bad("all credentials are stored", `Missing: ${missing.join(", ")}. Run tapster init --rotate for them.`) : ok("all credentials are stored"));
+  if (config && sparkleLabels(config).length) checks.push(sparkleCheck(config, secrets, workflow));
   const vars = (await gh.json<{ variables: { name: string; value: string }[] }>("GET", `/repos/${hub}/environments/tapster/variables`)).variables;
   const repoVars = (await gh.json<{ variables: { name: string }[] }>("GET", `/repos/${hub}/actions/variables`)).variables;
   const exposed = [...vars, ...repoVars].map((v) => v.name).filter((n) => SECRETS.includes(n) || /^SPARKLE_KEY_/.test(n));
@@ -95,8 +107,10 @@ export async function doctor(_args: string[]): Promise<number> {
   const hub = await currentRepo(dir);
   const checks: Check[] = [];
   let repos: string[] = [];
+  let config: HubConfig | null = null;
   try {
-    repos = parseConfig(readFileSync(join(dir, "tapster.yml"), "utf8"), hub.split("/")[0]!).packages.map((p) => p.repo);
+    config = parseConfig(readFileSync(join(dir, "tapster.yml"), "utf8"), hub.split("/")[0]!);
+    repos = config.packages.map((p) => p.repo);
     checks.push(ok("tapster.yml is valid"));
   } catch (e) {
     checks.push(bad("tapster.yml is valid", e instanceof TapsterError ? `${e.reason}. ${e.fix}` : "Run tapster init."));
@@ -107,7 +121,7 @@ export async function doctor(_args: string[]): Promise<number> {
   const { "tapster.yml": _, ...others } = flows;
   checks.push(otherWorkflowsCheck(others));
   const gh = await userGitHub();
-  checks.push(...(await apiChecks(gh, hub, repos)));
+  checks.push(...(await apiChecks(gh, hub, repos, config, flows["tapster.yml"] ?? "")));
   for (const c of checks) console.log(c.ok ? `ok   ${c.name}` : `fix  ${c.name}\n     ${c.fix}`);
   const note = await appNote(gh, hub, repos);
   if (note) console.log(note);

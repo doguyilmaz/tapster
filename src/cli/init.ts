@@ -1,10 +1,12 @@
 import { createHash, createPrivateKey, createPublicKey, randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { type HubConfig, isApp, parseConfig } from "../config";
 import { TapsterError } from "../errors";
 import { GitHub } from "../github";
+import { decodeSparkleKey } from "../sparkle-key";
 import { appJwt } from "../token";
 import { run, runPath } from "../run";
 import hubReadme from "../../templates/hub/README.md" with { type: "text" };
@@ -31,8 +33,31 @@ export function teamIdFromSubject(subject: string): string | null {
   return /(?:^|[,/]\s*)OU=([A-Z0-9]{10})(?:[,/]|$)/.exec(subject)?.[1] ?? null;
 }
 
-export function fillWorkflow(template: string, pins: Pins, tapster: { sha: string; tag: string }): string {
+export function sparkleLabels(config: HubConfig): string[] {
+  const labels = config.packages.filter(isApp).flatMap((p) => (p.sparkle ? [p.sparkle.key, ...(p.sparkle.next_key ? [p.sparkle.next_key] : [])] : []));
+  return [...new Set(labels)];
+}
+
+export function sparkleEnv(labels: string[]): string {
+  const lines = labels.map((l) => `SPARKLE_KEY_${l.toUpperCase()}: "\${{ secrets.SPARKLE_KEY_${l.toUpperCase()} }}"`);
+  return lines.length ? `{ ${lines.join(", ")} }` : "{}";
+}
+
+export function keyPins(config: HubConfig, label: string, publicKey: string): string[] {
+  const users: string[] = [];
+  for (const p of config.packages.filter(isApp)) {
+    const pinned = p.sparkle?.key === label ? p.sparkle.public_key : p.sparkle?.next_key === label ? p.sparkle.next_public_key : undefined;
+    if (pinned === undefined) continue;
+    if (pinned !== publicKey) throw new TapsterError(`${p.name} pins ${pinned} for ${label}, but this key's public half is ${publicKey}`, "Pick the keychain account of the key the app ships with or fix tapster.yml.");
+    users.push(p.name);
+  }
+  if (users.length === 0) throw new TapsterError(`no package in tapster.yml uses the Sparkle key ${label}`, "Add the package with its sparkle section first.");
+  return users;
+}
+
+export function fillWorkflow(template: string, pins: Pins, tapster: { sha: string; tag: string }, labels: string[] = []): string {
   return template
+    .replaceAll("__SPARKLE_ENV__", sparkleEnv(labels))
     .replaceAll("__CHECKOUT_SHA__", pins["actions/checkout"].sha)
     .replaceAll("__CHECKOUT_TAG__", pins["actions/checkout"].tag)
     .replaceAll("__ATTEST_SHA__", pins["actions/attest-build-provenance"].sha)
@@ -110,7 +135,7 @@ async function rotateAppKey(gh: GitHub, hub: string): Promise<void> {
   });
   await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", pem);
   console.log(`Stored the new key (${fingerprint}).`);
-  console.log(`Now delete every other key on that page, so the old one stops working, and delete ${path}.`);
+  console.log(`Now delete every other key on that page so the old one stops working. Then delete ${path}.`);
 }
 
 async function storeCertificate(hub: string): Promise<void> {
@@ -165,6 +190,37 @@ async function tapsterRef(gh: GitHub): Promise<{ sha: string; tag: string }> {
   return { sha, tag: latest.tag_name };
 }
 
+function hubConfig(dir: string, hub: string): HubConfig {
+  const path = join(dir, "tapster.yml");
+  if (!existsSync(path)) throw new TapsterError("tapster.yml is missing", "Run tapster init in the hub first.");
+  return parseConfig(readFileSync(path, "utf8"), hub.split("/")[0]!);
+}
+
+async function writeWorkflow(gh: GitHub, dir: string, labels: string[]): Promise<void> {
+  await mkdir(join(dir, ".github/workflows"), { recursive: true });
+  const ref = await tapsterRef(gh);
+  await writeFile(join(dir, ".github/workflows/tapster.yml"), fillWorkflow(hubWorkflow, pinsJson, ref, labels));
+  console.log(`wrote .github/workflows/tapster.yml from the template, pinned to tapster ${ref.tag}; hand edits in it are replaced`);
+}
+
+async function storeSparkleKey(gh: GitHub, dir: string, hub: string, label: string, account: string): Promise<void> {
+  if (!/^[a-z0-9]+$/.test(label)) throw new TapsterError(`${label} is not a valid label`, "Use lowercase letters and digits, as in sparkle.key.");
+  const config = hubConfig(dir, hub);
+  const read = await run("security", ["find-generic-password", "-s", "https://sparkle-project.org", "-a", account, "-w"], { allowFail: true });
+  if (read.code !== 0) throw new TapsterError(`the login keychain has no Sparkle key for the account ${account}`, "Pass the account generate_keys used with --account (ed25519 by default).");
+  const text = read.stdout.trim();
+  const key = decodeSparkleKey(text);
+  const users = keyPins(config, label, key.publicKey);
+  console.log(`The key ${key.publicKey} signs updates for ${users.join(", ")}.`);
+  console.log("If it is lost, installed copies can never update again; if it leaks, anyone can sign updates for them.");
+  const backup = await ask("Do you keep an offline backup of this key? Type yes to store it in the hub: ");
+  if (backup !== "yes") throw new TapsterError("no offline backup confirmed", "Back the key up first (generate_keys -x exports it), then run this again.");
+  await setEnvSecret(hub, `SPARKLE_KEY_${label.toUpperCase()}`, text);
+  console.log(`Stored SPARKLE_KEY_${label.toUpperCase()}.`);
+  await writeWorkflow(gh, dir, sparkleLabels(config));
+  console.log("Review and commit the workflow change, then push.");
+}
+
 async function writeFiles(gh: GitHub, dir: string, hub: string): Promise<void> {
   const [owner, repo] = hub.split("/") as [string, string];
   const tap = `${owner}/${repo.replace(/^homebrew-/, "")}`;
@@ -177,10 +233,7 @@ async function writeFiles(gh: GitHub, dir: string, hub: string): Promise<void> {
   await write("tapster.yml", `version: 1\ntap: ${tap}\npackages: []\n`);
   await write(".tapster/state.json", `${JSON.stringify({ version: 1, packages: {} }, null, 2)}\n`);
   await write("README.md", hubReadme.replaceAll("__TAP__", tap).replaceAll("__OWNER__", owner).replaceAll("__HUB__", hub));
-  const flow = fillWorkflow(hubWorkflow, pinsJson, await tapsterRef(gh));
-  await mkdir(join(dir, ".github/workflows"), { recursive: true });
-  await writeFile(join(dir, ".github/workflows/tapster.yml"), flow);
-  console.log("wrote .github/workflows/tapster.yml");
+  await writeWorkflow(gh, dir, []);
 }
 
 export async function init(args: string[]): Promise<void> {
@@ -191,7 +244,14 @@ export async function init(args: string[]): Promise<void> {
   if (rotate === "app") return rotateAppKey(gh, hub);
   if (rotate === "certificate") return storeCertificate(hub);
   if (rotate === "notary") return storeNotary(hub);
-  if (args.length) throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init or tapster init --rotate app|certificate|notary.");
+  if (args[0] === "--sparkle" && args[1]) {
+    const account = args[2] === "--account" && args[3] ? args[3] : args.length === 2 ? "ed25519" : null;
+    if (account) return storeSparkleKey(gh, dir, hub, args[1], account);
+  }
+  if (args[0] === "--workflow" && args.length === 1) return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)));
+  if (args.length) {
+    throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, init --rotate app|certificate|notary, init --sparkle <label> [--account <account>] or init --workflow.");
+  }
   await protectHub(gh, hub);
   await createApp(hub.split("/")[0]!, hub);
   await storeCertificate(hub);

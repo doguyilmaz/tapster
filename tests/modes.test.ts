@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { auditArgs, auditEach, buildDownloads, renderNeeded } from "../src/action/render";
+import { appCaskInput, auditArgs, auditEach, buildDownloads, renderNeeded } from "../src/action/render";
 import { signMode } from "../src/action/sign";
-import { parseConfig } from "../src/config";
+import { type AppPackage, type CliPackage, parseConfig } from "../src/config";
 import { serializeState, upsert, emptyState } from "../src/state";
 import { loadManifest, saveManifest } from "../src/workdir";
 
@@ -22,9 +22,9 @@ packages:
 );
 
 test("downloads come from the published checksums", () => {
-  const d = buildDownloads(cfg.packages[0]!, "v1.0.0", [{ sha256: "a".repeat(64), name: "aims_1.0.0_darwin_arm64.tar.gz" }]);
+  const d = buildDownloads(cfg.packages[0] as CliPackage, "v1.0.0", [{ sha256: "a".repeat(64), name: "aims_1.0.0_darwin_arm64.tar.gz" }]);
   expect(d).toEqual([{ platform: "darwin-arm64", url: "https://github.com/o/aims/releases/download/v1.0.0/aims_1.0.0_darwin_arm64.tar.gz", sha256: "a".repeat(64) }]);
-  expect(() => buildDownloads(cfg.packages[0]!, "v1.0.0", [])).toThrow();
+  expect(() => buildDownloads(cfg.packages[0] as CliPackage, "v1.0.0", [])).toThrow();
 });
 
 test("render is needed when a cask is behind the state or an entry is publishing", async () => {
@@ -78,4 +78,33 @@ test("each cask is audited for the systems it ships for", () => {
   ]);
   expect(auditArgs("o/tapster-audit", "b", false, ["linux-arm64"])).toEqual([["audit", "--cask", "--os", "linux", "--arch", "arm", "o/tapster-audit/b"]]);
   expect(auditArgs("o/tapster-audit", "c", false, ["darwin-universal", "windows-amd64"])).toEqual([["audit", "--cask", "o/tapster-audit/c"]]);
+});
+
+test("an app cask takes the DMG digest from the published checksums and the floor from the state", () => {
+  const app = parseConfig(
+    `version: 1
+tap: o/tap
+packages:
+  - name: hafifpix
+    repo: o/hafifpix
+    kind: app
+    app: HafifPix.app
+    bundle_id: com.o.HafifPix
+    assets: { darwin-arm64: "HafifPix-{version}.app.tar.gz" }
+    dmg: { name: "HafifPix-{version}.dmg" }
+`,
+    "o",
+  ).packages[0] as AppPackage;
+  const entry = { tag: "v1.3.1", releaseId: 1, checksums: "b".repeat(64), status: "published" as const, app: { macos: "sequoia", identifiers: [] } };
+  const lines = [{ sha256: "d".repeat(64), name: "HafifPix-1.3.1.dmg" }];
+  expect(appCaskInput(app, entry, lines, { description: "Image compressor", homepage: "https://x.y" })).toEqual({
+    pkg: app,
+    version: "1.3.1",
+    sha256: "d".repeat(64),
+    macos: "sequoia",
+    description: "Image compressor",
+    homepage: "https://x.y",
+  });
+  expect(() => appCaskInput(app, { ...entry, app: undefined }, lines, { description: "x", homepage: "https://x.y" })).toThrow(/app facts/);
+  expect(() => appCaskInput(app, entry, [], { description: "x", homepage: "https://x.y" })).toThrow(/HafifPix-1.3.1.dmg/);
 });

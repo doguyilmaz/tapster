@@ -46,6 +46,7 @@ function parsePax(data: Buffer): Record<string, string> {
 
 const PATH_MAX = 1024;
 const MAX_ENTRIES = 200_000;
+const MAX_LINK_STEPS = 1_000_000;
 const MAX_HEADER = 64 * 1024;
 const PRINTABLE = /^[\x20-\x5b\x5d-\x7e]+$/;
 
@@ -132,10 +133,10 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
 }
 
 function checkSymlinks(entries: TarEntry[]) {
-  const links = new Set(entries.filter((e) => e.type === "symlink").map((e) => e.name.toLowerCase()));
+  const links = new Map(entries.filter((e) => e.type === "symlink").map((e) => [e.name.toLowerCase(), e.linkname!] as const));
   if (links.size === 0) return;
   const names = entries.map((e) => e.name.toLowerCase()).sort();
-  for (const link of links) {
+  for (const link of links.keys()) {
     const below = `${link}/`;
     let lo = 0;
     let hi = names.length;
@@ -146,19 +147,29 @@ function checkSymlinks(entries: TarEntry[]) {
     }
     if (names[lo]?.startsWith(below)) throw bad(`has ${names[lo]}, which passes through a symlink`);
   }
+  const components = (target: string) => target.split("/").filter((p) => p !== "" && p !== ".");
+  let steps = 0;
   for (const e of entries) {
     if (e.type !== "symlink") continue;
     const dir = posix.dirname(e.name);
     const stack = dir === "." ? [] : dir.split("/");
-    const parts = e.linkname!.split("/").filter((p) => p !== "" && p !== ".");
-    for (const [i, p] of parts.entries()) {
-      if (p === "..") {
+    const queue = components(e.linkname!);
+    let hops = 0;
+    while (queue.length > 0) {
+      if (++steps > MAX_LINK_STEPS) throw bad("has more symlinks than tapster checks");
+      const part = queue.shift()!;
+      if (part === "..") {
         if (stack.length === 0) throw bad(`has a symlink ${e.name} pointing outside`);
         stack.pop();
         continue;
       }
-      stack.push(p);
-      if (i < parts.length - 1 && links.has(stack.join("/").toLowerCase())) throw bad(`has a symlink ${e.name} whose target passes through another symlink`);
+      stack.push(part);
+      if (stack.length > PATH_MAX / 2) throw bad(`has a symlink ${e.name} that resolves to a path longer than macOS allows`);
+      const target = links.get(stack.join("/").toLowerCase());
+      if (target === undefined) continue;
+      if (++hops > 40) throw bad(`has a symlink ${e.name} whose links loop`);
+      stack.pop();
+      queue.unshift(...components(target));
     }
   }
 }

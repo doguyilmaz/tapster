@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { descProblems, downloadUrl, renderCask, renderScoop, rubyString } from "../src/render";
-import { parseConfig } from "../src/config";
+import { descProblems, downloadUrl, renderAppCask, renderCask, renderScoop, rubyString } from "../src/render";
+import { type AppPackage, type CliPackage, parseConfig } from "../src/config";
 
 const golden = (n: string) => readFileSync(new URL(`./golden/${n}`, import.meta.url), "utf8");
 const cfg = parseConfig(
@@ -29,7 +29,7 @@ packages:
 `,
   "o",
 );
-const [aims, ebb] = cfg.packages as [typeof cfg.packages[0], typeof cfg.packages[0]];
+const [aims, ebb] = cfg.packages as [CliPackage, CliPackage];
 const d = (platform: string, asset: string, n: string) => ({ platform: platform as never, url: downloadUrl("o/aims", "v0.1.5", asset), sha256: n.repeat(64) });
 const aimsInput = {
   pkg: aims,
@@ -78,4 +78,53 @@ test("descriptions follow Homebrew's rules", () => {
     expect(descProblems(bad, "aims"), bad).not.toEqual([]);
   }
   expect(descProblems("Lists files, dirs etc.", "x")).toEqual([]);
+});
+
+const apps = parseConfig(
+  `version: 1
+tap: doguyilmaz/tap
+packages:
+  - name: hafifpix
+    repo: doguyilmaz/hafifpix
+    kind: app
+    app: HafifPix.app
+    bundle_id: com.doguyilmaz.HafifPix
+    assets: { darwin-arm64: "HafifPix-{version}.app.tar.gz" }
+    dmg: { name: "HafifPix-{version}.dmg" }
+    sparkle: { key: shared, public_key: "${"A".repeat(43)}=" }
+    cask:
+      binaries: [Contents/Resources/bin/hafif]
+      zap: { trash: ["~/Library/Preferences/com.doguyilmaz.HafifPix.plist"] }
+  - name: battistics
+    repo: doguyilmaz/battistics
+    kind: app
+    app: Battistics.app
+    bundle_id: com.doguyilmaz.Battistics
+    assets: { darwin-universal: "Battistics-{version}.app.tar.gz" }
+    dmg: { name: "Battistics-{version}.dmg" }
+    cask:
+      uninstall: { launchctl: [com.doguyilmaz.Battistics.PowerHelper], quit: [com.doguyilmaz.Battistics] }
+`,
+  "doguyilmaz",
+).packages as [AppPackage, AppPackage];
+
+test("app cask with a linked command and the macOS floor from the state", () => {
+  const out = renderAppCask({
+    pkg: apps[0],
+    version: "1.3.1",
+    sha256: "5".repeat(64),
+    macos: "sequoia",
+    description: "Image compressor that keeps quality",
+    homepage: "https://github.com/doguyilmaz/hafifpix",
+  });
+  expect(out).toBe(golden("hafifpix.rb"));
+});
+
+test("a universal app without Sparkle has no arch floor and no auto_updates", () => {
+  const out = renderAppCask({ pkg: apps[1], version: "1.4.1", sha256: "6".repeat(64), macos: "sonoma", description: "Battery details", homepage: "https://github.com/doguyilmaz/battistics" });
+  expect(out).not.toContain("depends_on arch");
+  expect(out).not.toContain("auto_updates");
+  expect(out).toContain("  depends_on macos: :sonoma\n");
+  expect(out).toContain('  uninstall launchctl: "com.doguyilmaz.Battistics.PowerHelper",\n            quit:      "com.doguyilmaz.Battistics"\n');
+  expect(() => renderAppCask({ pkg: apps[1], version: "1.4.1", sha256: "6".repeat(64), macos: "leopard", description: "x", homepage: "https://x.y" })).toThrow(/leopard/);
 });

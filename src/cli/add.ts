@@ -1,9 +1,12 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { isMap, isSeq, parseDocument, type Scalar, YAMLMap } from "yaml";
+import { basename, join } from "node:path";
+import { isMap, isSeq, parse, parseDocument, type Scalar, YAMLMap } from "yaml";
+import { BUNDLE_ID } from "../config";
 import { TapsterError } from "../errors";
+import { parsePlist } from "../plist";
 import pinsJson from "../../templates/pins.json";
+import appTemplate from "../../templates/project/app-release.yml" with { type: "text" };
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, userGitHub } from "./gh";
 
@@ -107,10 +110,145 @@ export function inferEntry(name: string, repo: string, assets: string[], version
   return lines.join("\n");
 }
 
+export type FoundApp = { name: string; bundleId: string | null; feed: string; publicKey: string | null; universal: boolean; build: string | null; appPath: string | null };
+
+const SKIP = new Set([".git", ".build", "build", "dist", "DerivedData", "node_modules", "Pods", "Carthage"]);
+const literal = (v: unknown) => (typeof v === "string" && !v.includes("$(") ? v : null);
+const feedName = (url: unknown) => (typeof url === "string" ? /\/releases\/latest\/download\/([A-Za-z0-9._-]+\.xml)$/.exec(url)?.[1] ?? null : null);
+
+function infoPlists(dir: string, depth = 0): string[] {
+  if (depth > 5) return [];
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.isSymbolicLink() || SKIP.has(e.name) || e.name.endsWith(".app") || e.name.endsWith(".xcodeproj")) continue;
+    if (e.isDirectory()) out.push(...infoPlists(join(dir, e.name), depth + 1));
+    else if (e.name === "Info.plist") out.push(join(dir, e.name));
+  }
+  return out;
+}
+
+function makeTarget(dir: string): { build: string | null; appPath: string | null } {
+  const make = existsSync(join(dir, "Makefile")) ? readFileSync(join(dir, "Makefile"), "utf8") : "";
+  return { build: /^app:/m.test(make) ? "make app" : null, appPath: /^APP\s*:?=\s*([^\s].*?\.app)\s*$/m.exec(make)?.[1] ?? null };
+}
+
+export function findApp(dir: string): FoundApp | null {
+  const top = readdirSync(dir);
+  if (!top.some((f) => f === "project.yml" || f === "Package.swift" || f.endsWith(".xcodeproj"))) return null;
+  const make = makeTarget(dir);
+  if (existsSync(join(dir, "project.yml"))) {
+    const project = parse(readFileSync(join(dir, "project.yml"), "utf8")) as { settings?: { base?: Record<string, unknown> }; targets?: Record<string, Record<string, unknown>> };
+    for (const [target, t] of Object.entries(project?.targets ?? {})) {
+      if (t.type !== "application") continue;
+      const props = ((t.info as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}) as Record<string, unknown>;
+      const feed = feedName(props.SUFeedURL);
+      if (!feed) continue;
+      const base = { ...(project.settings?.base ?? {}), ...((t.settings as { base?: Record<string, unknown> } | undefined)?.base ?? {}) };
+      return {
+        name: literal(base.PRODUCT_NAME) ?? target,
+        bundleId: literal(base.PRODUCT_BUNDLE_IDENTIFIER),
+        feed,
+        publicKey: literal(props.SUPublicEDKey),
+        universal: String(base.ARCHS ?? "").includes("x86_64"),
+        ...make,
+      };
+    }
+  }
+  const xcodeproj = top.find((f) => f.endsWith(".xcodeproj"));
+  for (const path of infoPlists(dir)) {
+    let info: Record<string, unknown>;
+    try {
+      info = parsePlist(readFileSync(path)) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const feed = feedName(info.SUFeedURL);
+    if (!feed) continue;
+    const pbx = xcodeproj && existsSync(join(dir, xcodeproj, "project.pbxproj")) ? readFileSync(join(dir, xcodeproj, "project.pbxproj"), "utf8") : "";
+    const fromPbx = /PRODUCT_BUNDLE_IDENTIFIER = "?([A-Za-z0-9.-]+)"?;/.exec(pbx)?.[1] ?? null;
+    return {
+      name: literal(info.CFBundleName) ?? (xcodeproj ? basename(xcodeproj, ".xcodeproj") : basename(dir)),
+      bundleId: literal(info.CFBundleIdentifier) ?? fromPbx,
+      feed,
+      publicKey: literal(info.SUPublicEDKey),
+      universal: /ARCHS = [^;]*x86_64/.test(pbx),
+      ...make,
+    };
+  }
+  return null;
+}
+
+export function appEntry(name: string, repo: string, found: FoundApp): string {
+  const app = { ...found, name: found.appPath ? basename(found.appPath, ".app") : found.name };
+  const lines = [
+    `  - name: ${name}`,
+    `    repo: ${repo}`,
+    "    kind: app",
+    `    app: ${app.name}.app`,
+    `    bundle_id: ${app.bundleId && BUNDLE_ID.test(app.bundleId) ? app.bundleId : "<bundle id>"}`,
+    "    assets:",
+    `      ${app.universal ? "darwin-universal" : "darwin-arm64"}: "${app.name}-{version}.app.tar.gz"`,
+    "    dmg:",
+    `      name: "${app.name}-{version}.dmg"`,
+    "    sparkle:",
+    `      key: ${name.replace(/[^a-z0-9]/g, "")}`,
+    ...(app.feed === "appcast.xml" ? [] : [`      feed: ${app.feed}`]),
+    `      public_key: "${app.publicKey ?? "<SUPublicEDKey>"}"`,
+  ];
+  return lines.join("\n");
+}
+
+export type AppBuild = { build: string; appPath: string; runner: string; carry: string[] };
+
+export function appWorkflow(b: AppBuild, pins: Pins): string {
+  if (/[\r\n]/.test(b.build)) throw new TapsterError("the build command must be one line", "Wrap several steps in a make target or a script.");
+  if (!/^[A-Za-z0-9 ._\/-]+\.app$/.test(b.appPath)) throw new TapsterError(`${b.appPath} is not a path to an .app`, "Pass the path the build writes the app to.");
+  if (!/^macos-[0-9a-z.-]+$/.test(b.runner)) throw new TapsterError(`${b.runner} is not a macOS runner`, "Use a runner like macos-15.");
+  const carry = b.carry.map((c) => {
+    const [from, to] = c.split(":");
+    if (!from || !to || !/^[A-Za-z0-9._\/-]+$/.test(from) || !/^[A-Za-z0-9._-]+$/.test(to)) throw new TapsterError(`${c} is not <path>:<asset name>`, "Name each carried file as path:name.");
+    return `          cp "${from}" "dist/${to}"`;
+  });
+  return appTemplate
+    .replaceAll("__CHECKOUT_SHA__", pins["actions/checkout"].sha)
+    .replaceAll("__CHECKOUT_TAG__", pins["actions/checkout"].tag)
+    .replaceAll("__UPLOAD_SHA__", pins["actions/upload-artifact"].sha)
+    .replaceAll("__UPLOAD_TAG__", pins["actions/upload-artifact"].tag)
+    .replaceAll("__DOWNLOAD_SHA__", pins["actions/download-artifact"].sha)
+    .replaceAll("__DOWNLOAD_TAG__", pins["actions/download-artifact"].tag)
+    .replaceAll("__ATTEST_SHA__", pins["actions/attest-build-provenance"].sha)
+    .replaceAll("__ATTEST_TAG__", pins["actions/attest-build-provenance"].tag)
+    .replaceAll("__RUNNER__", b.runner)
+    .replaceAll("__BUILD__", b.build)
+    .replaceAll("__APP_PATH__", b.appPath)
+    .replaceAll("__APP_NAME__", basename(b.appPath, ".app"))
+    .replace("__CARRY__\n", carry.map((l) => `${l}\n`).join(""));
+}
+
+async function addApp(dir: string, repo: string, name: string, app: FoundApp, force: boolean): Promise<void> {
+  const flow = join(dir, ".github/workflows/release.yml");
+  if (existsSync(flow) && !force) {
+    throw new TapsterError(".github/workflows/release.yml already exists", "Move it aside and run tapster add again. To replace it, run tapster add --force.");
+  }
+  const build = app.build ?? `echo "Set the build command in .github/workflows/release.yml" && exit 1`;
+  const appPath = app.appPath ?? `build/${app.name}.app`;
+  await mkdir(join(dir, ".github/workflows"), { recursive: true });
+  await writeFile(flow, appWorkflow({ build, appPath, runner: "macos-15", carry: [] }, pinsJson));
+  console.log(`- wrote .github/workflows/release.yml (build with "${build}", pack ${appPath}, attest, draft)`);
+  if (!app.build || !app.appPath) console.log("- set the build command and the app path in that file; the build must sign the app ad hoc");
+  console.log("- the app must set SURequireSignedFeed and SUVerifyUpdateBeforeExtraction to true and stamp both version keys with the tag");
+  console.log("- to attach files the hub carries unchanged, add cp lines to the release job and list them under carry in tapster.yml");
+  console.log("\nAdd this to the hub's tapster.yml under packages:\n");
+  console.log(appEntry(name, repo, app));
+  console.log(`\nThen store the Sparkle key in the hub with tapster init --sparkle ${name.replace(/[^a-z0-9]/g, "")}.`);
+}
+
 export async function add(args: string[]): Promise<void> {
   const dir = process.cwd();
   const repo = await currentRepo(dir);
   const name = repo.split("/")[1]!.toLowerCase();
+  const app = findApp(dir);
+  if (app) return addApp(dir, repo, name, app, args.includes("--force"));
   const goreleaser = [".goreleaser.yaml", ".goreleaser.yml"].find((f) => existsSync(join(dir, f)));
   const isBun = existsSync(join(dir, "package.json")) && (existsSync(join(dir, "bun.lock")) || existsSync(join(dir, "bun.lockb")));
   let kind: "go" | "bun";
@@ -136,7 +274,7 @@ export async function add(args: string[]): Promise<void> {
     await writeFile(flow, bunWorkflow(name, entry.replace(/^\.\//, ""), pinsJson));
     console.log("- wrote .github/workflows/release.yml (build, attest, draft)");
   } else {
-    throw new TapsterError("this project is neither GoReleaser-based Go nor Bun", "tapster add supports those two in phase 1.");
+    throw new TapsterError("this project is not a GoReleaser-based Go CLI, a Bun CLI or an app with a Sparkle feed", "tapster add supports those three.");
   }
   const gh = await userGitHub();
   const latest = await gh.json<{ tag_name: string; assets: { name: string }[] }>("GET", `/repos/${repo}/releases/latest`).catch(() => null);

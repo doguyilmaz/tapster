@@ -1,5 +1,5 @@
 import type { ChecksumLine } from "./checksums";
-import { type PackageConfig, type Platform, assetName, parseTag, versionOf } from "./config";
+import { type PackageConfig, type Platform, assetName, isApp, parseTag, versionOf } from "./config";
 import { TapsterError } from "./errors";
 import type { Release } from "./github";
 
@@ -9,7 +9,9 @@ export type DraftStatus = { kind: "ready" } | { kind: "resume" } | { kind: "wait
 export type WorkItem = { package: string; tag: string; releaseId: number; resume: boolean };
 
 export function draftStatus(r: Release, pkg: PackageConfig, checksums: ChecksumLine[] | null, recorded?: string): DraftStatus {
-  if (!parseTag(r.tag_name)) return { kind: "invalid", reason: `tag ${r.tag_name} is not like v1.2.3` };
+  const tag = parseTag(r.tag_name);
+  if (!tag) return { kind: "invalid", reason: `tag ${r.tag_name} is not like v1.2.3` };
+  if (isApp(pkg) && tag.pre !== null) return { kind: "invalid", reason: "prereleases of apps are not published, because the feed would never serve them" };
   if (r.assets.some((a) => a.name.startsWith(STAGING))) return { kind: "resume" };
   if (recorded && r.assets.some((a) => a.name === "checksums.txt" && a.digest === `sha256:${recorded}`)) return { kind: "resume" };
   if (r.assets.some((a) => a.state !== "uploaded")) return { kind: "waiting", reason: "assets are still uploading" };

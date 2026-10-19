@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { appKeyFingerprint, appManifest, fillWorkflow, teamIdFromSubject } from "../src/cli/init";
+import { appKeyFingerprint, appManifest, fillWorkflow, keyPins, sparkleEnv, sparkleLabels, teamIdFromSubject } from "../src/cli/init";
+import { parseConfig } from "../src/config";
 import { generateKeyPairSync } from "node:crypto";
 import { TapsterError } from "../src/errors";
 import pins from "../templates/pins.json";
@@ -35,4 +36,32 @@ test("an App key shows the fingerprint GitHub lists for it", () => {
   expect(() => appKeyFingerprint("not a key")).toThrow(TapsterError);
   const { publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   expect(() => appKeyFingerprint(publicKey.export({ type: "spki", format: "pem" }).toString())).toThrow(TapsterError);
+});
+
+const K1 = `${"A".repeat(43)}=`;
+const K2 = `${"B".repeat(43)}=`;
+const apps = parseConfig(
+  `version: 1
+tap: o/tap
+packages:
+  - { name: a, repo: o/a, kind: app, app: A.app, bundle_id: com.o.A, assets: { darwin-arm64: "A-{version}.tar.gz" }, dmg: { name: "A-{version}.dmg" }, sparkle: { key: shared, public_key: "${K1}" } }
+  - { name: b, repo: o/b, kind: app, app: B.app, bundle_id: com.o.B, assets: { darwin-arm64: "B-{version}.tar.gz" }, dmg: { name: "B-{version}.dmg" }, sparkle: { key: shared, public_key: "${K1}", next_key: newer, next_public_key: "${K2}" } }
+  - { name: c, repo: o/c, binaries: [c], assets: { darwin-arm64: "c-{version}.tar.gz" } }
+`,
+  "o",
+);
+
+test("the sparkle step gets one secret per label", () => {
+  expect(sparkleLabels(apps)).toEqual(["shared", "newer"]);
+  const env = sparkleEnv(["shared", "recesso"]);
+  expect(env).toContain('SPARKLE_KEY_SHARED: "${{ secrets.SPARKLE_KEY_SHARED }}"');
+  expect(env).toContain('SPARKLE_KEY_RECESSO: "${{ secrets.SPARKLE_KEY_RECESSO }}"');
+  expect(sparkleEnv([])).toBe("{}");
+});
+
+test("a stored Sparkle key must match every package that pins it", () => {
+  expect(keyPins(apps, "shared", K1)).toEqual(["a", "b"]);
+  expect(keyPins(apps, "newer", K2)).toEqual(["b"]);
+  expect(() => keyPins(apps, "shared", K2)).toThrow(/a pins/);
+  expect(() => keyPins(apps, "other", K1)).toThrow(/no package/);
 });

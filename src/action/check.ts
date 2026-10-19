@@ -3,15 +3,31 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { missingAttestations } from "../attest";
 import { parseChecksums } from "../checksums";
-import { GitHub } from "../github";
+import { type AppPackage, isApp } from "../config";
+import { GitHub, type Release } from "../github";
 import { readSecret, requireVar } from "../mask";
 import { type WorkItem, planPackage } from "../plan";
-import { failure, record } from "../report";
-import { TapsterError } from "../errors";
-import { STATE_PATH, parseState, recordedChecksums } from "../state";
+import { failure, record, warn } from "../report";
+import { GitHubError, TapsterError } from "../errors";
+import { STATE_PATH, type State, parseState, recordedChecksums } from "../state";
 import { type InstallationToken, installationExists, installationToken } from "../token";
 import type { Context } from "./context";
 import { renderNeeded } from "./render";
+
+export function feedWarning(latest: Release | null, state: State, pkg: AppPackage): string | null {
+  if (!latest || !pkg.sparkle) return null;
+  if (state.packages[pkg.name]?.some((e) => e.releaseId === latest.id && e.status === "published")) return null;
+  return `${pkg.name}: the latest release ${latest.tag_name} did not come from the hub; installed copies read its ${pkg.sparkle.feed}, so check who published it`;
+}
+
+async function latestRelease(gh: GitHub, repo: string): Promise<Release | null> {
+  try {
+    return await gh.json<Release>("GET", `/repos/${repo}/releases/latest`);
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 404) return null;
+    throw e;
+  }
+}
 
 export async function check(ctx: Context): Promise<void> {
   const appId = requireVar("TAPSTER_APP_ID");
@@ -42,11 +58,14 @@ export async function check(ctx: Context): Promise<void> {
       if (repo.private) privateRepos.add(pkg.name);
       for (const item of plan.items) {
         const release = pkg.attestation === "auto" && !repo.private && !item.resume ? await gh.getRelease(pkg.repo, item.releaseId) : null;
-        const missing = release ? await missingAttestations(pkg.repo, release.assets, tok.token) : [];
+        const attested = release?.assets.filter((a) => !(isApp(pkg) && Object.hasOwn(pkg.carry, a.name))) ?? [];
+        const missing = release ? await missingAttestations(pkg.repo, attested, tok.token) : [];
         if (missing.length) record({ item: pkg.name, result: "waiting", detail: `${item.tag}: no attestation yet for ${missing.join(", ")}` });
         else items.push(item);
       }
       for (const note of plan.notes) record({ item: pkg.name, result: "waiting", detail: note });
+      const feed = isApp(pkg) ? feedWarning(await latestRelease(gh, pkg.repo), state, pkg) : null;
+      if (feed) warn(feed);
     } catch (e) {
       failure(pkg.name, e);
     } finally {

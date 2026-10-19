@@ -1,0 +1,52 @@
+name: release
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+permissions: {}
+jobs:
+  build:
+    runs-on: __RUNNER__
+    permissions: { contents: read }
+    steps:
+      - name: Refuse anything but a tag
+        if: ${{ github.ref_type != 'tag' }}
+        run: |
+          echo "::error::Run this workflow on a tag like v1.2.3."
+          exit 1
+      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+        with: { persist-credentials: false }
+      - name: Build the app, signed ad hoc
+        env: { TAG: "${{ github.ref_name }}" }
+        run: |
+          set -euo pipefail
+          export VERSION="${TAG#v}"
+          __BUILD__
+      - name: Pack the app
+        env: { TAG: "${{ github.ref_name }}" }
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/out"
+          tar -C "$(dirname "__APP_PATH__")" --no-mac-metadata --no-xattrs -czf "$RUNNER_TEMP/out/__APP_NAME__-${TAG#v}.app.tar.gz" "$(basename "__APP_PATH__")"
+      - uses: actions/upload-artifact@__UPLOAD_SHA__ # __UPLOAD_TAG__
+        with: { name: app, path: "${{ runner.temp }}/out", if-no-files-found: error, retention-days: 1 }
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions: { contents: write, id-token: write, attestations: write }
+    steps:
+      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@__DOWNLOAD_SHA__ # __DOWNLOAD_TAG__
+        with: { name: app, path: dist }
+      - name: List the files
+        run: |
+          set -euo pipefail
+__CARRY__
+          cd dist && sha256sum * > checksums.txt
+      - uses: actions/attest-build-provenance@__ATTEST_SHA__ # __ATTEST_TAG__
+        if: ${{ !github.event.repository.private }}
+        with: { subject-checksums: dist/checksums.txt }
+      - name: Hand the draft to the tapster hub
+        env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" }
+        run: gh release create "$TAG" dist/* --draft --verify-tag --generate-notes --title "$TAG"

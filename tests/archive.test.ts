@@ -108,25 +108,69 @@ test("the repack drops setuid, setgid, sticky and group or other write", () => {
   expect(out.find((e) => e.name === "d")!.mode).toBe(0o755);
 });
 
+test("framework links that chain through other links are fine", () => {
+  const entries = readTarGz(
+    rawTarGz([
+      { name: "S.framework/Versions/B/S", data: "x" },
+      { name: "S.framework/Versions/B/Resources/Info.plist", data: "p" },
+      { name: "S.framework/Versions/Current", type: "2", linkname: "B" },
+      { name: "S.framework/S", type: "2", linkname: "Versions/Current/S" },
+      { name: "S.framework/Resources", type: "2", linkname: "Versions/Current/Resources" },
+    ]),
+  );
+  expect(entries.filter((e) => e.type === "symlink").length).toBe(3);
+});
+
+test.each([
+  ["a chain that leaves", [{ name: "a", type: "2", linkname: "." }, { name: "b", type: "2", linkname: "a/.." }]],
+  ["a loop", [{ name: "a", type: "2", linkname: "b" }, { name: "b", type: "2", linkname: "a" }, { name: "c", type: "2", linkname: "a/x" }]],
+])("still rejects %s", (_, entries) => {
+  expect(() => readTarGz(rawTarGz(entries))).toThrow(TapsterError);
+});
+
 test("names and link targets longer than macOS's PATH_MAX are refused", () => {
   expect(() => readTarGz(rawTarGz([{ name: "PaxHeader", type: "x", data: paxRecord("path", "a/".repeat(600) + "x") }, { name: "x", data: "1" }]))).toThrow(TapsterError);
   expect(() => readTarGz(rawTarGz([{ name: "PaxHeader", type: "x", data: paxRecord("linkpath", "a/".repeat(600)) }, { name: "l", type: "2", linkname: "x" }]))).toThrow(TapsterError);
 });
 
-test("an archive built to make the symlink checks slow finishes quickly", () => {
+test("archives built to make the symlink checks slow finish quickly", () => {
   const deep = Array.from({ length: 500 }, () => "d").join("/");
-  const gz = rawTarGz([{ name: "link", type: "2", linkname: "x" }, ...Array.from({ length: 20000 }, (_, i) => ({ name: `${deep.slice(0, 900)}/${i}`, data: "" }))]);
-  const started = Date.now();
-  try {
-    readTarGz(gz);
-  } catch (e) {
-    expect(e).toBeInstanceOf(TapsterError);
+  const cases = [
+    rawTarGz(Array.from({ length: 4000 }, (_, i) => ({ name: `l${i}`, type: "2", linkname: deep }))),
+    rawTarGz([{ name: "link", type: "2", linkname: "x" }, ...Array.from({ length: 20000 }, (_, i) => ({ name: `${deep.slice(0, 900)}/${i}`, data: "" }))]),
+  ];
+  for (const gz of cases) {
+    const started = Date.now();
+    try {
+      readTarGz(gz);
+    } catch (e) {
+      expect(e).toBeInstanceOf(TapsterError);
+    }
+    expect(Date.now() - started).toBeLessThan(3000);
   }
-  expect(Date.now() - started).toBeLessThan(3000);
+});
+
+test("link chains that keep growing the path are cut off quickly", () => {
+  const wide = Array.from({ length: 500 }, () => "b").join("/");
+  const started = Date.now();
+  expect(() => readTarGz(rawTarGz([{ name: "a", type: "2", linkname: wide }, { name: "b", type: "2", linkname: wide }]))).toThrow(TapsterError);
+  expect(Date.now() - started).toBeLessThan(1000);
 });
 
 test("oversized long-name and extended headers are refused before they are read", () => {
   const huge = "a".repeat(200_000);
   expect(() => readTarGz(rawTarGz([{ name: "././@LongLink", type: "L", data: huge }, { name: "x", data: "1" }]))).toThrow(TapsterError);
   expect(() => readTarGz(rawTarGz([{ name: "PaxHeader", type: "x", data: paxRecord("comment", huge) }, { name: "x", data: "1" }]))).toThrow(TapsterError);
+});
+
+test("forty links that each add 500 folders are cut off quickly", () => {
+  const pad = Array.from({ length: 500 }, () => "d").join("/");
+  const links = Array.from({ length: 40 }, (_, i) => ({ name: `L${i}`, type: "2", linkname: i < 39 ? `L${i + 1}/${pad}` : pad }));
+  const started = Date.now();
+  try {
+    readTarGz(rawTarGz(links));
+  } catch (e) {
+    expect(e).toBeInstanceOf(TapsterError);
+  }
+  expect(Date.now() - started).toBeLessThan(1000);
 });
