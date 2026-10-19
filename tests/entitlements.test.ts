@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { checkEntitlements, mergeEntitlements, parseEntitlements, renderEntitlements } from "../src/entitlements";
+import { entitlementsFor, mergeEntitlements, parseEntitlements, renderEntitlements } from "../src/entitlements";
 import { parsePlist } from "../src/plist";
 import { TapsterError } from "../src/errors";
 
@@ -14,13 +14,6 @@ test("reads what codesign prints, including nothing", () => {
   });
   expect(parseEntitlements("")).toEqual({});
   expect(parseEntitlements("  \n")).toEqual({});
-});
-
-test("only listed keys pass, and get-task-allow never does", () => {
-  const found = parseEntitlements(fromCodesign);
-  expect(() => checkEntitlements(found, ["com.apple.security.network.client"], "Contents/MacOS/App")).toThrow(TapsterError);
-  expect(() => checkEntitlements(found, ["com.apple.security.network.client", "com.apple.security.application-groups"], "x")).not.toThrow();
-  expect(() => checkEntitlements({ "com.apple.security.get-task-allow": true }, ["com.apple.security.get-task-allow"], "x")).toThrow(TapsterError);
 });
 
 test("values other than booleans, strings and string lists are refused", () => {
@@ -40,4 +33,12 @@ test("the written plist round-trips and is escaped", () => {
   expect(xml.indexOf("a.key")).toBeLessThan(xml.indexOf("m.key"));
   expect(() => renderEntitlements({ "a.key": "<x>" })).toThrow(TapsterError);
   expect(() => renderEntitlements({ "bad key": true })).toThrow(TapsterError);
+});
+test("entitlements come only from config; the build cannot add one", () => {
+  const p = { code: { "Contents/MacOS/Helper": { entitlements: { "com.apple.application-identifier": "{team}.com.o.B.Helper" } } } } as never;
+  expect(entitlementsFor("Contents/MacOS/Helper", {}, p, "TEAM000001").entitlements).toEqual({ "com.apple.application-identifier": "TEAM000001.com.o.B.Helper" });
+  expect(entitlementsFor("Contents/MacOS/Helper", { "com.apple.application-identifier": "TEAM000001.com.o.B.Helper" }, p, "TEAM000001").dropped).toEqual([]);
+  expect(() => entitlementsFor("Contents/MacOS/Helper", { "com.apple.application-identifier": "OTHER.x" }, p, "TEAM000001")).toThrow(TapsterError);
+  expect(() => entitlementsFor("Contents/MacOS/App", { "com.apple.security.network.client": true }, p, "TEAM000001")).toThrow(TapsterError);
+  expect(entitlementsFor("Contents/MacOS/App", { "com.apple.security.get-task-allow": true }, p, "TEAM000001")).toEqual({ entitlements: {}, dropped: ["com.apple.security.get-task-allow"] });
 });

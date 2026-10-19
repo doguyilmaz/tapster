@@ -74,3 +74,9 @@ test("the volume name defaults to the app name", () => {
   if (!isApp(p)) throw new Error("not an app");
   expect(p.dmg.volume).toBe("HafifPix");
 });
+
+test("the app itself can take entitlements under code '.'", () => {
+  const p = parseConfig(app.replace("    code:\n", '    code:\n      ".": { entitlements: { com.apple.security.network.client: true } }\n'), "o").packages[0]!;
+  if (!isApp(p)) throw new Error("not an app");
+  expect(p.code["."]!.entitlements).toEqual({ "com.apple.security.network.client": true });
+});

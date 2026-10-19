@@ -1,4 +1,5 @@
 import { TapsterError } from "./errors";
+import type { AppPackage } from "./config";
 import { parsePlist } from "./plist";
 
 export type EntitlementValue = boolean | string | string[];
@@ -22,17 +23,6 @@ export function parseEntitlements(xml: string): Entitlements {
     else throw refuse(`the entitlement ${key} has a value tapster does not sign`, "tapster signs boolean, string and string list entitlements.");
   }
   return out;
-}
-
-export function checkEntitlements(found: Entitlements, allowed: string[], path: string): void {
-  for (const key of Object.keys(found)) {
-    if (key === "com.apple.security.get-task-allow") {
-      throw refuse(`${path} carries com.apple.security.get-task-allow`, "Build the app in the Release configuration.");
-    }
-    if (!allowed.includes(key)) {
-      throw refuse(`${path} asks for the entitlement ${key}`, `If the app needs it, list ${key} under entitlements in tapster.yml.`);
-    }
-  }
 }
 
 export function mergeEntitlements(found: Entitlements, extra: Entitlements, teamId: string): Entitlements {
@@ -64,4 +54,19 @@ export function renderEntitlements(e: Entitlements): string {
 ${body}
 </dict></plist>
 `;
+}
+
+export function entitlementsFor(path: string, found: Entitlements, pkg: AppPackage, teamId: string): { entitlements: Entitlements; dropped: string[] } {
+  const configured = mergeEntitlements({}, (pkg.code[path]?.entitlements ?? {}) as Entitlements, teamId);
+  const dropped: string[] = [];
+  for (const [key, value] of Object.entries(found)) {
+    if (key === "com.apple.security.get-task-allow") {
+      dropped.push(key);
+      continue;
+    }
+    if (!(key in configured) || JSON.stringify(configured[key]) !== JSON.stringify(value)) {
+      throw refuse(`${path} asks for the entitlement ${key}`, `If the app needs it, set it with the same value under code: ${path} in tapster.yml.`);
+    }
+  }
+  return { entitlements: configured, dropped };
 }
