@@ -64,7 +64,7 @@ export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag:
     }
     if (already) notes.push("the attestation step is already there; permissions checked");
     else {
-      const attest = doc.createNode({ name: "Attest the archives for tapster", uses: `actions/attest-build-provenance@${attestSha}`, "continue-on-error": "${{ github.event.repository.private }}", with: { "subject-checksums": "dist/checksums.txt" } });
+      const attest = doc.createNode({ name: "Attest the archives for tapster", uses: `actions/attest-build-provenance@${attestSha}`, if: "${{ !github.event.repository.private }}", with: { "subject-checksums": "dist/checksums.txt" } });
       (attest.get("uses", true) as Scalar).comment = ` ${attestTag}`;
       steps.items.splice(index + 1, 0, attest as never);
       notes.push(`added the attestation step (actions/attest-build-provenance ${attestTag}) and its permissions`);

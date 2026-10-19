@@ -45,7 +45,7 @@ jobs:
 __CARRY__
           cd dist && sha256sum * > checksums.txt
       - uses: actions/attest-build-provenance@__ATTEST_SHA__ # __ATTEST_TAG__
-        continue-on-error: ${{ github.event.repository.private }}
+        if: ${{ !github.event.repository.private }}
         with: { subject-checksums: dist/checksums.txt }
       - name: Hand the draft to the tapster hub
         env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" }
