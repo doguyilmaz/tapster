@@ -17,6 +17,7 @@ const SKEW = 60;
 const MAX_TOKEN = 8192;
 const KEYS_TTL = 3600;
 const REFETCH_GAP = 300;
+const FAILURE_GAP = 30;
 
 const refuse = (reason: string) => new DoorbellError(401, reason);
 
@@ -35,26 +36,31 @@ function json(part: string): Record<string, unknown> {
 export function jwksSource(fetchImpl: typeof fetch, clock: () => number): KeySource {
   let keys = new Map<string, Jwk>();
   let fetchedAt = -Infinity;
-  const refresh = async () => {
-    fetchedAt = clock();
-    const res = await fetchImpl(JWKS, { headers: { accept: "application/json" } }).catch(() => null);
-    if (!res?.ok) throw new DoorbellError(502, "GitHub's key set is unreachable");
-    const body = (await res.json().catch(() => null)) as { keys?: unknown } | null;
-    const list = Array.isArray(body?.keys) ? (body.keys as Jwk[]) : [];
-    const next = new Map(list.filter((k) => typeof k.kid === "string" && k.kty === "RSA").map((k) => [k.kid!, k]));
-    if (next.size === 0) throw new DoorbellError(502, "GitHub's key set is empty");
-    keys = next;
-  };
+  let failedAt = -Infinity;
+  let inflight: Promise<void> | null = null;
+  const refresh = () =>
+    (inflight ??= (async () => {
+      try {
+        const res = await fetchImpl(JWKS, { headers: { accept: "application/json" } }).catch(() => null);
+        if (!res?.ok) throw new DoorbellError(502, "GitHub's key set is unreachable");
+        const body = (await res.json().catch(() => null)) as { keys?: unknown } | null;
+        const list = Array.isArray(body?.keys) ? (body.keys as Jwk[]) : [];
+        const next = new Map(list.filter((k) => typeof k.kid === "string" && k.kty === "RSA").map((k) => [k.kid!, k]));
+        if (next.size === 0) throw new DoorbellError(502, "GitHub's key set is empty");
+        keys = next;
+        fetchedAt = clock();
+      } catch (e) {
+        failedAt = clock();
+        throw e;
+      } finally {
+        inflight = null;
+      }
+    })());
   return async (kid) => {
     const now = clock();
-    if (now - fetchedAt > KEYS_TTL || (!keys.has(kid) && now - fetchedAt > REFETCH_GAP)) {
-      try {
-        await refresh();
-      } catch (e) {
-        fetchedAt = -Infinity;
-        throw e;
-      }
-    }
+    const stale = now - fetchedAt > KEYS_TTL || (!keys.has(kid) && now - fetchedAt > REFETCH_GAP);
+    if (stale && now - failedAt >= FAILURE_GAP) await refresh();
+    else if (stale && !keys.has(kid)) throw new DoorbellError(502, "GitHub's key set is unreachable");
     return keys.get(kid) ?? null;
   };
 }

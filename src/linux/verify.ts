@@ -5,6 +5,7 @@ import type { HubConfig } from "../config";
 import { TapsterError } from "../errors";
 import { run } from "../run";
 import type { State } from "../state";
+import { rpmTags } from "./rpmheader";
 import { ARCH, type LinuxPlatform, archiveFile, fetchArchives, linuxTargets, manifestJson, packageFiles } from "./build";
 
 export type ExpectedFile = { path: string; mode: number; sha256: string };
@@ -113,10 +114,19 @@ export function checkDeb(parts: DebParts, exp: Expected): void {
   checkFiles(file, parts.data, exp.deb);
 }
 
-export type RpmParts = { tags: string; scripts: string; deps: Record<string, string[]>; files: string; payload: TarEntry[] };
+export type RpmParts = { headerTags: { signature: number[]; main: number[] }; tags: string; scripts: string; deps: Record<string, string[]>; files: string; payload: TarEntry[] };
+
+const RPM_SIGNATURE_TAGS = new Set([62, 273, 1000, 1007]);
+const RPM_MAIN_TAGS = new Set([
+  63, 100, 1000, 1001, 1002, 1004, 1005, 1006, 1007, 1009, 1014, 1015, 1020, 1021, 1022, 1028, 1030, 1033, 1034, 1035, 1036, 1037, 1039, 1040, 1044, 1045, 1047, 1095, 1096, 1097, 1112, 1113,
+  1116, 1117, 1118, 1124, 1125, 1126, 5011, 5092, 5093,
+]);
 
 export function checkRpm(parts: RpmParts, exp: Expected): void {
   const file = rpmName(exp);
+  const sig = parts.headerTags.signature.filter((t) => !RPM_SIGNATURE_TAGS.has(t));
+  const main = parts.headerTags.main.filter((t) => !RPM_MAIN_TAGS.has(t));
+  if (sig.length || main.length) throw refuse(file, `carries header tags tapster does not allow (${[...sig, ...main].join(", ")})`);
   const [name, version, release, arch, epoch] = parts.tags.trim().split("|");
   if (name !== exp.name || version !== exp.version || release !== "1") throw refuse(file, `is ${name}-${version}-${release}`);
   if (arch !== exp.rpmArch) throw refuse(file, `is built for ${arch}`);
@@ -168,6 +178,7 @@ export async function readRpm(path: string): Promise<RpmParts> {
   const deps: Record<string, string[]> = {};
   for (const d of DEPS) deps[d] = (await q([`--${d}`])).split("\n");
   return {
+    headerTags: rpmTags(await readFile(path)),
     tags: await q(["--qf", "%{NAME}|%{VERSION}|%{RELEASE}|%{ARCH}|%{EPOCH}\\n"]),
     scripts: await q(["--scripts", "--triggers", "--filetriggers"]),
     deps,

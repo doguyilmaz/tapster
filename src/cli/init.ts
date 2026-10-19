@@ -197,10 +197,23 @@ async function storeSparkleKey(gh: GitHub, dir: string, hub: string, label: stri
   console.log("Review and commit the workflow change, then push.");
 }
 
-async function setupLinux(gh: GitHub, dir: string, hub: string): Promise<void> {
+export function linuxKeyAllowed(secrets: string[], rotate: boolean): void {
+  if (secrets.includes("TAPSTER_LINUX_KEY") && !rotate) {
+    throw new TapsterError("the hub already has a Linux signing key", "Replacing it makes every apt and dnf user fetch the new key. To do that, run tapster init --rotate linux.");
+  }
+}
+
+async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean): Promise<void> {
   const config = hubConfig(dir, hub);
+  const secrets = (await gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${hub}/environments/tapster/secrets`)).secrets.map((x) => x.name);
+  linuxKeyAllowed(secrets, rotate);
   const gpg = ["/opt/homebrew/bin/gpg", "/usr/local/bin/gpg", "/usr/bin/gpg"].find((p) => existsSync(p));
   if (!gpg) throw new TapsterError("gpg is not installed", "Install it with brew install gnupg, then run this again.");
+  await gh.json("POST", `/repos/${hub}/pages`, { build_type: "workflow" }).catch(async (e) => {
+    if (!(e instanceof GitHubError) || e.status !== 409) throw new TapsterError("GitHub Pages could not be turned on for the hub", "A private hub needs a paid plan for Pages; make the hub public or turn Pages on by hand with GitHub Actions as the source.");
+    await gh.json("PUT", `/repos/${hub}/pages`, { build_type: "workflow" });
+  });
+  console.log("GitHub Pages serves the hub from GitHub Actions.");
   const home = mkdtempSync("/tmp/tl-");
   const env = { GNUPGHOME: home };
   try {
@@ -208,16 +221,11 @@ async function setupLinux(gh: GitHub, dir: string, hub: string): Promise<void> {
     const key = (await runPath(gpg, "gpg", ["--batch", "--armor", "--export-secret-keys"], { env })).stdout;
     const fingerprint = (await runPath(gpg, "gpg", ["--batch", "--with-colons", "--list-secret-keys"], { env })).stdout.split("\n").find((l) => l.startsWith("fpr:"))?.split(":")[9];
     await setEnvSecret(hub, "TAPSTER_LINUX_KEY", key);
-    console.log(`Stored TAPSTER_LINUX_KEY, fingerprint ${fingerprint}. It is kept nowhere else; if it is lost, run this again and users fetch the new key.`);
+    console.log(`Stored TAPSTER_LINUX_KEY, fingerprint ${fingerprint}. It is kept nowhere else; if it is lost, run tapster init --rotate linux and users fetch the new key.`);
   } finally {
     await runPath(join(gpg, "..", "gpgconf"), "gpgconf", ["--kill", "all"], { env, allowFail: true }).catch(() => undefined);
     await rm(home, { recursive: true, force: true });
   }
-  await gh.json("POST", `/repos/${hub}/pages`, { build_type: "workflow" }).catch(async (e) => {
-    if (!(e instanceof GitHubError) || e.status !== 409) throw new TapsterError("GitHub Pages could not be turned on for the hub", "A private hub needs a paid plan for Pages; make the hub public or turn Pages on by hand with GitHub Actions as the source.");
-    await gh.json("PUT", `/repos/${hub}/pages`, { build_type: "workflow" });
-  });
-  console.log("GitHub Pages serves the hub from GitHub Actions.");
   if (!config.packages.some((p) => !isApp(p) && p.linux)) console.log("No package sets linux: true yet; add it to the CLI packages that should ship to apt and dnf.");
   await writeWorkflow(gh, dir, sparkleLabels(config));
 }
@@ -246,15 +254,16 @@ export async function init(args: string[]): Promise<void> {
   if (rotate === "certificate") return storeCertificate(hub);
   if (rotate === "notary") return storeNotary(hub);
   if (rotate === "doorbell") return rotateDoorbell(gh, hub);
+  if (rotate === "linux") return setupLinux(gh, dir, hub, true);
   if (args[0] === "--doorbell" && args.length === 1) return setupDoorbell(gh, hub, hubConfig(dir, hub), setRepoVariable);
-  if (args[0] === "--linux" && args.length === 1) return setupLinux(gh, dir, hub);
+  if (args[0] === "--linux" && args.length === 1) return setupLinux(gh, dir, hub, false);
   if (args[0] === "--sparkle" && args[1]) {
     const account = args[2] === "--account" && args[3] ? args[3] : args.length === 2 ? "ed25519" : null;
     if (account) return storeSparkleKey(gh, dir, hub, args[1], account);
   }
   if (args[0] === "--workflow" && args.length === 1) return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)));
   if (args.length) {
-    throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, init --rotate app|certificate|notary|doorbell, init --sparkle <label> [--account <account>], init --doorbell, init --linux or init --workflow.");
+    throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, init --rotate app|certificate|notary|doorbell|linux, init --sparkle <label> [--account <account>], init --doorbell, init --linux or init --workflow.");
   }
   await protectHub(gh, hub);
   await createApp(hub.split("/")[0]!, hub);

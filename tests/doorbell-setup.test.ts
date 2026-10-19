@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { appWorkflow, bunWorkflow, adaptReleaseWorkflow } from "../src/cli/add";
 import { doorbellCheck } from "../src/cli/doctor";
-import { doorbellConfig, doorbellManifest, ringStep, workerOrigin } from "../src/cli/doorbell";
+import { bunEnv, doorbellConfig, doorbellManifest, doorbellStage, ringStep, workerOrigin } from "../src/cli/doorbell";
 import pins from "../templates/pins.json";
 
 test("the dispatch App is private and can only start workflows", () => {
@@ -72,4 +72,15 @@ test("doctor names projects that ring another doorbell or none", () => {
   expect(c.fix).toContain("o/b");
   expect(c.fix).toContain("o/c");
   expect(c.fix).not.toContain("o/a");
+});
+
+test("a doorbell setup that stopped after creating its App continues with that App", () => {
+  const v = (names: string[]) => ({ variables: names.map((name) => ({ name, value: "1" })) });
+  expect(doorbellStage(v([]))).toBe("new");
+  expect(doorbellStage(v(["TAPSTER_DOORBELL_APP_ID", "TAPSTER_DOORBELL_APP_SLUG"]))).toBe("resume");
+  expect(doorbellStage(v(["TAPSTER_DOORBELL_APP_ID", "TAPSTER_DOORBELL_APP_SLUG", "TAPSTER_DOORBELL"]))).toBe("done");
+});
+
+test("Wrangler is installed by the bun inside a compiled tapster", () => {
+  expect(bunEnv("/usr/bin:/bin")).toEqual({ PATH: "/usr/bin:/bin", BUN_BE_BUN: "1" });
 });

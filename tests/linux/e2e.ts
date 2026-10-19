@@ -98,7 +98,7 @@ ${plant === "file" ? `  - { src: "${evil}/evil", dst: "/etc/evil", file_info: { 
       () => null,
       (e: Error) => e.message,
     );
-    const want = plant === "file" ? /\betc\b/ : /postinst|script/;
+    const want = plant === "file" ? /\betc\b/ : /postinst|script|header tags/;
     if (!refused || !want.test(refused)) throw new Error(`the ${kind} with a planted ${plant} was not refused: ${refused}`);
     console.log(`refused the ${kind} with a planted ${plant}: ${refused}`);
   }

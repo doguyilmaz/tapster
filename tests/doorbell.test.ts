@@ -100,9 +100,10 @@ test("the key set is cached for an hour, fetched again for an unknown kid at mos
   expect(await source("k1")).toEqual(jwk);
   expect(calls).toBe(3);
   fail = true;
-  const fresh = jwksSource(fetchImpl as unknown as typeof fetch, () => NOW);
+  const fresh = jwksSource(fetchImpl as unknown as typeof fetch, () => clock);
   await expect(fresh("k1")).rejects.toThrow(DoorbellError);
   fail = false;
+  clock += 31;
   expect(await fresh("k1")).toEqual(jwk);
 });
 
@@ -158,4 +159,31 @@ test("the handler answers 405, 401, 202 and 502 and never logs a token", async (
   expect(lines.join("\n")).not.toContain(t.split(".")[2]!.slice(0, 20));
   expect(lines.join("\n")).not.toContain("ghs_installationtoken");
   expect(lines.some((l) => l.includes("o/aims refs/tags/v1.2.3"))).toBe(true);
+});
+
+test("rings that arrive together share one key set fetch, and a failed fetch is not retried for 30 seconds", async () => {
+  let calls = 0;
+  let fail = false;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  const fetchImpl = (async () => {
+    calls++;
+    await gate;
+    return fail ? new Response("down", { status: 503 }) : Response.json({ keys: [jwk] });
+  }) as unknown as typeof fetch;
+  let clock = NOW;
+  const source = jwksSource(fetchImpl, () => clock);
+  const both = Promise.all([source("k1"), source("k1")]);
+  release();
+  expect(await both).toEqual([jwk, jwk]);
+  expect(calls).toBe(1);
+  fail = true;
+  const broken = jwksSource(fetchImpl, () => clock);
+  await expect(broken("k1")).rejects.toThrow(DoorbellError);
+  await expect(broken("k1")).rejects.toThrow(DoorbellError);
+  expect(calls).toBe(2);
+  clock += 31;
+  fail = false;
+  expect(await broken("k1")).toEqual(jwk);
+  expect(calls).toBe(3);
 });

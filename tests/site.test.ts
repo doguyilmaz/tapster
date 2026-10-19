@@ -28,3 +28,9 @@ test("the real README builds into a page without scripts", () => {
   expect(html).not.toMatch(/<script|javascript:|\son[a-z]+=/i);
   expect(html).toContain('<h2 id="apps">Apps</h2>');
 });
+
+test("links with a title are rewritten too", () => {
+  const html = renderReadme('[a](javascript:alert(1) "t") and [b](docs/x.md "t")', BASE);
+  expect(html).not.toContain("javascript:");
+  expect(html).toContain(`<a href="${BASE}docs/x.md"`);
+});

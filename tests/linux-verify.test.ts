@@ -51,7 +51,9 @@ test.each([
   expect(() => checkDeb(deb(over), exp)).toThrow(reason);
 });
 
-const rpm = (over: Partial<{ tags: string; scripts: string; deps: Record<string, string[]>; files: string; payload: TarEntry[] }> = {}) => ({
+const MAIN = [63, 100, 1000, 1001, 1002, 1004, 1005, 1006, 1007, 1009, 1014, 1015, 1020, 1021, 1022, 1028, 1030, 1033, 1034, 1035, 1036, 1037, 1039, 1040, 1044, 1045, 1047, 1095, 1096, 1097, 1112, 1113, 1116, 1117, 1118, 1124, 1125, 1126, 5011, 5092, 5093];
+const rpm = (over: Partial<{ tags: string; scripts: string; deps: Record<string, string[]>; files: string; payload: TarEntry[]; headerTags: { signature: number[]; main: number[] } }> = {}) => ({
+  headerTags: over.headerTags ?? { signature: [62, 273, 1000, 1007], main: MAIN },
   tags: over.tags ?? "aims|0.1.5|1|x86_64|(none)",
   scripts: over.scripts ?? "",
   deps: { requires: [], provides: ["aims = 0.1.5-1", "aims(x86-64) = 0.1.5-1"], obsoletes: [], conflicts: [], recommends: [], suggests: [], supplements: [], enhances: [], ...over.deps },
@@ -66,6 +68,8 @@ test("an rpm built as configured passes", () => {
 
 test.each([
   ["a script", { scripts: "postinstall scriptlet (using /bin/sh):\nrm -rf /\n" }, /script/],
+  ["a header tag the verifier cannot print", { headerTags: { signature: [62, 273, 1000, 1007], main: [...MAIN, 5104] } }, /5104/],
+  ["an unexpected signature tag", { headerTags: { signature: [62, 273, 1000, 1007, 1004], main: MAIN } }, /1004/],
   ["a requirement", { deps: { requires: ["curl"] } }, /requires/],
   ["an obsoleted package", { deps: { obsoletes: ["sudo"] } }, /obsoletes/],
   ["a foreign provide", { deps: { provides: ["aims = 0.1.5-1", "sudo = 9"] } }, /provides/],

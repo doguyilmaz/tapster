@@ -9,9 +9,9 @@ function href(url: string, base: string): string | null {
 
 export function renderReadme(md: string, base: string): string {
   const html = Bun.markdown.html(md, { headings: { ids: true }, noHtmlBlocks: true, noHtmlSpans: true });
-  return html.replace(/<a href="([^"]*)">([\s\S]*?)<\/a>/g, (_, url: string, label: string) => {
+  return html.replace(/<a href="([^"]*)"([^>]*)>([\s\S]*?)<\/a>/g, (_, url: string, rest: string, label: string) => {
     const target = href(url.replace(/&amp;/g, "&"), base);
-    return target ? `<a href="${escape(target)}">${label}</a>` : label;
+    return target ? `<a href="${escape(target)}"${rest}>${label}</a>` : label;
   });
 }
 

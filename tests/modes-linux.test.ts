@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { linuxNeeded } from "../src/action/check";
 import { linuxCheck } from "../src/cli/doctor";
-import { fillWorkflow } from "../src/cli/init";
+import { fillWorkflow, linuxKeyAllowed } from "../src/cli/init";
 import { parseConfig } from "../src/config";
 import pins from "../templates/pins.json";
 
@@ -60,4 +60,16 @@ test("doctor checks the Linux key, the Pages source and its address", () => {
   expect(linuxCheck(c, "o/homebrew-tap", ["TAPSTER_LINUX_KEY"], null).fix).toContain("Pages");
   expect(linuxCheck(c, "o/homebrew-tap", ["TAPSTER_LINUX_KEY"], { ...pages, build_type: "legacy" }).fix).toContain("GitHub Actions");
   expect(linuxCheck(c, "o/homebrew-tap", ["TAPSTER_LINUX_KEY"], { ...pages, html_url: "https://apt.o.dev/" }).fix).toContain("linux.url");
+});
+
+test("init --linux never replaces a live key unless asked to rotate", () => {
+  expect(() => linuxKeyAllowed([], false)).not.toThrow();
+  let fix = "";
+  try {
+    linuxKeyAllowed(["TAPSTER_LINUX_KEY"], false);
+  } catch (e) {
+    fix = (e as { fix: string }).fix;
+  }
+  expect(fix).toContain("tapster init --rotate linux");
+  expect(() => linuxKeyAllowed(["TAPSTER_LINUX_KEY"], true)).not.toThrow();
 });

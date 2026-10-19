@@ -197,3 +197,9 @@ test("an archive that goes on after its end or names a file like a folder is ref
   expect(() => readTarGz(rawTarGz([{ name: "a", data: "1" }], Buffer.alloc(9216)))).not.toThrow();
   expect(() => readTarGz(rawTarGz([{ name: "usr/bin/x/", data: "1" }]))).toThrow(TapsterError);
 });
+
+test("a folder or symlink that claims data is refused, so no entry can hide behind it", () => {
+  expect(() => readTarGz(rawTarGz([{ name: "usr/", type: "5", data: Buffer.alloc(512, 1) }, { name: "usr/bin/x", data: "1" }]))).toThrow(TapsterError);
+  expect(() => readTarGz(rawTarGz([{ name: "./", type: "5", data: Buffer.alloc(512, 1) }]))).toThrow(TapsterError);
+  expect(() => readTarGz(rawTarGz([{ name: "l", type: "2", linkname: "x", data: "abc" }, { name: "x", data: "1" }]))).toThrow(TapsterError);
+});

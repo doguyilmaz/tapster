@@ -133,6 +133,7 @@ export function readTar(tar: Buffer, limits: Limits = LIMITS): TarEntry[] {
     longLink = null;
     const kind = type === "0" || type === "\0" ? "file" : type === "5" ? "dir" : type === "2" ? "symlink" : null;
     if (!kind) throw bad(`holds ${rawName}, which is not a file, folder or symlink`);
+    if (kind !== "file" && size !== 0) throw bad(`gives the ${kind} ${rawName} data, which could hide entries`);
     if (kind === "dir" && /^(\.\/)*\.\/?$/.test(rawName)) continue;
     if (kind !== "dir" && rawName.endsWith("/")) throw bad(`names the ${kind} ${rawName} like a folder`);
     const name = safeName(rawName);
