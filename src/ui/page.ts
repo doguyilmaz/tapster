@@ -1,8 +1,8 @@
-import { LOGO } from "./logo";
+import { LOGO_URI } from "./images";
 
 export const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-export const LOGO_URI = `data:image/svg+xml;base64,${btoa(LOGO)}`;
+export { LOGO_URI };
 
 export const BASE_CSS = `
 :root {
@@ -49,17 +49,18 @@ th { font-weight: 650; }
 .button { display: inline-block; background: var(--button); color: var(--button-fg); font: 650 1rem/1.2 var(--sans); padding: 0.8rem 1.3rem; border: 0; border-radius: 10px; text-decoration: none; cursor: pointer; }
 .button:hover { background: var(--button-hover); }
 .button:focus-visible, a:focus-visible { outline: 3px solid color-mix(in srgb, var(--button) 50%, transparent); outline-offset: 2px; }
+.brand img { border-radius: 22%; }
 .brand { display: inline-flex; align-items: center; gap: 0.55rem; font-weight: 700; font-size: 1.1rem; color: var(--fg); text-decoration: none; letter-spacing: -0.01em; }
 `;
 
-export function head(title: string, css: string, description?: string): string {
+export function head(title: string, css: string, description?: string, icons = `<link rel="icon" href="${LOGO_URI}">`): string {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)}</title>
-${description ? `<meta name="description" content="${escape(description)}">\n` : ""}<link rel="icon" href="${LOGO_URI}">
+${description ? `<meta name="description" content="${escape(description)}">\n` : ""}${icons}
 <style>${BASE_CSS}${css}</style>
 </head>`;
 }

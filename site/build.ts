@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { escape } from "../src/ui/page";
 import { homePage } from "./home";
@@ -95,6 +95,7 @@ export function buildSite(contentDir: string, out: string): string[] {
     mkdirSync(join(out, p.id), { recursive: true });
     writeFileSync(join(out, p.id, "index.html"), p.html);
   }
+  cpSync(join(import.meta.dir, "assets"), join(out, "assets"), { recursive: true });
   writeFileSync(join(out, "index.html"), homePage(nav));
   writeFileSync(join(out, "404.html"), frame({ id: "", title: "Not found · tapster", nav, side: false, main: '<main class="doc" style="margin:4rem auto;padding:0 16px"><h1>Not found</h1><p><a href="/">Back to tapster</a></p></main>' }));
   return pages.map((p) => p.id);

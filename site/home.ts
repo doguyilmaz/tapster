@@ -1,4 +1,3 @@
-import { LOGO_URI } from "../src/ui/page";
 import { frame, rel, type NavItem } from "./layout";
 
 const CSS = `
@@ -6,7 +5,7 @@ const CSS = `
 .hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3rem; padding: clamp(2.5rem, 7vw, 5.5rem) 0 clamp(2rem, 5vw, 3.5rem); }
 .hero h1 { font-size: clamp(2rem, 4.6vw, 3.1rem); line-height: 1.12; letter-spacing: -0.03em; margin: 0 0 1.1rem; max-width: 16em; }
 .hero p { font-size: 1.15rem; color: var(--muted); max-width: 34em; margin: 0 0 1.8rem; }
-.hero img { width: clamp(120px, 18vw, 200px); height: auto; }
+.hero img { width: clamp(260px, 34vw, 440px); height: auto; border-radius: 28px; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.8rem 1.4rem; align-items: center; }
 .actions a:not(.button) { font-weight: 600; text-decoration: none; }
 .flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; counter-reset: flow; margin: 0 0 3.5rem; }
@@ -27,7 +26,7 @@ const CSS = `
 .start p { margin: 0; color: var(--muted); max-width: 36em; }
 @media (max-width: 760px) {
   .hero { grid-template-columns: 1fr; gap: 1.5rem; }
-  .hero img { order: -1; width: 88px; }
+  .hero img { order: -1; width: 100%; max-width: 420px; }
   .flow, .trust ul { grid-template-columns: 1fr; }
 }
 `;
@@ -49,7 +48,7 @@ export function homePage(nav: NavItem[]): string {
 <p>Your projects build their files and open a draft release. Your tap signs them, has Apple notarize them and publishes the release with its Homebrew cask. Your signing keys stay in your own accounts.</p>
 <div class="actions"><a class="button" href="${at(first.id)}">Start the tutorial</a><a href="${at("reference/security")}">How your keys are kept</a></div>
 </div>
-<img src="${LOGO_URI}" alt="">
+<img src="assets/hero.webp" width="600" height="600" alt="The tapster octopus takes releases from your projects and sends them out signed and sealed">
 </section>
 
 <section class="flow" aria-label="How a release travels">

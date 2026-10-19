@@ -1,3 +1,5 @@
+<p><img src="https://raw.githubusercontent.com/doguyilmaz/tapster/main/site/assets/logo-512.png" width="112" alt="The tapster octopus, a courier carrying sealed parcels"></p>
+
 # tapster
 
 tapster turns your Homebrew tap into the one place that signs, notarizes and publishes the releases of all your

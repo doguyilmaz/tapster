@@ -1,4 +1,4 @@
-import { escape, head, LOGO_URI } from "../src/ui/page";
+import { escape, head } from "../src/ui/page";
 
 export const SECTIONS = ["Tutorial", "Guides", "Reference"] as const;
 export type Section = (typeof SECTIONS)[number];
@@ -78,10 +78,12 @@ function navList(nav: NavItem[], current: string): string {
 
 export function frame(o: { id: string; title: string; description?: string; css?: string; main: string; nav: NavItem[]; side: boolean }): string {
   const first = o.nav.find((n) => n.step === 1) ?? o.nav[0]!;
-  return `${head(o.id ? `${o.title} · tapster` : o.title, CSS + (o.css ?? ""), o.description)}
+  const root = rel(o.id, "");
+  const icons = `<link rel="icon" type="image/png" href="${root}assets/favicon-32.png">\n<link rel="apple-touch-icon" href="${root}assets/apple-touch-icon.png">`;
+  return `${head(o.id ? `${o.title} · tapster` : o.title, CSS + (o.css ?? ""), o.description, icons)}
 <body>
 <header class="top">
-<a class="brand" href="${rel(o.id, "")}"><img src="${LOGO_URI}" width="30" height="30" alt="">tapster</a>
+<a class="brand" href="${root}"><img src="${root}assets/logo-128.webp" width="32" height="32" alt="">tapster</a>
 <nav aria-label="Site"><a href="${rel(o.id, first.id)}">Tutorial</a><a href="${REPO}">GitHub</a></nav>
 </header>
 ${o.side ? `<div class="layout">
