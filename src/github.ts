@@ -1,7 +1,7 @@
 import { GitHubError } from "./errors";
 
 export type Account = { login: string; type: string };
-export type Asset = { id: number; name: string; size: number; state: string; digest: string | null; browser_download_url: string; uploader?: Account | null };
+export type Asset = { id: number; name: string; size: number; state: string; digest: string | null; browser_download_url: string; uploader?: Account | null; created_at?: string };
 export type Release = {
   id: number;
   tag_name: string;

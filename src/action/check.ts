@@ -7,7 +7,7 @@ import { type AppPackage, type HubConfig, type InvalidPackage, type PackageConfi
 import { GitHub, type Release } from "../github";
 import { readSecret, requireVar } from "../mask";
 import { type Note, type WorkItem, planPackage } from "../plan";
-import { noteOutcome, withNote } from "../draftnote";
+import { noteOutcome, waitingSince, withNote } from "../draftnote";
 import { failure, record, warn } from "../report";
 import { protectionProblems } from "../rulesets";
 import { GitHubError, TapsterError } from "../errors";
@@ -172,7 +172,7 @@ export async function check(ctx: Context): Promise<void> {
         const attested = judged ? release.assets.filter((a) => !(isApp(pkg) && Object.hasOwn(pkg.carry, a.name))) : [];
         const missing = judged ? await missingAttestations(pkg.repo, attested, tok.token) : [];
         if (missing.length) {
-          notes.push({ tag: item.tag, releaseId: item.releaseId, kind: "waiting", reason: `no attestation yet for ${missing.join(", ")}`, since: release.created_at });
+          notes.push({ tag: item.tag, releaseId: item.releaseId, kind: "waiting", reason: `no attestation yet for ${missing.join(", ")}`, since: waitingSince(release) });
           continue;
         }
         items.push(item);
