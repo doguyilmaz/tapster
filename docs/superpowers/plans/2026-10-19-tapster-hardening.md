@@ -77,6 +77,10 @@ protected); `createProtection(gh, repo): Promise<"created" | "exists" | "unavail
   `refs/tags/v*`, one missing `creation`, one the App can bypass, and an unenforced plan each give a reason; two good
   rulesets give none; `protection: off` skips the check and is reported; create posts the exact bodies and maps 403/422
   plan errors to "unavailable".
+- [ ] Failing tests for the draft origin: a draft whose tag does not exist waits ("the tag is not pushed yet"); a draft
+  created by a bot other than `github-actions[bot]`, or holding a file uploaded by one, is invalid and names the
+  uploader; the owner and `github-actions[bot]` pass; resumed drafts (the hub's own staged files) are not judged by
+  uploader.
 - [ ] tapster's own repository gets the same two rulesets (by hand, owner's token) and its CI checks them.
 - [ ] Implement, green, commit "Refuse projects whose tags a stolen App key could move".
 

@@ -35,6 +35,11 @@ release workflow then builds and attests the attacker's code and the hub signs i
   refuses to create them. They do the same when `GET /rules/branches/<default>` shows no rules although the ruleset
   exists. The owner then has three choices: make the project public, move to a plan that enforces rulesets or set
   `protection: off` on the package to accept the risk in writing. `doctor` keeps reporting the last one.
+- The App can still create drafts and upload files to them. `check` therefore takes a draft only when its tag exists
+  (the ruleset keeps the App from creating tags, and publishing a draft whose tag is missing would create it) and when
+  the draft and every file on it come from `github-actions[bot]` or the owner. Files uploaded by the App itself, or by
+  any other App, make the draft invalid. Attestations prove the same for public projects; this check also covers
+  private ones, which GitHub gives no attestations on personal accounts.
 - A project whose release workflow tags by itself with `GITHUB_TOKEN` (battistics today) must start releases with a tag
   the owner pushes or with `workflow_dispatch` on a tag; the migration notes say so.
 - The same two rulesets protect `doguyilmaz/tapster` itself, set once by hand and checked by its CI.

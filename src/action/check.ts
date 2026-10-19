@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { missingAttestations } from "../attest";
 import { parseChecksums } from "../checksums";
-import { type AppPackage, type HubConfig, type InvalidPackage, isApp } from "../config";
+import { type AppPackage, type HubConfig, type InvalidPackage, type PackageConfig, isApp } from "../config";
 import { GitHub, type Release } from "../github";
 import { readSecret, requireVar } from "../mask";
 import { type WorkItem, planPackage } from "../plan";
 import { failure, record, warn } from "../report";
+import { protectionProblems } from "../rulesets";
 import { GitHubError, TapsterError } from "../errors";
 import { STATE_PATH, type State, parseState, recordedChecksums } from "../state";
 import { type InstallationToken, installationExists, installationToken } from "../token";
@@ -27,6 +28,29 @@ export function feedWarning(latest: Release | null, state: State, pkg: AppPackag
 
 export function reportInvalid(invalid: InvalidPackage[], only: string): void {
   for (const i of invalid) if (!only || i.name === only) failure(i.name, new TapsterError(i.reason, i.fix));
+}
+
+export async function protectionGate(gh: GitHub, pkg: Pick<PackageConfig, "name" | "repo" | "protection">, branch: string): Promise<void> {
+  if (pkg.protection === "off") {
+    warn(`${pkg.name}: protection is off, so a stolen App key could tag code in ${pkg.repo} that the hub would sign`);
+    return;
+  }
+  const problems = await protectionProblems(gh, pkg.repo, branch, "app");
+  if (problems.length === 0) return;
+  throw new TapsterError(
+    `${pkg.repo} is not protected against a stolen App key: ${problems.join("; ")}`,
+    `Run tapster add in a clone of ${pkg.repo}. If GitHub cannot enforce rulesets there, make it public, use a paid plan or set protection: off for ${pkg.name} in tapster.yml to accept the risk.`,
+  );
+}
+
+async function tagExists(gh: GitHub, repo: string, tag: string): Promise<boolean> {
+  try {
+    await gh.json("GET", `/repos/${repo}/git/ref/tags/${encodeURIComponent(tag)}`);
+    return true;
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 404) return false;
+    throw e;
+  }
 }
 
 async function latestRelease(gh: GitHub, repo: string): Promise<Release | null> {
@@ -55,16 +79,17 @@ export async function check(ctx: Context): Promise<void> {
     try {
       tok = await installationToken(appId, pem, pkg.repo, { contents: "write", attestations: "read" });
       const gh = new GitHub(tok.token);
-      const plan = await planPackage(
-        pkg,
-        await gh.listReleases(pkg.repo),
-        async (r) => {
+      const repo = await gh.getRepo(pkg.repo);
+      await protectionGate(gh, pkg, repo.default_branch);
+      const plan = await planPackage(pkg, await gh.listReleases(pkg.repo), {
+        checksumsOf: async (r) => {
           const asset = r.assets.find((a) => a.name === "checksums.txt");
           return asset ? parseChecksums((await gh.downloadAsset(pkg.repo, asset.id)).toString("utf8")) : null;
         },
-        (releaseId) => recordedChecksums(state, pkg.name, releaseId),
-      );
-      const repo = await gh.getRepo(pkg.repo);
+        recorded: (releaseId) => recordedChecksums(state, pkg.name, releaseId),
+        owner: ctx.owner,
+        tagExists: (tag) => tagExists(gh, pkg.repo, tag),
+      });
       if (repo.private) privateRepos.add(pkg.name);
       for (const item of plan.items) {
         const release = pkg.attestation === "auto" && !repo.private && !item.resume ? await gh.getRelease(pkg.repo, item.releaseId) : null;

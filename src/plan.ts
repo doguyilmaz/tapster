@@ -1,7 +1,7 @@
 import type { ChecksumLine } from "./checksums";
 import { type PackageConfig, type Platform, assetName, isApp, parseTag, versionOf } from "./config";
 import { TapsterError } from "./errors";
-import type { Release } from "./github";
+import type { Account, Release } from "./github";
 
 export const STAGING = "tapster-staging--";
 
@@ -34,12 +34,25 @@ export function draftStatus(r: Release, pkg: PackageConfig, checksums: ChecksumL
   return { kind: "ready" };
 }
 
-export async function planPackage(
-  pkg: PackageConfig,
-  releases: Release[],
-  checksumsOf: (r: Release) => Promise<ChecksumLine[] | null>,
-  recorded: (releaseId: number) => string | undefined = () => undefined,
-): Promise<{ items: WorkItem[]; notes: string[] }> {
+const CI = "github-actions[bot]";
+
+export function draftOrigin(r: Release, owner: string): string | null {
+  const trusted = (a: Account | null | undefined) => a?.login === CI || a?.login.toLowerCase() === owner.toLowerCase();
+  const rule = `tapster takes drafts only from ${CI} or ${owner}`;
+  if (!trusted(r.author)) return `the draft was created by ${r.author?.login ?? "an unknown account"}; ${rule}`;
+  const foreign = r.assets.find((a) => !trusted(a.uploader));
+  return foreign ? `${foreign.name} was uploaded by ${foreign.uploader?.login ?? "an unknown account"}; ${rule}` : null;
+}
+
+export type PlanOptions = {
+  checksumsOf: (r: Release) => Promise<ChecksumLine[] | null>;
+  recorded?: (releaseId: number) => string | undefined;
+  owner: string;
+  tagExists: (tag: string) => Promise<boolean>;
+};
+
+export async function planPackage(pkg: PackageConfig, releases: Release[], opts: PlanOptions): Promise<{ items: WorkItem[]; notes: string[] }> {
+  const { checksumsOf, recorded = () => undefined } = opts;
   const items: WorkItem[] = [];
   const notes: string[] = [];
   const drafts = releases.filter((r) => r.draft);
@@ -66,8 +79,22 @@ export async function planPackage(
       continue;
     }
     const status = draftStatus(r, pkg, checksums, recorded(r.id));
-    if (status.kind === "ready" || status.kind === "resume") items.push({ package: pkg.name, tag, releaseId: r.id, resume: status.kind === "resume" });
-    else notes.push(`${tag}: ${status.reason}`);
+    if (status.kind === "waiting" || status.kind === "invalid") {
+      notes.push(`${tag}: ${status.reason}`);
+      continue;
+    }
+    if (status.kind === "ready") {
+      const foreign = draftOrigin(r, opts.owner);
+      if (foreign) {
+        notes.push(`${tag}: ${foreign}`);
+        continue;
+      }
+      if (!(await opts.tagExists(tag))) {
+        notes.push(`${tag}: the tag is not pushed yet; tapster publishes only tags that exist`);
+        continue;
+      }
+    }
+    items.push({ package: pkg.name, tag, releaseId: r.id, resume: status.kind === "resume" });
   }
   return { items, notes };
 }

@@ -1,6 +1,7 @@
 import { GitHubError } from "./errors";
 
-export type Asset = { id: number; name: string; size: number; state: string; digest: string | null; browser_download_url: string };
+export type Account = { login: string; type: string };
+export type Asset = { id: number; name: string; size: number; state: string; digest: string | null; browser_download_url: string; uploader?: Account | null };
 export type Release = {
   id: number;
   tag_name: string;
@@ -9,6 +10,7 @@ export type Release = {
   created_at: string;
   published_at: string | null;
   upload_url: string;
+  author?: Account | null;
   assets: Asset[];
 };
 export type Repo = { id: number; private: boolean; description: string | null; html_url: string; default_branch: string };

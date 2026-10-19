@@ -17,6 +17,22 @@ jobs:
       - run: bun test
       - name: dist/ matches the source
         run: bun run build:action && git diff --exit-code dist/
+  protection:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-24.04
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with: { bun-version: 1.4.3 }
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Only the owner can move main and the release tags
+        env: { GH_TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}" }
+        run: |
+          bun -e 'import { GitHub } from "./src/github"; import { protectionProblems } from "./src/rulesets";
+          const p = await protectionProblems(new GitHub(process.env.GH_TOKEN!), process.env.REPO!, "main", "app");
+          if (p.length) { console.error(p.join("\n")); process.exit(1); }'
   macos:
     runs-on: macos-15
     permissions: { contents: read }

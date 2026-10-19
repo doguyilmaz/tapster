@@ -4,7 +4,9 @@ import { basename, join } from "node:path";
 import { isMap, isSeq, parse, parseDocument, type Scalar, YAMLMap } from "yaml";
 import { BUNDLE_ID } from "../config";
 import { TapsterError } from "../errors";
+import type { GitHub } from "../github";
 import { parsePlist } from "../plist";
+import { createProtection } from "../rulesets";
 import { ringStep } from "./doorbell";
 import pinsJson from "../../templates/pins.json";
 import appTemplate from "../../templates/project/app-release.yml" with { type: "text" };
@@ -250,12 +252,26 @@ async function addApp(dir: string, repo: string, name: string, app: FoundApp, fo
   console.log(`\nThen store the Sparkle key in the hub with tapster init --sparkle ${name.replace(/[^a-z0-9]/g, "")}.`);
 }
 
+export async function protectProject(gh: GitHub, repo: string): Promise<string> {
+  const branch = (await gh.getRepo(repo)).default_branch;
+  const result = await createProtection(gh, repo, branch);
+  if (result === "exists") return `- ${repo} is already protected: only an admin can push to ${branch} or touch v* tags`;
+  if (result === "created") {
+    return `- protected ${repo}: only you can push to ${branch} and create, move or delete v* tags; workflows and Apps, the hub's included, cannot. Push release tags yourself.`;
+  }
+  return `- GitHub does not enforce rulesets on ${repo} (private repositories need a paid plan for them), so a stolen App key could tag code the hub would sign. Make it public, use a paid plan, or set protection: off for this package in the hub's tapster.yml to accept that; until then the hub refuses it.`;
+}
+
 export async function add(args: string[]): Promise<void> {
   const dir = process.cwd();
   const repo = await currentRepo(dir);
   const name = repo.split("/")[1]!.toLowerCase();
   const app = findApp(dir);
-  if (app) return addApp(dir, repo, name, app, args.includes("--force"));
+  if (app) {
+    await addApp(dir, repo, name, app, args.includes("--force"));
+    console.log(await protectProject(await userGitHub(), repo));
+    return;
+  }
   const goreleaser = [".goreleaser.yaml", ".goreleaser.yml"].find((f) => existsSync(join(dir, f)));
   const isBun = existsSync(join(dir, "package.json")) && (existsSync(join(dir, "bun.lock")) || existsSync(join(dir, "bun.lockb")));
   let kind: "go" | "bun";
@@ -284,6 +300,7 @@ export async function add(args: string[]): Promise<void> {
     throw new TapsterError("this project is not a GoReleaser-based Go CLI, a Bun CLI or an app with a Sparkle feed", "tapster add supports those three.");
   }
   const gh = await userGitHub();
+  console.log(await protectProject(gh, repo));
   const latest = await gh.json<{ tag_name: string; assets: { name: string }[] }>("GET", `/repos/${repo}/releases/latest`).catch(() => null);
   console.log("\nAdd this to the hub's tapster.yml under packages:\n");
   console.log(latest ? inferEntry(name, repo, latest.assets.map((a) => a.name), latest.tag_name.slice(1), kind) : `  - name: ${name}\n    repo: ${repo}\n    binaries: [${name}]\n    assets: {}   # fill after the first release`);
