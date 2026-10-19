@@ -18,13 +18,22 @@ test("one failed item never stops the steps and jobs after it", () => {
   }
 });
 
-test("the hub attests only what publish asks for, so a private hub skips the step instead of failing it", () => {
-  const attest = flow.jobs.sign!.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
-  expect(attest.if).toContain("steps.publish.outputs.attest == 'true'");
-  expect((attest as { "continue-on-error"?: string })["continue-on-error"]).toBeUndefined();
-  const own = (parse(readFileSync(".github/workflows/release.yml", "utf8")) as { jobs: { build: { steps: { uses?: string; if?: string; "continue-on-error"?: unknown }[] } } }).jobs.build.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
-  expect(own.if).toBe("${{ !github.event.repository.private }}");
-  expect(own["continue-on-error"]).toBeUndefined();
+test("signing holds no attestation rights; a separate job attests what publish lists", () => {
+  const sign = flow.jobs.sign as unknown as { permissions: Record<string, string>; outputs: Record<string, string>; steps: Step[] };
+  expect(sign.permissions).toEqual({ contents: "write" });
+  expect(sign.steps.some((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))).toBe(false);
+  expect(sign.outputs.checksums).toBe("${{ steps.publish.outputs.attest-checksums }}");
+  const attest = flow.jobs.attest as unknown as { needs: string; if: string; "runs-on": string; permissions: Record<string, string>; steps: (Step & { run?: string; env?: Record<string, string> })[] };
+  expect(attest.needs).toBe("sign");
+  expect(attest.if).toContain("needs.sign.outputs.attest == 'true'");
+  expect(attest["runs-on"]).toBe("ubuntu-24.04");
+  expect(attest.permissions).toEqual({ contents: "read", "id-token": "write", attestations: "write" });
+  expect(attest.steps.some((s) => (s.uses ?? "").startsWith("actions/checkout@"))).toBe(false);
+  for (const s of attest.steps) expect(s.run ?? "").not.toContain("${{");
+  expect(attest.steps[0]!.env!.CHECKSUMS).toBe("${{ needs.sign.outputs.checksums }}");
+  const step = attest.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
+  expect(step.with!["subject-checksums"]).toBe("${{ runner.temp }}/checksums.txt");
+  expect((step as { "continue-on-error"?: string })["continue-on-error"]).toBeUndefined();
 });
 
 test("a check that fails before writing outputs runs no later job", () => {

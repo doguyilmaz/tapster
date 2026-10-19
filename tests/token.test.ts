@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { createVerify, generateKeyPairSync } from "node:crypto";
-import { appJwt, installationRepos, installationToken } from "../src/token";
+import { appJwt, attestationToken, installationRepos, installationToken } from "../src/token";
 import { resetMaskForTests, scrub } from "../src/mask";
 
 afterEach(resetMaskForTests);
@@ -50,4 +50,18 @@ test("installationRepos lists what the owner's installation can reach, with a me
   expect(calls.at(-1)!.init!.method).toBe("DELETE");
   const none = async () => new Response(null, { status: 404 });
   expect(await installationRepos("1", pem, "o", none)).toBeNull();
+});
+
+test("gh attestation verify gets a token that can only read attestations", async () => {
+  const bodies: unknown[] = [];
+  const fetchImpl = async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/repos/o/aims/installation")) return Response.json({ id: 3 });
+    if (url.endsWith("/access_tokens")) {
+      bodies.push(JSON.parse(init!.body as string));
+      return Response.json({ token: "ghs_readattest" });
+    }
+    return new Response(null, { status: 204 });
+  };
+  await attestationToken("1", pem, "o/aims", fetchImpl);
+  expect(bodies).toEqual([{ repositories: ["aims"], permissions: { attestations: "read" } }]);
 });

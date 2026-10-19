@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { appAsset, dmgName } from "../appcheck";
 import { readTarGz, writeTarGz } from "../archive";
@@ -38,6 +38,8 @@ function recordedApp(state: State, pkg: string, releaseId: number): StateEntry["
   return app;
 }
 
+export const attestLines = (files: Outgoing[]) => writeChecksums(files.map((f) => ({ sha256: sha256(f.data), name: f.name })));
+
 export function attestDecision(signed: boolean, hubPrivate: boolean): { attest: boolean; note: string | null } {
   if (!signed) return { attest: false, note: null };
   if (hubPrivate) return { attest: false, note: "the hub is a private repository, where GitHub offers no attestations; the published files are not attested" };
@@ -48,9 +50,7 @@ export async function publishMode(ctx: Context): Promise<void> {
   const appId = requireVar("TAPSTER_APP_ID");
   const pem = readSecret("TAPSTER_APP_PRIVATE_KEY");
   const hubGh = new GitHub(readSecret("GITHUB_TOKEN"));
-  const out = join(workdir(), "out");
-  await mkdir(out, { recursive: true, mode: 0o700 });
-  let attest = false;
+  const attested: Outgoing[] = [];
   for (const item of (await loadManifest()).items) {
     const pkg = ctx.config.packages.find((p) => p.name === item.package);
     if (!pkg || item.status !== (isApp(pkg) ? "sparkled" : "signed")) continue;
@@ -102,9 +102,7 @@ export async function publishMode(ctx: Context): Promise<void> {
       const publishedSums = await gh.downloadAsset(pkg.repo, sumsAsset.id);
       assertRecorded(publishedSums, expected!);
       await recordState(hubGh, ctx.hub, pkg.name, { tag: item.tag, releaseId: item.releaseId, checksums: expected!, status: "published", ...(app ? { app } : {}) });
-      await mkdir(join(out, pkg.name), { recursive: true, mode: 0o700 });
-      for (const f of signed) await writeFile(join(out, pkg.name, f.name), f.data);
-      attest ||= signed.length > 0;
+      attested.push(...signed);
       record({ item: `${pkg.name} ${item.tag}`, result: "published", detail: "" });
     } catch (e) {
       failure(`${item.package} ${item.tag}`, e);
@@ -112,8 +110,9 @@ export async function publishMode(ctx: Context): Promise<void> {
       await tok?.revoke();
     }
   }
-  const decision = attestDecision(attest, attest && (await hubGh.getRepo(ctx.hub)).private);
+  const signedAny = attested.length > 0;
+  const decision = attestDecision(signedAny, signedAny && (await hubGh.getRepo(ctx.hub)).private);
   if (decision.note) info(`hub: ${decision.note}`);
   core.setOutput("attest", String(decision.attest));
-  core.setOutput("attest-path", `${out}/*/*`);
+  core.setOutput("attest-checksums", decision.attest ? attestLines(attested).trimEnd() : "");
 }

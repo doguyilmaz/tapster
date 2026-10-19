@@ -40,6 +40,9 @@ export async function installationToken(
   };
 }
 
+export const attestationToken = (appId: string, pem: string, repo: string, fetchImpl?: FetchLike) =>
+  installationToken(appId, pem, repo, { attestations: "read" }, fetchImpl);
+
 export async function installationRepos(appId: string, pem: string, owner: string, fetchImpl?: FetchLike): Promise<string[] | null> {
   const app = new GitHub(appJwt(appId, pem), fetchImpl);
   let installation: { id: number };

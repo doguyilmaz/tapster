@@ -40,7 +40,10 @@ jobs:
     if: ${{ !cancelled() && needs.check.outputs.work != '[]' && needs.check.outputs.work != '' }}
     runs-on: macos-15
     environment: { name: tapster, deployment: false }
-    permissions: { contents: write, id-token: write, attestations: write }
+    permissions: { contents: write }
+    outputs:
+      attest: ${{ steps.publish.outputs.attest }}
+      checksums: ${{ steps.publish.outputs.attest-checksums }}
     steps:
       - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
@@ -84,12 +87,21 @@ jobs:
           TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
           TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
-      - if: ${{ !cancelled() && steps.publish.outputs.attest == 'true' }}
-        uses: actions/attest-build-provenance@__ATTEST_SHA__ # __ATTEST_TAG__
-        with: { subject-path: "${{ steps.publish.outputs.attest-path }}" }
       - if: always()
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
         with: { mode: cleanup, template: 2 }
+  attest:
+    needs: sign
+    if: ${{ !cancelled() && needs.sign.outputs.attest == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions: { contents: read, id-token: write, attestations: write }
+    steps:
+      - name: Write the checksums of the signed files
+        env: { CHECKSUMS: "${{ needs.sign.outputs.checksums }}" }
+        run: printf '%s\n' "$CHECKSUMS" > "$RUNNER_TEMP/checksums.txt"
+      - name: Attest the signed files
+        uses: actions/attest-build-provenance@__ATTEST_SHA__ # __ATTEST_TAG__
+        with: { subject-checksums: "${{ runner.temp }}/checksums.txt" }
   render:
     needs: [check, sign]
     if: ${{ !cancelled() && needs.check.outputs.render == 'true' }}

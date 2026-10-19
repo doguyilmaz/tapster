@@ -35,8 +35,8 @@ outputs:
     description: "true when the render job has something to do (check mode)"
   attest:
     description: "true when publish wrote files to attest"
-  attest-path:
-    description: Glob of the files to attest
+  attest-checksums:
+    description: Checksum lines of the signed files to attest (publish mode)
   linux:
     description: "true when the Linux jobs have something to do (check mode)"
   changed:

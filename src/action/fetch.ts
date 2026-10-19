@@ -13,7 +13,7 @@ import { type WorkItem, draftOrigin } from "../plan";
 import { writeTree } from "../extract";
 import { readSecret, requireVar } from "../mask";
 import { failure, warn } from "../report";
-import { type InstallationToken, installationToken } from "../token";
+import { type InstallationToken, attestationToken, installationToken } from "../token";
 import { type Fetched, type Manifest, saveManifest, workdir } from "../workdir";
 import { type Context, parseWork } from "./context";
 
@@ -45,8 +45,9 @@ export async function fetchMode(ctx: Context): Promise<void> {
       continue;
     }
     let tok: InstallationToken | undefined;
+    let attTok: InstallationToken | undefined;
     try {
-      tok = await installationToken(appId, pem, pkg.repo, { contents: "write", attestations: "read" });
+      tok = await installationToken(appId, pem, pkg.repo, { contents: "write" });
       const gh = new GitHub(tok.token);
       const release = await gh.getRelease(pkg.repo, item.releaseId);
       assertFetchable(release, item, ctx.owner);
@@ -73,7 +74,8 @@ export async function fetchMode(ctx: Context): Promise<void> {
           if (unsigned) throw new TapsterError(unsigned, "Map every macOS archive in tapster.yml so tapster signs it or stop attaching the file.");
           const file = join(dir, "assets", a.name);
           await writeFile(file, data, { mode: 0o600 });
-          if (!carried(a.name) && (await verifyAttestation(file, pkg, item.tag, repo.private, tok.token)) === "skipped") {
+          attTok ??= await attestationToken(appId, pem, pkg.repo);
+          if (!carried(a.name) && (await verifyAttestation(file, pkg, item.tag, repo.private, attTok.token)) === "skipped") {
             warn(`${pkg.name} ${item.tag}: ${a.name} has no attestation; ${pkg.repo} is private, so this is allowed`);
           }
         }
@@ -106,6 +108,7 @@ export async function fetchMode(ctx: Context): Promise<void> {
       failure(`${item.package} ${item.tag}`, e);
     } finally {
       await tok?.revoke();
+      await attTok?.revoke();
     }
   }
   await saveManifest(manifest);
