@@ -78,7 +78,8 @@ const server = createServer({ cert: readFileSync(certPath!), key: readFileSync(k
   if (ruleset) return send(res, 200, rulesets.find((r) => r.id === Number(ruleset[1])));
   if (path === `${repo}/rules/branches/main`) return send(res, 200, rulesets[1]!.rules);
   if (path === `${repo}/git/ref/tags/${release.tag_name}`) return send(res, 200, { object: { sha: "f1x7" } });
-  if (path === "/repos/doguyilmaz/tapster/activity") return send(res, 200, []);
+  if (path === "/repos/doguyilmaz/tapster/activity") return send(res, 200, [{ before: "0".repeat(40), after: "c0ffee", actor: { login: "doguyilmaz", type: "User" } }]);
+  if (path === "/repos/doguyilmaz/tapster/compare/c0ffee...main") return send(res, 200, { status: "identical", files: [] });
   if (path.endsWith("/installation") && path.startsWith("/repos/")) return send(res, 404, { message: "Not Found" });
   if (path === "/app/installations/1/access_tokens" && method === "POST") return send(res, 201, { token: TOKEN });
   if (path === "/installation/token" && method === "DELETE") return send(res, 204);

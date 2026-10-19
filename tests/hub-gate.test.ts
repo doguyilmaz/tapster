@@ -1,47 +1,46 @@
 import { expect, test } from "bun:test";
-import { botWrites, installationProblems } from "../src/action/check";
+import { foreignWrites, installationProblems } from "../src/action/check";
 import type { GitHub } from "../src/github";
 
-type Push = { actor: { login: string; type: string }; before: string; after: string; activity_type: string };
-const bot = { login: "github-actions[bot]", type: "Bot" };
-const owner = { login: "o", type: "User" };
-const push = (actor: Push["actor"], before: string, after: string): Push => ({ actor, before, after, activity_type: "push" });
+const ownerPush = { actor: { login: "o", type: "User" }, before: "a", after: "b", activity_type: "push" };
 
-function fake(pushes: Push[], files: Record<string, string[]>) {
+function fake(pushes: unknown[], compare: { status: string; files: string[] }) {
   const asked: string[] = [];
   const gh = {
     json: async (_m: string, path: string) => {
       asked.push(path);
       if (path.includes("/activity?")) return pushes;
-      const m = /\/compare\/(\w+)\.\.\.(\w+)$/.exec(path);
-      if (m) return { files: (files[`${m[1]}..${m[2]}`] ?? []).map((filename) => ({ filename })) };
+      if (path.includes("/compare/")) return { status: compare.status, files: compare.files.map((filename) => ({ filename })) };
       throw new Error(path);
     },
   } as unknown as GitHub;
   return { gh, asked };
 }
 
-test("the hub's own state and cask commits are fine", async () => {
-  const { gh } = fake([push(bot, "b", "c"), push(owner, "a", "b")], { "b..c": [".tapster/state.json", "Casks/aims.rb", "bucket/aims.json"] });
-  expect(await botWrites(gh, "o/hub")).toEqual([]);
+test("only the hub's own files changed since the owner's last push", async () => {
+  const { gh, asked } = fake([ownerPush], { status: "ahead", files: [".tapster/state.json", "Casks/aims.rb", "bucket/aims.json"] });
+  expect(await foreignWrites(gh, "o/hub", "o")).toEqual([]);
+  expect(asked).toEqual(["/repos/o/hub/activity?ref=refs%2Fheads%2Fmain&actor=o&per_page=1", "/repos/o/hub/compare/b...main"]);
 });
 
-test("a bot commit that touched tapster.yml or a workflow since the owner's last push stops the hub", async () => {
-  const { gh } = fake([push(bot, "c", "d"), push(bot, "b", "c"), push(owner, "a", "b")], { "c..d": ["tapster.yml"], "b..c": [".github/workflows/tapster.yml"] });
-  expect(await botWrites(gh, "o/hub")).toEqual([
-    "github-actions[bot] changed tapster.yml in d",
-    "github-actions[bot] changed .github/workflows/tapster.yml in c",
-  ]);
+test("tapster.yml or a workflow changed by anyone but the owner since their last push stops the hub", async () => {
+  const { gh } = fake([ownerPush], { status: "ahead", files: ["tapster.yml", ".github/workflows/tapster.yml", "Casks/x.rb"] });
+  expect(await foreignWrites(gh, "o/hub", "o")).toEqual(["tapster.yml changed after your last push (b)", ".github/workflows/tapster.yml changed after your last push (b)"]);
 });
 
-test("an owner push after a bot change means the owner has seen it", async () => {
-  const { gh, asked } = fake([push(owner, "c", "d"), push(bot, "b", "c")], { "b..c": ["tapster.yml"] });
-  expect(await botWrites(gh, "o/hub")).toEqual([]);
-  expect(asked.filter((p) => p.includes("/compare/"))).toEqual([]);
+test("the hub stops when it cannot tell what changed since the owner's last push", async () => {
+  expect(await foreignWrites(fake([], { status: "ahead", files: [] }).gh, "o/hub", "o")).toEqual(["GitHub shows no push by o to main"]);
+  expect(await foreignWrites(fake([ownerPush], { status: "diverged", files: [] }).gh, "o/hub", "o")).toEqual(["main no longer contains your last push (b)"]);
+  const many = Array.from({ length: 300 }, (_, i) => `Casks/p${i}.rb`);
+  expect(await foreignWrites(fake([ownerPush], { status: "ahead", files: many }).gh, "o/hub", "o")).toEqual(["more files changed after your last push (b) than GitHub lists"]);
 });
 
-test("the App on the hub stops everything and extra repositories are named", () => {
+test("an identical main is fine", async () => {
+  expect(await foreignWrites(fake([ownerPush], { status: "identical", files: [] }).gh, "o/hub", "o")).toEqual([]);
+});
+
+test("the App on the hub, or on no repository at all, stops everything; extra repositories are named", () => {
   expect(installationProblems(["o/a", "O/Hub"], "o/hub", ["o/a"])).toEqual({ fatal: "the App is installed on the hub", extra: [] });
   expect(installationProblems(["o/a", "o/b", "o/c"], "o/hub", ["o/a"])).toEqual({ fatal: null, extra: ["o/b", "o/c"] });
-  expect(installationProblems(null, "o/hub", ["o/a"])).toEqual({ fatal: null, extra: [] });
+  expect(installationProblems(null, "o/hub", ["o/a"]).fatal).toBe("the App is not installed on any of your repositories");
 });

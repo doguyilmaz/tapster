@@ -1,5 +1,5 @@
 import { createSign } from "node:crypto";
-import { GitHubError } from "./errors";
+import { GitHubError, TapsterError } from "./errors";
 import { GitHub, type FetchLike } from "./github";
 import { register } from "./mask";
 
@@ -60,9 +60,9 @@ export async function installationRepos(appId: string, pem: string, owner: strin
     for (let page = 1; page <= 10; page++) {
       const batch = await gh.json<{ repositories: { full_name: string }[] }>("GET", `/installation/repositories?per_page=100&page=${page}`);
       repos.push(...batch.repositories.map((r) => r.full_name));
-      if (batch.repositories.length < 100) break;
+      if (batch.repositories.length < 100) return repos;
     }
-    return repos;
+    throw new TapsterError("the App is installed on more than 1000 repositories", "Install it only on the projects tapster.yml lists.");
   } finally {
     await gh.request("DELETE", "/installation/token").catch(() => undefined);
   }

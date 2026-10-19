@@ -65,3 +65,13 @@ test("gh attestation verify gets a token that can only read attestations", async
   await attestationToken("1", pem, "o/aims", fetchImpl);
   expect(bodies).toEqual([{ repositories: ["aims"], permissions: { attestations: "read" } }]);
 });
+
+test("installationRepos refuses to guess when the list is longer than it reads", async () => {
+  const fetchImpl = async (url: string) => {
+    if (url.endsWith("/users/o/installation")) return Response.json({ id: 7 });
+    if (url.endsWith("/access_tokens")) return Response.json({ token: "ghs_many" });
+    if (url.includes("/installation/repositories")) return Response.json({ repositories: Array.from({ length: 100 }, (_, i) => ({ full_name: `o/r${i}` })) });
+    return new Response(null, { status: 204 });
+  };
+  await expect(installationRepos("1", pem, "o", fetchImpl)).rejects.toThrow(/more than 1000/);
+});

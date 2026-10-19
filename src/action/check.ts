@@ -45,39 +45,37 @@ export async function protectionGate(gh: GitHub, pkg: Pick<PackageConfig, "name"
 
 const BOT_PATHS = /^(\.tapster|Casks|bucket)\//;
 
-export async function botWrites(gh: GitHub, hub: string): Promise<string[]> {
-  type Push = { actor: { login: string; type: string } | null; before: string; after: string };
-  const pushes = await gh.json<Push[]>("GET", `/repos/${hub}/activity?ref=refs/heads/main&per_page=30`);
-  const found: string[] = [];
-  for (const p of pushes) {
-    if (p.actor && p.actor.type !== "Bot") break;
-    if (/^0+$/.test(p.before)) continue;
-    const cmp = await gh.json<{ files?: { filename: string }[] }>("GET", `/repos/${hub}/compare/${p.before}...${p.after}`);
-    for (const f of cmp.files ?? []) {
-      if (!BOT_PATHS.test(f.filename)) found.push(`${p.actor?.login ?? "an unknown account"} changed ${f.filename} in ${p.after.slice(0, 7)}`);
-    }
-  }
-  return found;
+export async function foreignWrites(gh: GitHub, hub: string, owner: string): Promise<string[]> {
+  const ref = encodeURIComponent("refs/heads/main");
+  const [last] = await gh.json<{ after: string }[]>("GET", `/repos/${hub}/activity?ref=${ref}&actor=${owner}&per_page=1`);
+  if (!last) return [`GitHub shows no push by ${owner} to main`];
+  const at = last.after.slice(0, 7);
+  const cmp = await gh.json<{ status: string; files?: { filename: string }[] }>("GET", `/repos/${hub}/compare/${last.after}...main`);
+  if (cmp.status === "identical") return [];
+  if (cmp.status !== "ahead") return [`main no longer contains your last push (${at})`];
+  const files = cmp.files ?? [];
+  if (files.length >= 300) return [`more files changed after your last push (${at}) than GitHub lists`];
+  return files.filter((f) => !BOT_PATHS.test(f.filename)).map((f) => `${f.filename} changed after your last push (${at})`);
 }
 
 export function installationProblems(repos: string[] | null, hub: string, listed: string[]): { fatal: string | null; extra: string[] } {
-  if (repos === null) return { fatal: null, extra: [] };
+  if (repos === null) return { fatal: "the App is not installed on any of your repositories", extra: [] };
   const known = new Set(listed.map((r) => r.toLowerCase()));
   if (repos.some((r) => r.toLowerCase() === hub.toLowerCase())) return { fatal: "the App is installed on the hub", extra: [] };
   return { fatal: null, extra: repos.filter((r) => !known.has(r.toLowerCase())) };
 }
 
 async function hubGate(ctx: Context, appId: string, pem: string): Promise<void> {
-  const writes = await botWrites(new GitHub(readSecret("GITHUB_TOKEN")), ctx.hub);
+  const writes = await foreignWrites(new GitHub(readSecret("GITHUB_TOKEN")), ctx.hub, ctx.owner);
   if (writes.length) {
     throw new TapsterError(
-      `a bot changed the hub since your last push: ${writes.join("; ")}`,
-      "Only you may change what the hub signs. Review those commits and revert what you did not make, then push; if you did not expect them, rotate the App key with tapster init --rotate app.",
+      `the hub changed in ways only you may change it: ${writes.join("; ")}`,
+      "Review the commits on main since your last push, revert what you did not make and push; a push from you marks main as reviewed. If you did not expect them, rotate the App key with tapster init --rotate app.",
     );
   }
   const listed = [...ctx.config.packages.map((p) => p.repo), ...ctx.invalid.flatMap((i) => (i.repo ? [i.repo] : []))];
   const inst = installationProblems(await installationRepos(appId, pem, ctx.owner), ctx.hub, listed);
-  if (inst.fatal) throw new TapsterError(inst.fatal, "Remove the hub from the App's repositories at https://github.com/settings/installations; the App only needs the projects.");
+  if (inst.fatal) throw new TapsterError(inst.fatal, "The App must be installed on the projects only, never on the hub: https://github.com/settings/installations");
   if (inst.extra.length) warn(`the App can also write to ${inst.extra.join(", ")}, which tapster.yml does not list; remove them at https://github.com/settings/installations`);
 }
 
