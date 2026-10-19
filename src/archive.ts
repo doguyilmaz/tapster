@@ -46,6 +46,7 @@ function parsePax(data: Buffer): Record<string, string> {
 
 const PATH_MAX = 1024;
 const MAX_ENTRIES = 200_000;
+const MAX_LINK_STEPS = 1_000_000;
 const PRINTABLE = /^[\x20-\x5b\x5d-\x7e]+$/;
 
 function safeName(raw: string): string {
@@ -133,7 +134,7 @@ function checkSymlinks(entries: TarEntry[]) {
   const links = new Map(entries.filter((e) => e.type === "symlink").map((e) => [e.name.toLowerCase(), e.linkname!] as const));
   if (links.size === 0) return;
   const names = entries.map((e) => e.name.toLowerCase()).sort();
-  for (const link of links) {
+  for (const link of links.keys()) {
     const below = `${link}/`;
     let lo = 0;
     let hi = names.length;
@@ -145,6 +146,7 @@ function checkSymlinks(entries: TarEntry[]) {
     if (names[lo]?.startsWith(below)) throw bad(`has ${names[lo]}, which passes through a symlink`);
   }
   const components = (target: string) => target.split("/").filter((p) => p !== "" && p !== ".");
+  let steps = 0;
   for (const e of entries) {
     if (e.type !== "symlink") continue;
     const dir = posix.dirname(e.name);
@@ -152,6 +154,7 @@ function checkSymlinks(entries: TarEntry[]) {
     const queue = components(e.linkname!);
     let hops = 0;
     while (queue.length > 0) {
+      if (++steps > MAX_LINK_STEPS) throw bad("has more symlinks than tapster checks");
       const part = queue.shift()!;
       if (part === "..") {
         if (stack.length === 0) throw bad(`has a symlink ${e.name} pointing outside`);

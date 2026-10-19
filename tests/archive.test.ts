@@ -108,21 +108,6 @@ test("the repack drops setuid, setgid, sticky and group or other write", () => {
   expect(out.find((e) => e.name === "d")!.mode).toBe(0o755);
 });
 
-test("names and link targets longer than macOS's PATH_MAX are refused", () => {
-  expect(() => readTarGz(rawTarGz([{ name: "PaxHeader", type: "x", data: paxRecord("path", "a/".repeat(600) + "x") }, { name: "x", data: "1" }]))).toThrow(TapsterError);
-  expect(() => readTarGz(rawTarGz([{ name: "PaxHeader", type: "x", data: paxRecord("linkpath", "a/".repeat(600)) }, { name: "l", type: "2", linkname: "x" }]))).toThrow(TapsterError);
-});
-
-test("an archive built to make the symlink checks slow finishes quickly", () => {
-  const deep = Array.from({ length: 500 }, () => "d").join("/");
-  const gz = rawTarGz([{ name: "link", type: "2", linkname: "x" }, ...Array.from({ length: 20000 }, (_, i) => ({ name: `${deep.slice(0, 900)}/${i}`, data: "" }))]);
-  const started = Date.now();
-  try {
-    readTarGz(gz);
-  } catch (e) {
-    expect(e).toBeInstanceOf(TapsterError);
-  }
-  expect(Date.now() - started).toBeLessThan(3000);
 test("framework links that chain through other links are fine", () => {
   const entries = readTarGz(
     rawTarGz([
@@ -141,4 +126,26 @@ test.each([
   ["a loop", [{ name: "a", type: "2", linkname: "b" }, { name: "b", type: "2", linkname: "a" }, { name: "c", type: "2", linkname: "a/x" }]],
 ])("still rejects %s", (_, entries) => {
   expect(() => readTarGz(rawTarGz(entries))).toThrow(TapsterError);
+});
+
+test("names and link targets longer than macOS's PATH_MAX are refused", () => {
+  expect(() => readTarGz(rawTarGz([{ name: "PaxHeader", type: "x", data: paxRecord("path", "a/".repeat(600) + "x") }, { name: "x", data: "1" }]))).toThrow(TapsterError);
+  expect(() => readTarGz(rawTarGz([{ name: "PaxHeader", type: "x", data: paxRecord("linkpath", "a/".repeat(600)) }, { name: "l", type: "2", linkname: "x" }]))).toThrow(TapsterError);
+});
+
+test("archives built to make the symlink checks slow finish quickly", () => {
+  const deep = Array.from({ length: 500 }, () => "d").join("/");
+  const cases = [
+    rawTarGz(Array.from({ length: 4000 }, (_, i) => ({ name: `l${i}`, type: "2", linkname: deep }))),
+    rawTarGz([{ name: "link", type: "2", linkname: "x" }, ...Array.from({ length: 20000 }, (_, i) => ({ name: `${deep.slice(0, 900)}/${i}`, data: "" }))]),
+  ];
+  for (const gz of cases) {
+    const started = Date.now();
+    try {
+      readTarGz(gz);
+    } catch (e) {
+      expect(e).toBeInstanceOf(TapsterError);
+    }
+    expect(Date.now() - started).toBeLessThan(3000);
+  }
 });
