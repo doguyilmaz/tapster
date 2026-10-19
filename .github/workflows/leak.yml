@@ -14,6 +14,12 @@ env:
     CANARY-issuer-0c4a72
     CANARY-github-token-91df3e
     ghs_CANARYq7Zx81mPkW3vT9yLr2dNf5bHj4
+    CANARYsparkleSeedq7Zx81mPkW3vT9yLr2dNf5bHjA=
+    080340458b296ab92579279e76aed9c7cd663e45b7bd3f722ebd9d35fe5b1e30
+    gNrmRAB3S3v/YKC3kQBV3LKDd6/di8CmV9d1bP7Ctn6a0usQ+7Jj8Dv35MEq4oCp+5gJrjW4DZGGWS4hlNnxd9pltEpJmwgJPZw7Fs9qHw31fWymDU6QwHoUyhwCmqaa
+    80dae64400774b7bff60a0b7910055dcb28377afdd8bc0a657d7756cfec2b67e9ad2eb10fbb263f03bf7e4c12ae280a9fb9809ae35b80d9186592e2194d9f177da65b44a499b08093d9c3b16cf6a1f0df57d6ca60d4e90c07a14ca1c029aa69a
+    gNrmRAB3S3v/YKC3kQBV3LKDd6/di8CmV9d1bP7Ctn6a0usQ+7Jj8Dv35MEq4oCp+5gJrjW4DZGGWS4hlNnxdw==
+    CANARY-sparkle-malformed-6d2f9a
 jobs:
   plain:
     runs-on: macos-15
@@ -47,6 +53,22 @@ jobs:
         uses: ./
         with: { mode: render, config: tests/leak/hub/tapster.yml }
         env: { GITHUB_TOKEN: CANARY-github-token-91df3e }
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with: { bun-version: 1.4.3 }
+      - name: three sealed app items for sparkle
+        run: bun tests/leak/sparkle.ts "$RUNNER_TEMP"
+      - name: sparkle (two canary keys, one app pinned to the other key)
+        continue-on-error: true
+        uses: ./
+        with: { mode: sparkle, config: tests/leak/hub/sparkle.yml }
+        env: { SPARKLE_KEY_LEAKSEED: "CANARYsparkleSeedq7Zx81mPkW3vT9yLr2dNf5bHjA=", SPARKLE_KEY_LEAKOLD: "gNrmRAB3S3v/YKC3kQBV3LKDd6/di8CmV9d1bP7Ctn6a0usQ+7Jj8Dv35MEq4oCp+5gJrjW4DZGGWS4hlNnxd9pltEpJmwgJPZw7Fs9qHw31fWymDU6QwHoUyhwCmqaa" }
+      - name: the same items again
+        run: bun tests/leak/sparkle.ts "$RUNNER_TEMP"
+      - name: sparkle (malformed key)
+        continue-on-error: true
+        uses: ./
+        with: { mode: sparkle, config: tests/leak/hub/sparkle.yml }
+        env: { SPARKLE_KEY_LEAKSEED: CANARY-sparkle-malformed-6d2f9a, SPARKLE_KEY_LEAKOLD: "gNrmRAB3S3v/YKC3kQBV3LKDd6/di8CmV9d1bP7Ctn6a0usQ+7Jj8Dv35MEq4oCp+5gJrjW4DZGGWS4hlNnxd9pltEpJmwgJPZw7Fs9qHw31fWymDU6QwHoUyhwCmqaa" }
       - if: always()
         uses: ./
         with: { mode: cleanup }
@@ -164,6 +186,22 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.CI_CANARY_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.CI_CANARY_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.CI_CANARY_NOTARY_ISSUER_ID }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with: { bun-version: 1.4.3 }
+      - name: three sealed app items for sparkle
+        run: bun tests/leak/sparkle.ts "$RUNNER_TEMP"
+      - name: sparkle (two canary keys, one app pinned to the other key)
+        continue-on-error: true
+        uses: ./
+        with: { mode: sparkle, config: tests/leak/hub/sparkle.yml }
+        env: { SPARKLE_KEY_LEAKSEED: "${{ secrets.CI_CANARY_SPARKLE_SEED }}", SPARKLE_KEY_LEAKOLD: "${{ secrets.CI_CANARY_SPARKLE_EXPANDED }}" }
+      - name: the same items again
+        run: bun tests/leak/sparkle.ts "$RUNNER_TEMP"
+      - name: sparkle (malformed key)
+        continue-on-error: true
+        uses: ./
+        with: { mode: sparkle, config: tests/leak/hub/sparkle.yml }
+        env: { SPARKLE_KEY_LEAKSEED: "${{ secrets.CI_CANARY_SPARKLE_MALFORMED }}", SPARKLE_KEY_LEAKOLD: "${{ secrets.CI_CANARY_SPARKLE_EXPANDED }}" }
       - if: always()
         uses: ./
         with: { mode: cleanup }
@@ -182,8 +220,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXTRA_CANARIES: ${{ needs.plain-api.outputs.canaries }}
           EXPECT_STAGES: >-
-            {"plain":["tapster: failed (openssl exited with"],
-            "masked":["fixture v0.0.1: failed ("],
+            {"plain":["tapster: failed (openssl exited with", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
+            "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "tapster: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
+            "masked":["fixture v0.0.1: failed (", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
+            "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "tapster: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
             "plain-api":["fixture-linux v0.0.9: published", "Casks/fixture-linux.rb: rendered",
             "fixture-linux v0.0.9: failed (the release was published while tapster worked on it",
             "returned 500", "returned 404", "returned 422", "network error"]}

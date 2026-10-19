@@ -1,0 +1,27 @@
+version: 1
+tap: doguyilmaz/tapster-test
+packages:
+  - name: leakseed
+    repo: doguyilmaz/tapster-fixture
+    kind: app
+    app: LeakSeed.app
+    bundle_id: com.example.LeakSeed
+    assets: { darwin-arm64: "LeakSeed-{version}.app.tar.gz" }
+    dmg: { name: "LeakSeed-{version}.dmg" }
+    sparkle: { key: leakseed, public_key: "bd1jZbSx7VqqXdFV3qwt8LWNpys4uyUqTkO0DlyXtY8=" }
+  - name: leakold
+    repo: doguyilmaz/tapster-fixture
+    kind: app
+    app: LeakOld.app
+    bundle_id: com.example.LeakOld
+    assets: { darwin-arm64: "LeakOld-{version}.app.tar.gz" }
+    dmg: { name: "LeakOld-{version}.dmg" }
+    sparkle: { key: leakold, public_key: "2mW0SkmbCAk9nDsWz2ofDfV9bKYNTpDAehTKHAKappo=" }
+  - name: leakwrong
+    repo: doguyilmaz/tapster-fixture
+    kind: app
+    app: LeakWrong.app
+    bundle_id: com.example.LeakWrong
+    assets: { darwin-arm64: "LeakWrong-{version}.app.tar.gz" }
+    dmg: { name: "LeakWrong-{version}.dmg" }
+    sparkle: { key: leakseed, public_key: "2mW0SkmbCAk9nDsWz2ofDfV9bKYNTpDAehTKHAKappo=" }
