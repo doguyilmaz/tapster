@@ -22,5 +22,7 @@ test("the hub attests only what publish asks for, so a private hub skips the ste
   const attest = flow.jobs.sign!.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
   expect(attest.if).toContain("steps.publish.outputs.attest == 'true'");
   expect((attest as { "continue-on-error"?: string })["continue-on-error"]).toBeUndefined();
-  expect(readFileSync(".github/workflows/release.yml", "utf8")).not.toContain("continue-on-error");
+  const own = (parse(readFileSync(".github/workflows/release.yml", "utf8")) as { jobs: { build: { steps: { uses?: string; if?: string; "continue-on-error"?: unknown }[] } } }).jobs.build.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
+  expect(own.if).toBe("${{ !github.event.repository.private }}");
+  expect(own["continue-on-error"]).toBeUndefined();
 });

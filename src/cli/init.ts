@@ -1,10 +1,9 @@
-import { createHash, createPrivateKey, createPublicKey, randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type HubConfig, isApp, parseConfig } from "../config";
-import { TapsterError } from "../errors";
+import { GitHubError, TapsterError } from "../errors";
 import { GitHub } from "../github";
 import { decodeSparkleKey } from "../sparkle-key";
 import { appJwt } from "../token";
@@ -12,7 +11,9 @@ import { run, runPath } from "../run";
 import hubReadme from "../../templates/hub/README.md" with { type: "text" };
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
-import { currentRepo, setEnvSecret, setEnvVariable, userGitHub } from "./gh";
+import { appFromManifest, openUrl } from "./appflow";
+import { rotateDoorbell, setupDoorbell } from "./doorbell";
+import { currentRepo, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
 import { ask } from "./prompt";
 
 type Pins = typeof pinsJson;
@@ -62,45 +63,20 @@ export function fillWorkflow(template: string, pins: Pins, tapster: { sha: strin
     .replaceAll("__CHECKOUT_TAG__", pins["actions/checkout"].tag)
     .replaceAll("__ATTEST_SHA__", pins["actions/attest-build-provenance"].sha)
     .replaceAll("__ATTEST_TAG__", pins["actions/attest-build-provenance"].tag)
+    .replaceAll("__UPLOAD_SHA__", pins["actions/upload-artifact"].sha)
+    .replaceAll("__UPLOAD_TAG__", pins["actions/upload-artifact"].tag)
+    .replaceAll("__DOWNLOAD_SHA__", pins["actions/download-artifact"].sha)
+    .replaceAll("__DOWNLOAD_TAG__", pins["actions/download-artifact"].tag)
+    .replaceAll("__PAGES_UPLOAD_SHA__", pins["actions/upload-pages-artifact"].sha)
+    .replaceAll("__PAGES_UPLOAD_TAG__", pins["actions/upload-pages-artifact"].tag)
+    .replaceAll("__PAGES_DEPLOY_SHA__", pins["actions/deploy-pages"].sha)
+    .replaceAll("__PAGES_DEPLOY_TAG__", pins["actions/deploy-pages"].tag)
     .replaceAll("__TAPSTER_SHA__", tapster.sha)
     .replaceAll("__TAPSTER_TAG__", tapster.tag);
 }
 
-function openUrl(url: string): void {
-  console.log(`  ${url}`);
-  void runPath(process.platform === "darwin" ? "/usr/bin/open" : "/usr/bin/xdg-open", "open", [url], { allowFail: true }).catch(() => undefined);
-}
-
 async function createApp(owner: string, hub: string): Promise<void> {
-  const state = randomBytes(16).toString("hex");
-  const code = await new Promise<string>((resolve, reject) => {
-    const server = createServer((req, res) => {
-      const url = new URL(req.url ?? "/", "http://127.0.0.1");
-      if (url.pathname === "/start") {
-        const manifest = JSON.stringify(appManifest(owner, hub, `http://127.0.0.1:${(server.address() as { port: number }).port}/callback`)).replaceAll('"', "&quot;");
-        res.writeHead(200, { "content-type": "text/html" });
-        res.end(`<form id="f" method="post" action="https://github.com/settings/apps/new?state=${state}"><input type="hidden" name="manifest" value="${manifest}"></form><script>document.getElementById("f").submit()</script>`);
-        return;
-      }
-      if (url.pathname === "/callback") {
-        res.writeHead(200, { "content-type": "text/plain" });
-        res.end("tapster: the App was created. You can close this tab.");
-        server.close();
-        if (url.searchParams.get("state") !== state) reject(new TapsterError("the App creation answer did not match", "Run tapster init again."));
-        else resolve(url.searchParams.get("code") ?? "");
-        return;
-      }
-      res.writeHead(404).end();
-    });
-    server.listen(0, "127.0.0.1", () => {
-      const p = (server.address() as { port: number }).port;
-      console.log("Opening GitHub to create your tapster App. Click \"Create GitHub App\".");
-      openUrl(`http://127.0.0.1:${p}/start`);
-    });
-  });
-  const app = await fetch(`https://api.github.com/app-manifests/${code}/conversions`, { method: "POST", headers: { Accept: "application/vnd.github+json" } });
-  if (!app.ok) throw new TapsterError(`GitHub did not convert the App (status ${app.status})`, "Run tapster init again within an hour of creating the App.");
-  const created = (await app.json()) as { id: number; slug: string; pem: string };
+  const created = await appFromManifest((redirect) => appManifest(owner, hub, redirect), "your tapster App");
   await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", created.pem);
   await setEnvVariable(hub, "TAPSTER_APP_ID", String(created.id));
   await setEnvVariable(hub, "TAPSTER_APP_SLUG", created.slug);
@@ -221,6 +197,39 @@ async function storeSparkleKey(gh: GitHub, dir: string, hub: string, label: stri
   console.log("Review and commit the workflow change, then push.");
 }
 
+export function linuxKeyAllowed(secrets: string[], rotate: boolean): void {
+  if (secrets.includes("TAPSTER_LINUX_KEY") && !rotate) {
+    throw new TapsterError("the hub already has a Linux signing key", "Replacing it makes every apt and dnf user fetch the new key. To do that, run tapster init --rotate linux.");
+  }
+}
+
+async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean): Promise<void> {
+  const config = hubConfig(dir, hub);
+  const secrets = (await gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${hub}/environments/tapster/secrets`)).secrets.map((x) => x.name);
+  linuxKeyAllowed(secrets, rotate);
+  const gpg = ["/opt/homebrew/bin/gpg", "/usr/local/bin/gpg", "/usr/bin/gpg"].find((p) => existsSync(p));
+  if (!gpg) throw new TapsterError("gpg is not installed", "Install it with brew install gnupg, then run this again.");
+  await gh.json("POST", `/repos/${hub}/pages`, { build_type: "workflow" }).catch(async (e) => {
+    if (!(e instanceof GitHubError) || e.status !== 409) throw new TapsterError("GitHub Pages could not be turned on for the hub", "A private hub needs a paid plan for Pages; make the hub public or turn Pages on by hand with GitHub Actions as the source.");
+    await gh.json("PUT", `/repos/${hub}/pages`, { build_type: "workflow" });
+  });
+  console.log("GitHub Pages serves the hub from GitHub Actions.");
+  const home = mkdtempSync("/tmp/tl-");
+  const env = { GNUPGHOME: home };
+  try {
+    await runPath(gpg, "gpg", ["--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-gen-key", `${hub.split("/")[0]} tapster (${hub})`, "rsa4096", "sign", "never"], { env });
+    const key = (await runPath(gpg, "gpg", ["--batch", "--armor", "--export-secret-keys"], { env })).stdout;
+    const fingerprint = (await runPath(gpg, "gpg", ["--batch", "--with-colons", "--list-secret-keys"], { env })).stdout.split("\n").find((l) => l.startsWith("fpr:"))?.split(":")[9];
+    await setEnvSecret(hub, "TAPSTER_LINUX_KEY", key);
+    console.log(`Stored TAPSTER_LINUX_KEY, fingerprint ${fingerprint}. It is kept nowhere else; if it is lost, run tapster init --rotate linux and users fetch the new key.`);
+  } finally {
+    await runPath(join(gpg, "..", "gpgconf"), "gpgconf", ["--kill", "all"], { env, allowFail: true }).catch(() => undefined);
+    await rm(home, { recursive: true, force: true });
+  }
+  if (!config.packages.some((p) => !isApp(p) && p.linux)) console.log("No package sets linux: true yet; add it to the CLI packages that should ship to apt and dnf.");
+  await writeWorkflow(gh, dir, sparkleLabels(config));
+}
+
 async function writeFiles(gh: GitHub, dir: string, hub: string): Promise<void> {
   const [owner, repo] = hub.split("/") as [string, string];
   const tap = `${owner}/${repo.replace(/^homebrew-/, "")}`;
@@ -244,13 +253,17 @@ export async function init(args: string[]): Promise<void> {
   if (rotate === "app") return rotateAppKey(gh, hub);
   if (rotate === "certificate") return storeCertificate(hub);
   if (rotate === "notary") return storeNotary(hub);
+  if (rotate === "doorbell") return rotateDoorbell(gh, hub);
+  if (rotate === "linux") return setupLinux(gh, dir, hub, true);
+  if (args[0] === "--doorbell" && args.length === 1) return setupDoorbell(gh, hub, hubConfig(dir, hub), setRepoVariable);
+  if (args[0] === "--linux" && args.length === 1) return setupLinux(gh, dir, hub, false);
   if (args[0] === "--sparkle" && args[1]) {
     const account = args[2] === "--account" && args[3] ? args[3] : args.length === 2 ? "ed25519" : null;
     if (account) return storeSparkleKey(gh, dir, hub, args[1], account);
   }
   if (args[0] === "--workflow" && args.length === 1) return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)));
   if (args.length) {
-    throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, init --rotate app|certificate|notary, init --sparkle <label> [--account <account>] or init --workflow.");
+    throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, init --rotate app|certificate|notary|doorbell|linux, init --sparkle <label> [--account <account>], init --doorbell, init --linux or init --workflow.");
   }
   await protectHub(gh, hub);
   await createApp(hub.split("/")[0]!, hub);

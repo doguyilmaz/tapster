@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import { isMachO, readTarGz, writeTarGz } from "../src/archive";
+import { isMachO, readTar, readTarGz, writeTarGz } from "../src/archive";
 import { TapsterError } from "../src/errors";
+import { gunzipSync } from "node:zlib";
 import { paxRecord, rawTarGz } from "./helpers/rawtar";
 
 test("reads files, folders and inner symlinks", () => {
@@ -173,4 +174,32 @@ test("forty links that each add 500 folders are cut off quickly", () => {
     expect(e).toBeInstanceOf(TapsterError);
   }
   expect(Date.now() - started).toBeLessThan(1000);
+});
+
+test("owners are read and a plain tar reads like a gzipped one", () => {
+  const gz = rawTarGz([{ name: "./usr/bin/x", data: "a", uid: 1000 }]);
+  const [e] = readTarGz(gz);
+  expect(e!.uid).toBe(1000);
+  expect(e!.gid).toBe(0);
+  expect(readTar(gunzipSync(gz))[0]!.name).toBe("usr/bin/x");
+});
+
+test("owner names are read so packages can be checked for them", () => {
+  const [e] = readTarGz(rawTarGz([{ name: "usr/bin/x", data: "a", uname: "nobody" }]));
+  expect(e!.uname).toBe("nobody");
+  expect(e!.gname).toBe("");
+});
+
+test("an archive that goes on after its end or names a file like a folder is refused", () => {
+  const block = Buffer.alloc(512);
+  block.write("hidden");
+  expect(() => readTarGz(rawTarGz([{ name: "a", data: "1" }], block))).toThrow(TapsterError);
+  expect(() => readTarGz(rawTarGz([{ name: "a", data: "1" }], Buffer.alloc(9216)))).not.toThrow();
+  expect(() => readTarGz(rawTarGz([{ name: "usr/bin/x/", data: "1" }]))).toThrow(TapsterError);
+});
+
+test("a folder or symlink that claims data is refused, so no entry can hide behind it", () => {
+  expect(() => readTarGz(rawTarGz([{ name: "usr/", type: "5", data: Buffer.alloc(512, 1) }, { name: "usr/bin/x", data: "1" }]))).toThrow(TapsterError);
+  expect(() => readTarGz(rawTarGz([{ name: "./", type: "5", data: Buffer.alloc(512, 1) }]))).toThrow(TapsterError);
+  expect(() => readTarGz(rawTarGz([{ name: "l", type: "2", linkname: "x", data: "abc" }, { name: "x", data: "1" }]))).toThrow(TapsterError);
 });

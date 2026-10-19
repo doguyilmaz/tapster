@@ -2,7 +2,7 @@ import { posix } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { TapsterError } from "./errors";
 
-export type TarEntry = { name: string; type: "file" | "dir" | "symlink"; mode: number; data: Buffer; linkname?: string };
+export type TarEntry = { name: string; type: "file" | "dir" | "symlink"; mode: number; data: Buffer; linkname?: string; uid?: number; gid?: number; uname?: string; gname?: string };
 export type Limits = { entryBytes: number; totalBytes: number };
 export const LIMITS: Limits = { entryBytes: 1 << 30, totalBytes: 2 * (1 << 30) - 1 };
 
@@ -73,6 +73,11 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
   } catch {
     throw bad("is not a valid tar.gz or is larger than allowed");
   }
+  return readTar(tar, limits);
+}
+
+export function readTar(tar: Buffer, limits: Limits = LIMITS): TarEntry[] {
+  if (tar.length > limits.totalBytes) throw bad("is larger than allowed");
   const entries: TarEntry[] = [];
   const seen = new Set<string>();
   let off = 0;
@@ -81,7 +86,10 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
   let pax: Record<string, string> = {};
   while (off + 512 <= tar.length) {
     const h = tar.subarray(off, off + 512);
-    if (h.every((b) => b === 0)) break;
+    if (h.every((b) => b === 0)) {
+      if (!tar.subarray(off).every((b) => b === 0)) throw bad("has data after its end");
+      break;
+    }
     if (!checksumOk(h)) throw bad("has a damaged header");
     const size = octal(h, 124, 12);
     if (size > limits.entryBytes) throw bad("holds a file larger than allowed");
@@ -109,6 +117,10 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
       continue;
     }
     if (pax.size !== undefined && Number(pax.size) !== size) throw bad("has a damaged extended header");
+    const uid = pax.uid !== undefined ? Number(pax.uid) : octal(h, 108, 8);
+    const gid = pax.gid !== undefined ? Number(pax.gid) : octal(h, 116, 8);
+    const uname = pax.uname ?? cstr(h.subarray(265, 297));
+    const gname = pax.gname ?? cstr(h.subarray(297, 329));
     const posixHeader = h.subarray(257, 263).equals(Buffer.from("ustar\0", "latin1"));
     const prefix = posixHeader ? cstr(h.subarray(345, 500)) : "";
     const base = cstr(h.subarray(0, 100));
@@ -121,12 +133,14 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
     longLink = null;
     const kind = type === "0" || type === "\0" ? "file" : type === "5" ? "dir" : type === "2" ? "symlink" : null;
     if (!kind) throw bad(`holds ${rawName}, which is not a file, folder or symlink`);
+    if (kind !== "file" && size !== 0) throw bad(`gives the ${kind} ${rawName} data, which could hide entries`);
     if (kind === "dir" && /^(\.\/)*\.\/?$/.test(rawName)) continue;
+    if (kind !== "dir" && rawName.endsWith("/")) throw bad(`names the ${kind} ${rawName} like a folder`);
     const name = safeName(rawName);
     if (seen.has(name.toLowerCase())) throw bad(`lists ${name} twice`);
     seen.add(name.toLowerCase());
     if (kind === "symlink") checkLink(name, rawLink);
-    entries.push({ name, type: kind, mode: octal(h, 100, 8) & 0o7777, data: Buffer.from(data), ...(kind === "symlink" ? { linkname: rawLink } : {}) });
+    entries.push({ name, type: kind, mode: octal(h, 100, 8) & 0o7777, data: Buffer.from(data), uid, gid, uname, gname, ...(kind === "symlink" ? { linkname: rawLink } : {}) });
   }
   checkSymlinks(entries);
   return entries;

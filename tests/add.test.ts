@@ -64,8 +64,9 @@ test("bun workflow builds every target and drafts the release", () => {
   expect(flow).not.toContain("__");
   expect(flow).not.toContain("secrets.");
   expect(flow).toContain("subject-checksums: dist/checksums.txt");
-  expect(flow).toContain("if: ${{ !github.event.repository.private }}");
-  expect(flow).not.toContain("continue-on-error");
+  const attest = (parse(flow) as { jobs: { build: { steps: { uses?: string; if?: string; "continue-on-error"?: string }[] } } }).jobs.build.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
+  expect(attest.if).toBe("${{ !github.event.repository.private }}");
+  expect(attest["continue-on-error"]).toBeUndefined();
   expect(flow).toContain('tar -C "$t" -czf "konvoy_${v}_${p/-/_}.tar.gz" konvoy');
 });
 
@@ -92,10 +93,10 @@ test("existing job permissions are kept", () => {
   expect(y.jobs.release.permissions).toEqual({ contents: "write", packages: "write", "id-token": "write", attestations: "write" });
 });
 
-test("running add twice adds one attestation step", () => {
+test("running add twice adds one attestation step and one ring step", () => {
   const once = adaptReleaseWorkflow(goFlow, "a".repeat(40), "v4").text;
   const twice = adaptReleaseWorkflow(once, "a".repeat(40), "v4");
-  expect(parse(twice.text).jobs.release.steps.length).toBe(2);
+  expect(parse(twice.text).jobs.release.steps.length).toBe(3);
   expect(twice.notes.join(" ")).toContain("already");
 });
 

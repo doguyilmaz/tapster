@@ -1,0 +1,10 @@
+version: 1
+tap: doguyilmaz/tapster-test
+linux: { maintainer: "Tapster Leak Test <leak@example.com>" }
+packages:
+  - name: fixture
+    repo: doguyilmaz/tapster-fixture
+    binaries: [fixture]
+    linux: true
+    description: Test package for the tapster leak test
+    assets: { linux-amd64: "fixture_{version}_linux_amd64.tar.gz" }

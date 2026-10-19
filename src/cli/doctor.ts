@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { type HubConfig, parseConfig } from "../config";
+import { type HubConfig, isApp, linuxUrl, parseConfig } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { currentRepo, userGitHub } from "./gh";
@@ -51,6 +51,22 @@ export function sparkleCheck(config: HubConfig, secrets: string[], workflow: str
   return ok(name);
 }
 
+export function doorbellCheck(hub: string, projects: Record<string, string | null>): Check {
+  const name = "every project rings the hub's doorbell";
+  const off = Object.entries(projects).filter(([, v]) => v !== hub).map(([repo]) => repo);
+  return off.length ? bad(name, off.map((r) => `gh variable set TAPSTER_DOORBELL --repo ${r} --body ${hub}`).join("; ")) : ok(name);
+}
+
+export function linuxCheck(config: HubConfig, hub: string, secrets: string[], pages: { build_type: string; html_url: string } | null): Check {
+  const name = "the Linux repositories can be signed and deployed";
+  if (!secrets.includes("TAPSTER_LINUX_KEY")) return bad(name, "Run tapster init --linux to make and store the signing key.");
+  if (!pages) return bad(name, "Turn on GitHub Pages for the hub; tapster init --linux does it.");
+  if (pages.build_type !== "workflow") return bad(name, "Set the hub's Pages source to GitHub Actions; tapster init --linux does it.");
+  const live = pages.html_url.replace(/\/$/, "");
+  if (live !== linuxUrl(config, hub)) return bad(name, `Pages serves ${live}; set linux.url in tapster.yml to it.`);
+  return ok(name);
+}
+
 const SECRETS = ["MACOS_SIGN_P12", "MACOS_SIGN_PASSWORD", "MACOS_NOTARY_KEY", "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER_ID", "TAPSTER_APP_PRIVATE_KEY"];
 const VARIABLES = ["TAPSTER_APP_ID", "TAPSTER_APP_SLUG", "TAPSTER_TEAM_ID"];
 
@@ -68,12 +84,24 @@ async function apiChecks(gh: GitHub, hub: string, repos: string[], config: HubCo
   const missing = SECRETS.filter((s) => !secrets.includes(s));
   checks.push(missing.length ? bad("all credentials are stored", `Missing: ${missing.join(", ")}. Run tapster init --rotate for them.`) : ok("all credentials are stored"));
   if (config && sparkleLabels(config).length) checks.push(sparkleCheck(config, secrets, workflow));
+  if (config?.packages.some((p) => !isApp(p) && p.linux)) {
+    const pages = await gh.json<{ build_type: string; html_url: string }>("GET", `/repos/${hub}/pages`).catch(() => null);
+    checks.push(linuxCheck(config, hub, secrets, pages));
+  }
   const vars = (await gh.json<{ variables: { name: string; value: string }[] }>("GET", `/repos/${hub}/environments/tapster/variables`)).variables;
   const repoVars = (await gh.json<{ variables: { name: string }[] }>("GET", `/repos/${hub}/actions/variables`)).variables;
   const exposed = [...vars, ...repoVars].map((v) => v.name).filter((n) => SECRETS.includes(n) || /^SPARKLE_KEY_/.test(n));
   checks.push(exposed.length ? bad("credentials are secrets, not variables", `Variables are readable by anyone with access; delete ${exposed.join(", ")} and store them with tapster init --rotate.`) : ok("credentials are secrets, not variables"));
   const missingVars = VARIABLES.filter((v) => !vars.some((x) => x.name === v));
   checks.push(missingVars.length ? bad("the App and team variables are set", `Missing: ${missingVars.join(", ")}. Run tapster init.`) : ok("the App and team variables are set"));
+  const doorbell = vars.find((v) => v.name === "TAPSTER_DOORBELL")?.value;
+  if (doorbell) {
+    const values: Record<string, string | null> = {};
+    for (const repo of repos) {
+      values[repo] = await gh.json<{ value: string }>("GET", `/repos/${repo}/actions/variables/TAPSTER_DOORBELL`).then((v) => v.value).catch(() => null);
+    }
+    checks.push(doorbellCheck(doorbell, values));
+  }
   const perms = await gh.json<{ default_workflow_permissions: string }>("GET", `/repos/${hub}/actions/permissions/workflow`);
   checks.push(perms.default_workflow_permissions === "read" ? ok("the default workflow token is read-only") : bad("the default workflow token is read-only", "Run tapster init."));
   const rules = await gh.json<{ name: string }[]>("GET", `/repos/${hub}/rulesets`);

@@ -50,3 +50,4 @@ __CARRY__
       - name: Hand the draft to the tapster hub
         env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" }
         run: gh release create "$TAG" dist/* --draft --verify-tag --generate-notes --title "$TAG"
+__RING__

@@ -5,6 +5,7 @@ import { isMap, isSeq, parse, parseDocument, type Scalar, YAMLMap } from "yaml";
 import { BUNDLE_ID } from "../config";
 import { TapsterError } from "../errors";
 import { parsePlist } from "../plist";
+import { ringStep } from "./doorbell";
 import pinsJson from "../../templates/pins.json";
 import appTemplate from "../../templates/project/app-release.yml" with { type: "text" };
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
@@ -29,6 +30,7 @@ export function adaptGoreleaser(text: string): { text: string; notes: string[] }
 }
 
 const jobMap = (job: { value: unknown }) => job.value as YAMLMap;
+const RING_NAME = "Ring the tapster hub";
 
 export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag: string): { text: string; notes: string[] } {
   const doc = parseDocument(text);
@@ -60,14 +62,17 @@ export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag:
       const merged: Record<string, string> = isMap(base) ? (base.toJSON() as Record<string, string>) : {};
       map.set("permissions", doc.createNode({ ...merged, contents: "write", "id-token": "write", attestations: "write" }));
     }
-    if (already) {
-      notes.push("the attestation step is already there; permissions checked");
-      return { text: doc.toString(), notes };
+    if (already) notes.push("the attestation step is already there; permissions checked");
+    else {
+      const attest = doc.createNode({ name: "Attest the archives for tapster", uses: `actions/attest-build-provenance@${attestSha}`, if: "${{ !github.event.repository.private }}", with: { "subject-checksums": "dist/checksums.txt" } });
+      (attest.get("uses", true) as Scalar).comment = ` ${attestTag}`;
+      steps.items.splice(index + 1, 0, attest as never);
+      notes.push(`added the attestation step (actions/attest-build-provenance ${attestTag}) and its permissions`);
     }
-    const attest = doc.createNode({ name: "Attest the archives for tapster", uses: `actions/attest-build-provenance@${attestSha}`, if: "${{ !github.event.repository.private }}", with: { "subject-checksums": "dist/checksums.txt" } });
-    (attest.get("uses", true) as Scalar).comment = ` ${attestTag}`;
-    steps.items.splice(index + 1, 0, attest as never);
-    notes.push(`added the attestation step (actions/attest-build-provenance ${attestTag}) and its permissions`);
+    if (!steps.items.some((st) => isMap(st) && st.get("name") === RING_NAME)) {
+      steps.items.push(doc.createNode((parse(ringStep(0)) as unknown[])[0]) as never);
+      notes.push("added the step that rings the hub's doorbell after the draft is open");
+    }
     return { text: doc.toString(), notes };
   }
   throw new TapsterError("no GoReleaser step found in the release workflow", "tapster add edits the job that runs goreleaser/goreleaser-action.");
@@ -83,7 +88,8 @@ export function bunWorkflow(name: string, entry: string, pins: Pins): string {
     .replaceAll("__ATTEST_SHA__", pins["actions/attest-build-provenance"].sha)
     .replaceAll("__ATTEST_TAG__", pins["actions/attest-build-provenance"].tag)
     .replaceAll("__NAME__", name)
-    .replaceAll("__ENTRY__", entry);
+    .replaceAll("__ENTRY__", entry)
+    .replace("__RING__\n", `${ringStep(6)}\n`);
 }
 
 const PLATFORM: Record<string, string> = {
@@ -222,7 +228,8 @@ export function appWorkflow(b: AppBuild, pins: Pins): string {
     .replaceAll("__BUILD__", b.build)
     .replaceAll("__APP_PATH__", b.appPath)
     .replaceAll("__APP_NAME__", basename(b.appPath, ".app"))
-    .replace("__CARRY__\n", carry.map((l) => `${l}\n`).join(""));
+    .replace("__CARRY__\n", carry.map((l) => `${l}\n`).join(""))
+    .replace("__RING__\n", `${ringStep(6)}\n`);
 }
 
 async function addApp(dir: string, repo: string, name: string, app: FoundApp, force: boolean): Promise<void> {
