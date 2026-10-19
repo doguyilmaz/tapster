@@ -170,7 +170,7 @@ jobs:
         continue-on-error: true
         uses: ./
         with: { mode: check, template: 2, config: tests/leak/hub/tapster.yml }
-        env: { TAPSTER_APP_ID: "${{ vars.CI_APP_ID }}", TAPSTER_APP_PRIVATE_KEY: "${{ secrets.CI_APP_PRIVATE_KEY }}" }
+        env: { TAPSTER_APP_ID: "${{ vars.CI_APP_ID }}", TAPSTER_APP_PRIVATE_KEY: "${{ secrets.CI_APP_PRIVATE_KEY }}", GITHUB_TOKEN: "${{ github.token }}" }
       - name: fetch the fixture drafts (one good, one malformed, one malicious)
         continue-on-error: true
         uses: ./
