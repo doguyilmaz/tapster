@@ -221,9 +221,9 @@ jobs:
           EXTRA_CANARIES: ${{ needs.plain-api.outputs.canaries }}
           EXPECT_STAGES: >-
             {"plain":["tapster: failed (openssl exited with", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
-            "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "tapster: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
+            "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "leakseed v1.0.0: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
             "masked":["fixture v0.0.1: failed (", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
-            "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "tapster: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
+            "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "leakseed v1.0.0: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
             "plain-api":["fixture-linux v0.0.9: published", "Casks/fixture-linux.rb: rendered",
             "fixture-linux v0.0.9: failed (the release was published while tapster worked on it",
             "returned 500", "returned 404", "returned 422", "network error"]}
