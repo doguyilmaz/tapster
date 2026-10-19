@@ -9,7 +9,7 @@ import { TapsterError } from "../errors";
 import { GitHub } from "../github";
 import { commitToHub, readHubFile } from "../hubcommit";
 import { readSecret, requireVar } from "../mask";
-import { type Outgoing, assertRecorded, makeLatest, resumeSwap, stageAndSwap, waitDownloadable } from "../publish";
+import { type Outgoing, assertFinal, assertRecorded, makeLatest, resumeSwap, stageAndSwap, waitDownloadable } from "../publish";
 import { failure, info, record, warn } from "../report";
 import { STATE_PATH, type State, type StateEntry, parseState, recordedChecksums, serializeState, upsert } from "../state";
 import { type InstallationToken, installationToken } from "../token";
@@ -94,6 +94,7 @@ export async function publishMode(ctx: Context): Promise<void> {
         await recordState(hubGh, ctx.hub, pkg.name, { tag: item.tag, releaseId: item.releaseId, checksums: expected, status: "publishing" });
         await stageAndSwap(gh, pkg.repo, item.releaseId, files, item.before);
       }
+      await assertFinal(gh, pkg.repo, item.releaseId, expected!);
       await gh.updateRelease(pkg.repo, item.releaseId, { draft: false, make_latest: makeLatest(item.tag, await gh.listReleases(pkg.repo)) });
       const published = await gh.getRelease(pkg.repo, item.releaseId);
       if ((await gh.getRepo(pkg.repo)).private) warn(`${pkg.name}: ${pkg.repo} is private, so its files cannot be downloaded by Homebrew users`);
