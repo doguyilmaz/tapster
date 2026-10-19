@@ -228,29 +228,34 @@ async function storeNotary(hub: string): Promise<void> {
   console.log(`Notarization key stored. You may delete ${path} once you keep a backup.`);
 }
 
-async function protectHub(gh: GitHub, hub: string, isPrivate: boolean): Promise<void> {
+export const HUB_RULESET = {
+  name: "tapster main",
+  target: "branch",
+  enforcement: "active",
+  bypass_actors: [] as { actor_id: number; actor_type: string; bypass_mode: string }[],
+  conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] as string[] } },
+  rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
+};
+
+export async function protectHub(gh: GitHub, hub: string, isPrivate: boolean): Promise<void> {
   try {
     await gh.json("PUT", `/repos/${hub}/environments/tapster`, { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } });
   } catch (e) {
     throw privateHubError(e, isPrivate);
   }
-  const policies = await gh.json<{ branch_policies: { name: string }[] }>("GET", `/repos/${hub}/environments/tapster/deployment-branch-policies`);
+  const policies = await gh.json<{ branch_policies: { id: number; name: string }[] }>("GET", `/repos/${hub}/environments/tapster/deployment-branch-policies`);
+  for (const p of policies.branch_policies.filter((x) => x.name !== "main")) {
+    await gh.json("DELETE", `/repos/${hub}/environments/tapster/deployment-branch-policies/${p.id}`);
+  }
   if (!policies.branch_policies.some((p) => p.name === "main")) {
     await gh.json("POST", `/repos/${hub}/environments/tapster/deployment-branch-policies`, { name: "main", type: "branch" });
   }
   await gh.json("PUT", `/repos/${hub}/actions/permissions/workflow`, { default_workflow_permissions: "read", can_approve_pull_request_reviews: false });
   await gh.json("PUT", `/repos/${hub}/actions/permissions`, { enabled: true, allowed_actions: "selected", sha_pinning_required: true });
   await gh.json("PUT", `/repos/${hub}/actions/permissions/selected-actions`, { github_owned_allowed: true, verified_allowed: false, patterns_allowed: ["doguyilmaz/tapster@*"] });
-  const rules = await gh.json<{ name: string }[]>("GET", `/repos/${hub}/rulesets`);
-  if (!rules.some((r) => r.name === "tapster main")) {
-    await gh.json("POST", `/repos/${hub}/rulesets`, {
-      name: "tapster main",
-      target: "branch",
-      enforcement: "active",
-      conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
-      rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
-    });
-  }
+  const existing = (await gh.json<{ id: number; name: string }[]>("GET", `/repos/${hub}/rulesets`)).find((r) => r.name === HUB_RULESET.name);
+  if (existing) await gh.json("PUT", `/repos/${hub}/rulesets/${existing.id}`, HUB_RULESET);
+  else await gh.json("POST", `/repos/${hub}/rulesets`, HUB_RULESET);
 }
 
 export async function tapsterPin(gh: GitHub, build: typeof TAPSTER, flag: string | null): Promise<{ sha: string; tag: string }> {

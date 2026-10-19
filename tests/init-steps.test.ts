@@ -84,3 +84,25 @@ test("macOS work waits for Apple credentials and a certificate that has not expi
   expect(expired.failed[0]!.error.reason).toContain("expired");
   expect(appleGate([item("lin")], cfg.packages, { team: "", expires: "" }, now).macos).toBe(false);
 });
+
+test("init repairs a weakened hub ruleset and extra branch rules instead of leaving them", async () => {
+  const { protectHub, HUB_RULESET } = await import("../src/cli/init");
+  const writes: string[] = [];
+  const gh = {
+    json: async (method: string, path: string) => {
+      if (method !== "GET") {
+        writes.push(`${method} ${path}`);
+        return {};
+      }
+      if (path.endsWith("/deployment-branch-policies")) return { branch_policies: [{ id: 1, name: "main" }, { id: 2, name: "dev" }] };
+      if (path.endsWith("/rulesets")) return [{ id: 9, name: "tapster main" }];
+      throw new Error(path);
+    },
+  } as never;
+  await protectHub(gh, "o/hub", false);
+  expect(writes).toContain("DELETE /repos/o/hub/environments/tapster/deployment-branch-policies/2");
+  expect(writes).not.toContain("POST /repos/o/hub/environments/tapster/deployment-branch-policies");
+  expect(writes).toContain("PUT /repos/o/hub/rulesets/9");
+  expect(HUB_RULESET.rules.map((r) => r.type)).toEqual(["deletion", "non_fast_forward"]);
+  expect(HUB_RULESET.bypass_actors).toEqual([]);
+});
