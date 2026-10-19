@@ -5,6 +5,7 @@ import { check } from "./check";
 import { cleanupMode } from "./cleanup";
 import { loadContext } from "./context";
 import { fetchMode } from "./fetch";
+import { linuxBuildMode } from "./linux";
 import { packageMode } from "./package";
 import { publishMode } from "./publish";
 import { renderMode } from "./render";
@@ -25,9 +26,10 @@ async function main(): Promise<void> {
   if (mode === "package") return packageMode(ctx);
   if (mode === "seal") return sealMode(ctx);
   if (mode === "sparkle") return sparkleMode(ctx);
+  if (mode === "linux-build") return linuxBuildMode(ctx);
   if (mode === "publish") return publishMode(ctx);
   if (mode === "render") return renderMode(ctx);
-  throw new TapsterError(`unknown mode ${mode}`, "Use check, fetch, sign, package, seal, sparkle, publish, render or cleanup.");
+  throw new TapsterError(`unknown mode ${mode}`, "Use check, fetch, sign, package, seal, sparkle, publish, render, linux-build, linux-sign or cleanup.");
 }
 
 try {
