@@ -47,3 +47,29 @@ This runs once with real credentials before the first migration. It needs the te
 
 Delete the fixture repository, its releases and the `SPARKLE_KEY_E2E*` secrets, remove the keys from the login
 keychain and delete the backup files.
+
+# End to end test for the doorbell and Linux packages
+
+## 5. The doorbell
+
+1. In the test hub run `bunx @doguyilmaz/tapster init --doorbell`. Sign in to Cloudflare when Wrangler asks, click
+   "Create GitHub App" and install the new App on the test hub only.
+2. Run `bunx @doguyilmaz/tapster doctor` in the test hub; every project must have `TAPSTER_DOORBELL`.
+3. Tag a fixture release. The hub's workflow must start within a minute of the draft opening, with the event
+   `workflow_dispatch`. The fixture's "Ring the tapster hub" step answers `202`.
+4. Send the Worker a token from a repository of another account (for example a fork in a second account): it must
+   answer `401`.
+
+## 6. apt and dnf
+
+1. Set `linux: true` on the CLI fixture in the test hub, add `linux.maintainer` and run
+   `bunx @doguyilmaz/tapster init --linux`. Commit and push.
+2. Start the hub's workflow by hand with `linux` ticked. `linux-build`, `linux-sign` and `linux-pages` must pass.
+3. Follow the commands on the site's front page in an Ubuntu and a Fedora machine or container. Both must install and
+   run the fixture.
+4. Start the workflow again with `linux` ticked: `linux-build` must report that the live repositories are current.
+
+## 7. Clean up
+
+If the test hub keeps no doorbell, delete the doorbell App, the `tapster-doorbell` Worker and the `TAPSTER_DOORBELL*`
+variables. If it keeps no Linux packages, delete the `TAPSTER_LINUX_KEY` secret.
