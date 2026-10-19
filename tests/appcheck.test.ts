@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { appFacts, checkArchiveRoot } from "../src/appcheck";
+import { appFacts, checkArchiveRoot, systemPlist } from "../src/appcheck";
 import { type AppPackage, parseConfig } from "../src/config";
 import { TapsterError } from "../src/errors";
+import { parsePlist } from "../src/plist";
 
 const KEY = `${"A".repeat(43)}=`;
 const NEXT = `${"B".repeat(43)}=`;
@@ -70,7 +71,8 @@ function app(info: Record<string, unknown>, extra: Record<string, string | Buffe
   return root;
 }
 
-const agree = async () => undefined;
+const agree = async (path: string) => parsePlist(readFileSync(path)) as Record<string, never>;
+const darwin = process.platform === "darwin";
 
 test("a well-formed app gives its facts", async () => {
   const facts = await appFacts(app(good), pkg, cfg.packages, "v1.3.1", agree);
@@ -95,10 +97,17 @@ test.each([
   ["a localized override in UTF-16 big endian", good, { "Contents/Resources/tr.lproj/InfoPlist.strings": Buffer.from('\uFEFF"SUFeedURL" = "x";', "utf16le").swap16() }, /InfoPlist.strings/],
   ["a localized override in UTF-32", good, { "Contents/Resources/de.lproj/InfoPlist.strings": Buffer.concat([..."SUFeedURL"].map((c) => Buffer.from([c.charCodeAt(0), 0, 0, 0])) ) }, /InfoPlist.strings/],
   ["a localized override behind an escape", good, { "Contents/Resources/en.lproj/InfoPlist.strings": '"SU\\U0046eedURL" = "https://evil";' }, /InfoPlist.strings/],
-  ["a localization table", good, { "Contents/Resources/InfoPlist.loctable": plist({ en: "SUFeedURL" }) }, /InfoPlist.loctable/],
+  ["a localization table", good, { "Contents/Resources/InfoPlist.loctable": '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>en</key><dict><key>SUFeedURL</key><string>https://evil</string></dict></dict></plist>' }, /InfoPlist.loctable localizes SUFeedURL/],
   ["a lowercase lproj folder", good, { "Contents/Resources/EN.LPROJ/infoplist.strings": '"SUFeedURL" = "x";' }, /infoplist.strings/],
   ["a nested Info.plist in lowercase", good, { "Contents/Resources/X.bundle/Contents/info.plist": plist({ CFBundleIdentifier: "com.o.Battistics.X" }) }, /X.bundle/],
   ["a nested app named like this app", good, { "Contents/Resources/HafifPix.app/Contents/Info.plist": plist({ CFBundleIdentifier: "com.o.HafifPix.Inner" }) }, /HafifPix.app/],
+  ["a folder named like another app", good, { "Contents/Resources/battistics/x": "x" }, /battistics/],
+  ["a platform Info.plist", good, { "Contents/Resources/N.app/Contents/Info.plist": plist({ CFBundleIdentifier: "com.o.HafifPix.N" }), "Contents/Resources/N.app/Contents/Info-macos.plist": plist({ CFBundleIdentifier: "com.o.Battistics" }) }, /Info-macos.plist/],
+  ["an installer package", good, { "Contents/Resources/Battistics.pkg": "xar!" }, /Battistics.pkg/],
+  ["an installer package folder", good, { "Contents/Resources/Tool.mpkg/Contents/x": "x" }, /Tool.mpkg/],
+  ["a localized feed outside any lproj folder", good, { "Contents/Resources/Loc/InfoPlist.strings": plist({ SUFeedURL: "https://evil" }) }, /SUFeedURL/],
+  ["a localized key written as a character reference", good, { "Contents/Resources/en.lproj/InfoPlist.strings": plist({ "&#83;URequireSignedFeed": "NO" }) }, /SURequireSignedFeed/],
+  ["a localized key in a nested bundle", good, { "Contents/Helpers/H.app/Contents/Info.plist": plist({ CFBundleIdentifier: "com.o.HafifPix.H" }), "Contents/Helpers/H.app/Contents/Resources/en.lproj/InfoPlist.strings": plist({ SUPublicEDKey: KEY }) }, /SUPublicEDKey/],
   ["a resource bundle with a foreign id", good, { "Contents/Resources/X.bundle/Contents/Info.plist": plist({ CFBundleIdentifier: "com.o.Battistics.X" }) }, /X.bundle/],
   ["a nested app named like another app", good, { "Contents/Resources/Battistics.app/Contents/Info.plist": plist({ CFBundleIdentifier: "com.o.HafifPix.B" }) }, /Battistics.app/],
   ["a nested bundle using another app's name", good, { "Contents/Resources/Q.bundle/Contents/Info.plist": plist({ CFBundleIdentifier: "com.o.HafifPix.Q", CFBundleName: "Battistics" }) }, /Battistics/],
@@ -131,18 +140,25 @@ test("an app without a hub-managed Sparkle cannot keep its own feed", async () =
   expect((await appFacts(app({ ...plain, CFBundleIdentifier: "com.o.Battistics" }), bat, cfg.packages, "v1.3.1", agree)).publicKey).toBeNull();
 });
 
-test("plutil's number formatting is not a disagreement", async () => {
-  const info = { ...good, SUSignedFeedFailureExpirationInterval: { real: 2000000 } };
-  const read = async (key: string) => (key === "SUSignedFeedFailureExpirationInterval" ? "2000000.000000" : key === "SURequireSignedFeed" ? "true" : undefined);
-  expect((await appFacts(app(info), pkg, cfg.packages, "v1.3.1", read)).version).toBe("1.3.1");
+test.if(darwin)("macOS's own reading decides: old-style, UTF-7 and escaped localized keys are found", async () => {
+  const cases: Record<string, string | Buffer> = {
+    oldStyle: '"SUFeedURL" = "https://evil";\n',
+    escaped: '"SU\\U0046eedURL" = "https://evil";\n',
+    utf7: '<?xml version="1.0" encoding="UTF-7"?><plist version="1.0"><dict><key>SU+AEY-eedURL</key><string>https://evil/</string></dict></plist>',
+    utf16: Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('"SUPublicEDKey" = "x";\n', "utf16le")]),
+  };
+  for (const [name, data] of Object.entries(cases)) {
+    await expect(appFacts(app(good, { "Contents/Resources/en.lproj/InfoPlist.strings": data }), pkg, cfg.packages, "v1.3.1", systemPlist), name).rejects.toThrow(/localizes SU/);
+  }
+  const nested = '<?xml version="1.0" encoding="UTF-7"?><plist version="1.0"><dict><key>CFBundle+AEk-dentifier</key><string>com.o.Battistics.H</string></dict></plist>';
+  await expect(appFacts(app(good, { "Contents/Helpers/H.app/Contents/Info.plist": nested }), pkg, cfg.packages, "v1.3.1", systemPlist)).rejects.toThrow(/com.o.Battistics.H/);
+  const linked = app(good, { "Contents/Resources/Loc/InfoPlist.strings": '"SUFeedURL" = "https://evil";\n' }, "2.9.4", { "Contents/Resources/en.lproj": "Loc" });
+  await expect(appFacts(linked, pkg, cfg.packages, "v1.3.1", systemPlist)).rejects.toThrow(/localizes SU/);
+  expect((await appFacts(app(good, { "Contents/Resources/en.lproj/InfoPlist.strings": '"CFBundleDisplayName" = "HafifPix";\n' }), pkg, cfg.packages, "v1.3.1", systemPlist)).version).toBe("1.3.1");
 });
 
 test("Sparkle older than 2.9 is refused", async () => {
   await expect(appFacts(app(good, {}, "2.8.1"), pkg, cfg.packages, "v1.3.1", agree)).rejects.toThrow(/Sparkle/);
-});
-
-test("plutil must read the same values", async () => {
-  await expect(appFacts(app(good), pkg, cfg.packages, "v1.3.1", async (key) => (key === "SUFeedURL" ? "https://elsewhere" : undefined))).rejects.toThrow(/plutil/);
 });
 
 test("the archive holds exactly the configured app at its top", () => {

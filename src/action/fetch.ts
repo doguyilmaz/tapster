@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { appFacts, carryCheck, checkArchiveRoot, plutilReader } from "../appcheck";
+import { appFacts, carryCheck, checkArchiveRoot, systemPlist } from "../appcheck";
 import { isMachO, readTarGz } from "../archive";
 import { verifyAttestation } from "../attest";
 import { macCodeIn } from "../maccode";
@@ -21,7 +21,7 @@ async function unpackApp(ctx: Context, pkg: AppPackage, tag: string, archive: Bu
   checkArchiveRoot(entries, pkg);
   await writeTree(entries, join(dir, "app"));
   const appDir = join(dir, "app", pkg.app);
-  const facts = await appFacts(appDir, pkg, ctx.config.packages, tag, plutilReader(join(appDir, "Contents", "Info.plist")));
+  const facts = await appFacts(appDir, pkg, ctx.config.packages, tag, systemPlist);
   return { dir: appDir, facts, created, identifiers: [], dmg: null, feed: null };
 }
 

@@ -80,21 +80,23 @@ When fetching, the hub checks the following and stops the item on any mismatch:
   `SUVerifyUpdateBeforeExtraction` are both true; `SUSignedFeedFailureExpirationInterval` is absent or at least 20 days;
   `SUPublicDSAKey`, `SUPublicDSAKeyFile` and `NSUpdateSecurityPolicy` are absent; the embedded `Sparkle.framework` is
   2.9.0 or newer;
-- no localized Info.plist in the app (`InfoPlist.strings`, `InfoPlist.loctable` and the like, in `Contents/Resources` or
-  an `.lproj` folder) mentions any key tapster checks in any encoding or behind an escape, because Sparkle reads
-  localized values;
+- no localized Info.plist anywhere in the app (`InfoPlist.strings`, `InfoPlist.loctable` and the like) sets a Sparkle
+  key or any key tapster checks, because Sparkle reads localized values;
 - without a `sparkle` section, the app sets neither `SUFeedURL` nor `SUPublicEDKey`, so it cannot keep an update channel
   the hub does not sign;
-- these values read the same through tapster's parser and `/usr/bin/plutil -extract`. Duplicate keys and DTD
-  entities are refused;
+- every property list above is read the way macOS reads it: `/usr/bin/plutil -convert xml1` turns it into plain UTF-8
+  XML first, so encodings, escapes and character references cannot show tapster one value and macOS another. tapster's
+  own parser, which signing uses, refuses any XML that is not UTF-8, duplicate keys and DTD entities;
+- the app holds no `Info-*.plist` (macOS prefers `Info-macos.plist` over `Info.plist`) and no `.pkg` or `.mpkg`
+  (Sparkle installs a package it finds in an update);
 - the archive holds exactly one top-level `<App>.app`;
 - every `CFBundleIdentifier` in a nested Info.plist (with or without an executable) is in the app's namespace or in
   `org.sparkle-project.` inside `Contents/Frameworks/Sparkle.framework/Versions/<V>/`. A resource bundle without an
   identifier (as Swift packages build them) passes, since Sparkle can only match it by name, which the next rule checks;
 - no Info.plist is a symlink;
 - no nested bundle carries `SUFeedURL`, `SUPublicEDKey` or a DSA key;
-- no nested bundle or symlink is named like any app in `tapster.yml`, this one included (`<App>.app` or the same
-  `CFBundleName`);
+- no nested directory or symlink is named like any app in `tapster.yml`, this one included (`<App>` or `<App>.app`), and
+  no nested bundle uses such a name as `CFBundleName` or `CFBundleDisplayName`;
 - every path in `code` matches code tapster finds;
 - no two items get the same identifier;
 - no file is named `embedded.provisionprofile`.
@@ -271,7 +273,12 @@ runtime flag and the identifier (§1.8).
 ### 6.3 What runs where
 
 No step with credentials runs project code. `codesign`, `notarytool` and `stapler` read the project's Mach-O files, as
-in phase 1. `plutil` reads the app's Info.plist in fetch (App key only) to confirm tapster's reading.
+in phase 1. `plutil` reads the app's property lists in fetch, where only the App key is in memory and its child gets
+none.
+
+What the checks cannot see: a display name of another app that differs from its `app` name in `tapster.yml`; a
+Sparkle older than 2.9 linked into the app some other way than `Contents/Frameworks/Sparkle.framework`. Both need
+code the project wrote on purpose; the release attestation names the commit that did.
 
 ### 6.4 Unpacking an app
 

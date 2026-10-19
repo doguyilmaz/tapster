@@ -10,7 +10,11 @@ const bad = (what: string) => new TapsterError(`an Info.plist ${what}`, "Rebuild
 export function parsePlist(data: Buffer): PlistValue {
   if (data.length > MAX_BYTES) throw bad("is larger than 1 MiB");
   if (data.subarray(0, 8).toString("latin1") === "bplist00") return parseBinary(data);
-  return parseXml(data.toString("utf8"));
+  if (data[0] === 0xfe || data[0] === 0xff || data[0] === 0) throw bad("is not UTF-8");
+  const xml = data.toString("utf8").replace(/^\ufeff/, "");
+  const declared = /^\s*<\?xml[^>]*\bencoding\s*=\s*["']([^"']*)["']/.exec(xml)?.[1];
+  if (declared !== undefined && !/^utf-?8$/i.test(declared)) throw bad(`declares the encoding ${declared}, not UTF-8`);
+  return parseXml(xml);
 }
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };

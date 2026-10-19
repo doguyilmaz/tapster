@@ -72,3 +72,11 @@ test("binary plists that reference themselves are rejected", () => {
   trailer.writeBigUInt64BE(10n, 24);
   expect(() => parsePlist(Buffer.concat([Buffer.from("bplist00"), objects, offsets, trailer]))).toThrow(TapsterError);
 });
+
+test("an XML plist that declares another encoding is refused", () => {
+  const body = '<plist version="1.0"><dict><key>a</key><string>b</string></dict></plist>';
+  expect(() => parsePlist(Buffer.from(`<?xml version="1.0" encoding="UTF-7"?>${body}`))).toThrow(/UTF-8/);
+  expect(() => parsePlist(Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(body)]))).toThrow(/UTF-8/);
+  expect(parsePlist(Buffer.from(`<?xml version="1.0" encoding="utf-8"?>${body}`))).toEqual({ a: "b" });
+  expect(parsePlist(Buffer.from(`\ufeff<?xml version='1.0'?>${body}`))).toEqual({ a: "b" });
+});
