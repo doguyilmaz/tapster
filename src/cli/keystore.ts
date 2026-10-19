@@ -31,7 +31,7 @@ function checkRef(ref: KeyRef): void {
 export function keychainScript(ref: KeyRef, secret: string): string {
   checkRef(ref);
   const comment = ref.comment === undefined ? "" : ` -j "${ref.comment}"`;
-  const line = `add-generic-password -s "${ref.service}" -a "${ref.account}" -l "${ref.label}" -D "private key"${comment} -X ${Buffer.from(secret).toString("hex")}\n`;
+  const line = `add-generic-password -s "${ref.service}" -a "${ref.account}" -l "${ref.label}" -D "private key"${comment} -T "" -X ${Buffer.from(secret).toString("hex")}\n`;
   if (line.length > 4000) throw new TapsterError("the key is too long for one security command", "tapster stores large keys through the Security API instead.");
   return line;
 }
@@ -40,7 +40,11 @@ export const JXA_ADD = `ObjC.import("Security");
 ObjC.import("Foundation");
 function run(argv) {
   const k = (ref) => ObjC.castRefToObject(ref);
+  const access = Ref();
+  const made = $.SecAccessCreate($(argv[2]), $.NSArray.array, access);
+  if (made !== 0) return String(made);
   const q = $.NSMutableDictionary.alloc.init;
+  q.setObjectForKey(k(access[0]), k($.kSecAttrAccess));
   q.setObjectForKey(k($.kSecClassGenericPassword), k($.kSecClass));
   q.setObjectForKey($(argv[0]), k($.kSecAttrService));
   q.setObjectForKey($(argv[1]), k($.kSecAttrAccount));

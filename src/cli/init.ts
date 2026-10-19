@@ -16,7 +16,7 @@ import pinsJson from "../../templates/pins.json";
 import { appFromManifest, openUrl } from "./appflow";
 import { rotateDoorbell, setupDoorbell } from "./doorbell";
 import { currentRepo, deleteEnvSecret, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
-import { localStore, newSparkleKey, requireStore } from "./keystore";
+import { type KeyRef, type Store, localStore, newSparkleKey, requireStore } from "./keystore";
 import { cleanPath, readInput } from "./paths";
 import { ask } from "./prompt";
 
@@ -327,10 +327,20 @@ async function createSparkleKey(dir: string, hub: string, label: string): Promis
   console.log("Review and commit the workflow change, then push.");
 }
 
+async function replaceLocal(store: Store, ref: KeyRef, secret: string): Promise<void> {
+  const pending = { ...ref, account: `${ref.account} pending`, label: `${ref.label} (pending)` };
+  await store.remove(pending);
+  await store.save(pending, secret);
+  await store.remove(ref);
+  await store.save(ref, secret);
+  await store.remove(pending);
+}
+
 const linuxRef = (hub: string, previous = false) => ({ service: "tapster-linux-key", account: previous ? `${hub} previous` : hub, label: `tapster Linux key for ${hub}${previous ? " (previous)" : ""}` });
 
-async function finishLinuxRotation(hub: string): Promise<void> {
-  await deleteEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS").catch(() => undefined);
+async function finishLinuxRotation(gh: GitHub, hub: string): Promise<void> {
+  const secrets = (await gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${hub}/environments/tapster/secrets`)).secrets.map((x) => x.name);
+  if (secrets.includes("TAPSTER_LINUX_KEY_PREVIOUS")) await deleteEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS");
   await localStore()?.remove(linuxRef(hub, true));
   console.log("The previous Linux key no longer signs; apt and dnf trust only the new one from the next run.");
 }
@@ -363,14 +373,12 @@ async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean)
       if (store.kind === "keychain") console.log("macOS asks whether tapster may read the previous key from your keychain; choose Allow.");
       const old = await store.read(linuxRef(hub));
       if (old) {
-        await store.remove(linuxRef(hub, true));
-        await store.save(linuxRef(hub, true), old);
+        await replaceLocal(store, linuxRef(hub, true), old);
         await setEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS", old);
         console.log("The previous key keeps signing next to the new one, so apt and dnf users can fetch the new key. Once they have, run tapster init --rotate linux --finish.");
       } else console.log("The previous key is not in your keychain, so apt and dnf users must fetch the new key before they can update.");
     }
-    await store.remove(linuxRef(hub));
-    await store.save(linuxRef(hub), key);
+    await replaceLocal(store, linuxRef(hub), key);
     await setEnvSecret(hub, "TAPSTER_LINUX_KEY", key);
     console.log(`Stored the Linux key (fingerprint ${fingerprint}) in the hub and in your ${store.kind === "keychain" ? "login keychain" : "keyring"} as "tapster-linux-key".`);
   } finally {
@@ -428,7 +436,7 @@ export async function init(argv: string[]): Promise<void> {
   if (rotate === "certificate") return storeCertificate(hub);
   if (rotate === "notary") return storeNotary(hub);
   if (rotate === "doorbell") return rotateDoorbell(gh, hub);
-  if (rotate === "linux" && args[2] === "--finish" && args.length === 3) return finishLinuxRotation(hub);
+  if (rotate === "linux" && args[2] === "--finish" && args.length === 3) return finishLinuxRotation(gh, hub);
   if (rotate === "linux" && args.length === 2) return setupLinux(gh, dir, hub, true);
   if (args[0] === "--doorbell" && args.length === 1) return setupDoorbell(gh, hub, hubConfig(dir, hub), setRepoVariable);
   if (args[0] === "--linux" && args.length === 1) return setupLinux(gh, dir, hub, false);

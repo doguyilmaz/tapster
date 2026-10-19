@@ -14,7 +14,7 @@ test("the keychain gets the Sparkle key only as hex on stdin, under Sparkle's se
   const secret = "q7Zx81mPkW3vT9yLr2dNf5bHjA0123456789abcdefg=";
   const script = keychainScript({ service: "https://sparkle-project.org", account: "shared", label: "Private key for signing Sparkle updates", comment: "public key: abc=" }, secret);
   expect(script).toBe(
-    `add-generic-password -s "https://sparkle-project.org" -a "shared" -l "Private key for signing Sparkle updates" -D "private key" -j "public key: abc=" -X ${Buffer.from(secret).toString("hex")}\n`,
+    `add-generic-password -s "https://sparkle-project.org" -a "shared" -l "Private key for signing Sparkle updates" -D "private key" -j "public key: abc=" -T "" -X ${Buffer.from(secret).toString("hex")}\n`,
   );
   expect(script).not.toContain(secret);
   expect(() => keychainScript({ service: "s", account: 'a" -w x', label: "l" }, secret)).toThrow(TapsterError);
@@ -27,6 +27,7 @@ test("large keys go to the macOS keychain through the Security API, read from st
   ]);
   expect(JXA_ADD).toContain("fileHandleWithStandardInput");
   expect(JXA_ADD).toContain("SecItemAdd");
+  expect(JXA_ADD).toContain("SecAccessCreate($(argv[2]), $.NSArray.array, access)");
 });
 
 test("on Linux the key goes to the Secret Service with the secret on stdin", () => {
