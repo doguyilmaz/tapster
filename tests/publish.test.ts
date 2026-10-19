@@ -158,6 +158,20 @@ test("resuming an app swap after the DMG rename finishes it and drops the archiv
     a(102, "tapster-staging--checksums.txt"),
   ]);
   const f = fakeGh(half, sums);
-  await resumeSwap(f.gh, "o/r", half, sha256(Buffer.from(sums)));
+  await resumeSwap(f.gh, "o/r", half, sha256(Buffer.from(sums)), ["HafifPix-1.3.1.app.tar.gz"]);
   expect(f.log).toEqual(["rename 101 appcast.xml", "delete 1", "delete 2", "rename 102 checksums.txt"]);
+});
+
+test("a staged file the recorded checksums do not list is never published", async () => {
+  const forged = rel([a(2, "checksums.txt"), a(100, "tapster-staging--x.tar.gz", `sha256:${hx}`), a(103, "tapster-staging--evil.dmg"), a(101, "tapster-staging--checksums.txt")]);
+  const f = fakeGh(forged, signedSums);
+  await expect(resumeSwap(f.gh, "o/r", forged, sha256(Buffer.from(signedSums)))).rejects.toBeInstanceOf(TapsterError);
+  expect(f.log.some((l) => l.startsWith("rename"))).toBe(false);
+});
+
+test("an unexpected unlisted asset stops the resume without deleting it", async () => {
+  const extra = rel([a(2, "checksums.txt"), a(7, "notes.txt"), a(100, "tapster-staging--x.tar.gz", `sha256:${hx}`), a(101, "tapster-staging--checksums.txt")]);
+  const f = fakeGh(extra, signedSums);
+  await expect(resumeSwap(f.gh, "o/r", extra, sha256(Buffer.from(signedSums)))).rejects.toBeInstanceOf(TapsterError);
+  expect(f.log).toEqual([]);
 });

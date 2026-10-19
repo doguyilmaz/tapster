@@ -43,7 +43,7 @@ export async function stageAndSwap(gh: GitHub, repo: string, releaseId: number, 
   await swap(gh, repo, current.assets, staged, remove);
 }
 
-export async function resumeSwap(gh: GitHub, repo: string, release: Release, recorded: string | undefined): Promise<void> {
+export async function resumeSwap(gh: GitHub, repo: string, release: Release, recorded: string | undefined, removable: string[] = []): Promise<void> {
   const stagedAssets = release.assets.filter((x) => x.name.startsWith(STAGING));
   const discard = async (reason: string) => {
     for (const x of stagedAssets) await gh.deleteAsset(repo, x.id);
@@ -60,11 +60,16 @@ export async function resumeSwap(gh: GitHub, repo: string, release: Release, rec
   const lines = parseChecksums(sums.toString("utf8"));
   const listed = new Set(lines.map((l) => l.name));
   const finalAsset = (name: string) => (staged.has(name) ? staged.get(name) : originals.find((x) => x.name === name));
-  if (!lines.every((l) => finalAsset(l.name)?.digest === `sha256:${l.sha256}`)) {
+  const unlistedStaged = [...staged.keys()].some((n) => n !== "checksums.txt" && !listed.has(n));
+  if (unlistedStaged || !lines.every((l) => finalAsset(l.name)?.digest === `sha256:${l.sha256}`)) {
     return discard("the staged files do not match the checksums tapster recorded");
   }
-  const remove = originals.map((x) => x.name).filter((n) => n !== "checksums.txt" && !listed.has(n) && !staged.has(n));
-  await swap(gh, repo, originals, staged, remove);
+  const unlisted = originals.map((x) => x.name).filter((n) => n !== "checksums.txt" && !listed.has(n) && !staged.has(n));
+  const unexpected = unlisted.filter((n) => !removable.includes(n));
+  if (unexpected.length) {
+    throw new TapsterError(`the draft holds ${unexpected.join(", ")}, which tapster did not expect`, "Delete the draft and release again.");
+  }
+  await swap(gh, repo, originals, staged, unlisted);
 }
 
 async function confirmSwapped(gh: GitHub, repo: string, release: Release, recorded: string): Promise<void> {

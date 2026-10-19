@@ -39,7 +39,12 @@ spec.
 - **Sparkle accepts an update** when its EdDSA signature verifies or when its Apple code signature satisfies the
   installed app's designated requirement. The Developer ID identity is therefore an update credential too.
 - **Signed feeds.** Sparkle 2.9 and later verify a feed signature when the app sets `SURequireSignedFeed`. All three
-  apps embed 2.9.4 or later.
+  apps embed 2.9.4 or later. Sparkle refuses to start when `SURequireSignedFeed` is set without
+  `SUVerifyUpdateBeforeExtraction`, so both are set together. After `SUSignedFeedFailureExpirationInterval` (20 days by
+  default) of feed failures Sparkle falls back to an unsigned "safe mode" feed.
+- **Install source.** Sparkle's installer looks through an update for a directory named like the installed app or a
+  bundle with its bundle identifier, and with `SUVerifyUpdateBeforeExtraction` it accepts a validly signed bundle whose
+  EdDSA key matches. A nested app named like another app is therefore an attack, not a curiosity.
 
 ### Success criteria
 
@@ -70,11 +75,20 @@ A second job, which runs no third-party code, attests the archive and opens the 
 When fetching, the hub checks the following and stops the item on any mismatch:
 - `CFBundleShortVersionString` and `CFBundleVersion` both equal the tag without `v`;
 - `CFBundleIdentifier` equals `bundle_id`;
-- with Sparkle: `SUFeedURL` equals `https://github.com/<repo>/releases/latest/download/<feed>`, `SUPublicEDKey`
-  equals `sparkle.public_key` and `SURequireSignedFeed` is true;
+- with Sparkle: `SUFeedURL` equals `https://github.com/<repo>/releases/latest/download/<feed>`; `SUPublicEDKey`
+  equals `sparkle.public_key` or, during a rotation, `sparkle.next_public_key`; `SURequireSignedFeed` and
+  `SUVerifyUpdateBeforeExtraction` are both true; `SUSignedFeedFailureExpirationInterval` is absent or at least 20 days;
+  `SUPublicDSAKey`, `SUPublicDSAKeyFile` and `NSUpdateSecurityPolicy` are absent; the embedded `Sparkle.framework` is
+  2.9.0 or newer;
+- no `InfoPlist.strings` in the app mentions any key tapster checks, because Sparkle reads localized values;
 - these values read the same through tapster's parser and `/usr/bin/plutil -extract`. Duplicate keys and DTD
   entities are refused;
-- no nested bundle carries `SUFeedURL` or `SUPublicEDKey`;
+- the archive holds exactly one top-level `<App>.app`;
+- every directory with an Info.plist (with or without an executable) has a `CFBundleIdentifier` in the app's namespace,
+  or in `org.sparkle-project.` inside `Contents/Frameworks/Sparkle.framework/Versions/<V>/`;
+- no nested bundle carries `SUFeedURL`, `SUPublicEDKey` or a DSA key, and no nested bundle is named like any app in
+  `tapster.yml` (`<App>.app` or the same `CFBundleName`);
+- every path in `code` matches code tapster finds, and no two items get the same identifier;
 - no file is named `embedded.provisionprofile`.
 
 ## 3. Hub config additions
@@ -131,16 +145,16 @@ When fetching, the hub checks the following and stops the item on any mismatch:
   the app. **`dmg.layout`:** the Finder window as `[left, top, right, bottom]` (the bounds the projects' AppleScript uses today; Finder measures from the bottom of the screen, so tapster converts with a reference height of 900 points), the icon size and the positions of the app and
   the `Applications` link, integers from 0 to 5000.
 - **`sparkle`:** `key` (`^[a-z0-9]+$`, the secret `SPARKLE_KEY_<LABEL>`), `feed` (default `appcast.xml`) and
-  `public_key` (base64 of 32 bytes).
-- **`code`:** per-path settings (paths relative to the `.app`, each must match code tapster discovers): `identifier`
-  and `entitlements` (key to boolean, string or list of strings; `{team}` in a string becomes the Team ID).
+  `public_key` (base64 of 32 bytes). For a rotation, `next_key` and `next_public_key` (§6.1).
+- **`code`:** per-path settings (paths relative to the `.app`, `.` for the app itself, each must match code tapster
+  discovers): `identifier` and `entitlements` (key to boolean, string or list of strings; `{team}` in a string becomes the Team ID).
 - **`cask.binaries`:** paths inside the app linked as commands. **`cask.auto_updates`:** default `true` with Sparkle.
 - `binaries`, `completions`, `scoop` and `entitlements` do not apply to apps and are errors.
 
 **Across packages** `parseConfig` refuses:
-- two packages whose `bundle_id`s are equal or where one followed by `.` starts the other;
+- two packages whose `bundle_id`s are equal or where one followed by `.` starts the other, compared without case;
 - a CLI binary name equal to an app's `bundle_id` or starting with one followed by `.`;
-- the same CLI binary name in two packages (already enforced in phase 1).
+- the same CLI binary name in two packages (already enforced in phase 1), including `cask.binaries` of apps.
 
 ## 4. What a run does for apps
 
@@ -180,10 +194,11 @@ tapster never drives Finder or AppleScript and never mounts an image a project m
 1. Read every `SPARKLE_KEY_*` variable once (§1.12.2). Decode each to 32 bytes (a seed) or 96 bytes (Sparkle's older
    format: a 64-byte expanded private key and the 32-byte public key). Anything else stops the step without printing
    the value.
-2. The derived public key must equal the package's `sparkle.public_key`. Otherwise the item stops: "the Sparkle key
-   `<label>` does not belong to this app; installed copies would reject the update".
-3. Sign the stapled DMG bytes. Render the appcast (§8.2), sign it and append the signature block. Verify both
-   signatures with the public key before use.
+2. The DMG is signed with the key whose public half equals the app's `SUPublicEDKey` (the current key, or the next key
+   during a rotation). The feed is always signed with the current key, which installed copies know. A key whose public
+   half differs from the configured one stops the item: "the Sparkle key `<label>` does not belong to this app;
+   installed copies would reject the update".
+3. Render the appcast (§8.2), sign it and append the signature block. Verify every signature before use.
 
 ## 5. Signing an app
 
@@ -200,17 +215,18 @@ Sign in order of path depth, deepest first; bundles are signed as bundles, loose
 
 Every signature gets an explicit `--identifier`:
 - the app: `bundle_id`;
-- a nested bundle: its `CFBundleIdentifier`, which must start with `bundle_id.` or (inside `Sparkle.framework`) with
-  `org.sparkle-project.`, unless `code` sets it;
+- a nested bundle: its `CFBundleIdentifier`, which must start with `bundle_id.` or (inside
+  `Contents/Frameworks/Sparkle.framework/Versions/<V>/`) with `org.sparkle-project.`. When `code` sets an identifier
+  for a bundle, it must equal the bundle's `CFBundleIdentifier`;
 - loose code: the `code` identifier when set, otherwise `bundle_id.` followed by the file name.
 Any other identifier stops the item. The identifiers a release used are recorded in the state.
 
 ### 5.3 Entitlements are the hub's choice
 
 - The entitlements a signature gets come only from `code` for that path.
-- The ad-hoc signature's entitlements are read with `codesign -d --entitlements - --xml`. Each must also be in `code`
-  with the same value, so a project cannot add one unnoticed. `com.apple.security.get-task-allow` is dropped with a
-  warning.
+- The ad-hoc signature's entitlements are read with `codesign -d --entitlements - --xml`. Any that `code` does not set
+  with the same value is not signed and the summary warns about it, so a missing setting shows up without blocking a
+  release. Security does not depend on these values: only `code` reaches the signature.
 - tapster writes the entitlements plist itself from validated values.
 
 ### 5.4 One signature and the check
@@ -227,9 +243,11 @@ runtime flag and the identifier (§1.8).
 | --- | --- |
 | A build borrows another package's identity (for example the identifier battistics' root daemon trusts) | Identifiers are chosen by the hub (§5.2) and kept apart across packages (§3). |
 | A build adds entitlements | Entitlements come only from `code` (§5.3). |
-| A project publishes a release outside the hub, so `releases/latest` serves its feed | Feeds are signed with the Sparkle key and the apps require signed feeds (§2). The build job holds no write token (§9). `check` warns when the latest release of an app is not one tapster published. |
+| A project publishes a release outside the hub, so `releases/latest` serves its feed | Feeds are signed with the Sparkle key and the apps require signed feeds (§2). The build job holds no write token (§9). `check` warns when the latest release of an app is not one tapster published. After 20 days of feed failures Sparkle's safe mode reads an unsigned feed; the update itself must still carry the EdDSA signature or the same team's Developer ID, so the owner has those 20 days to act on the warning. |
+| A nested app named like another app is installed in its place (Sparkle's install-source search) | Refused at fetch (§2). Every bundle's identifier is checked, not only bundles with code. |
+| Team-wide trust on users' Macs | Sparkle's installer accepts connections from any process signed by the team, which includes every CLI the hub signs. This is inherent to sharing one Developer ID; identifiers kept apart (§5.2) limit what else a borrowed identity could reach. |
 | A nested app carries its own Sparkle key | Refused (§2). |
-| A leaked Sparkle key | Rotate it: publish a release, signed with the old key and the Developer ID, whose app carries the new public key. Then update `sparkle.public_key` and the secret. Sparkle accepts the key change because the Apple signature matches. |
+| A leaked or retired Sparkle key | Rotate it: set `next_key` and `next_public_key`, store the new secret and publish a release whose app carries the new public key. Its DMG is signed with the new key and its feed with the old one; Sparkle accepts the change because the DMG carries the same team's Developer ID. Then make the new key the current one. Copies that skip that release wait for safe mode (20 days), so the old key's offline backup stays until the rotation is done. |
 | A wrong Sparkle key strands installed copies | Pinned public key in config, checked at fetch and at signing. |
 | Finder or system services parse project files while credentials are near | No Finder, no AppleScript, no browsable mounts (§4.1). |
 | A carried file is changed or holds code | Digests pinned in `carry`; macOS code refused among carried files. |
@@ -262,10 +280,11 @@ in phase 1. `plutil` reads the app's Info.plist in fetch (App key only) to confi
 - New assets: the DMG, the signed feed and the new `checksums.txt` (listing the DMG, the feed and the carried files).
 - Order of the swap: upload all staging files; rename the DMG and the feed; delete the app archive; delete the old
   `checksums.txt` and rename the new one last. That rename is the commit point.
-- Resume (§1.9) also handles removals: after verifying the staged files against the recorded digest, every asset that
-  is neither in the new `checksums.txt` nor the file itself is deleted.
-- The state entry records the app facts render needs: `macos` (the symbol from `LSMinimumSystemVersion`) and the
-  identifiers used.
+- Resume (§1.9) also handles removals: after verifying the staged files against the recorded digest, the configured app
+  archive is deleted if it is still there. Any other asset outside the new `checksums.txt` stops the item without
+  touching it.
+- The `publishing` state entry, written before the swap, already holds the app facts render needs: `macos` (the
+  symbol from `LSMinimumSystemVersion`) and the identifiers used. `published` keeps them. They are required for apps.
 
 ## 8. Output files
 
@@ -338,11 +357,12 @@ length: <number of those bytes>
 - **App template** (`templates/project/app-release.yml`): job `build` (`contents: read`) runs the project's build
   command with an ad-hoc identity and `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO`, packs the app and uploads it as a
   workflow artifact. Job `release` (`contents: write`, `id-token: write`, `attestations: write`) downloads it, writes
-  `checksums.txt`, attests and opens the draft. Triggers: tag push and `workflow_dispatch`.
+  `checksums.txt`, attests every listed file with `subject-checksums` and opens the draft. Triggers: tag push and
+  `workflow_dispatch`, which refuses any ref that is not a tag.
 - **`tapster init --sparkle <label> --account <keychain account>`** reads the key from the login keychain in-process
   (`security find-generic-password -s https://sparkle-project.org -a <account> -w`), so the key never appears on
   screen or on disk. It derives the public key, shows which packages pin it, asks for confirmation that an offline
-  backup exists, stores the secret and rewrites the hub workflow's sparkle step for every configured label.
+  backup exists (required), stores the secret and rewrites the hub workflow's sparkle step for every configured label.
 - **`tapster init --workflow`** rewrites the hub workflow from the template, the pins and the labels.
 - **`tapster add`** in an app project (an `.xcodeproj`, a `project.yml` or a `Package.swift` next to an `Info.plist`
   with `SUFeedURL`) writes the app template and prints the hub entry with `bundle_id`, the feed, the public key and
@@ -363,7 +383,8 @@ length: <number of those bytes>
 - **Leak test:** plain and masked Sparkle keys reach the sparkle step's success, its key mismatch failure and a
   malformed key.
 - **End to end:** a Sparkle fixture app on the test hub with real credentials: `spctl`, `stapler validate`, the feed
-  signature and an older installed build updating in place.
+  signature, an older installed build with both keys updating in place, and a build from before the hub updating to the
+  first hub release.
 
 ## 11. Migration
 
@@ -371,7 +392,7 @@ Order: hafifpix (simplest Sparkle setup, public), battistics (helper, two feeds)
 public). For each:
 1. Confirm where the Sparkle key lives (login keychain account) and that an offline backup exists. Store it with
    `tapster init --sparkle <label> --account <account>`.
-2. In the project: set `SURequireSignedFeed` to true in the Info.plist, replace the release workflow's signing,
+2. In the project: set `SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction` to true in the Info.plist, replace the release workflow's signing,
    notarizing, DMG, appcast and tap steps with the app template's jobs, keep the project's version and changelog
    logic. battistics' automatic tagging must start the release with `workflow_dispatch` on the new tag, so the build
    runs on the tag ref and its attestation names it.
