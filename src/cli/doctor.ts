@@ -9,6 +9,7 @@ import { currentRepo, userGitHub } from "./gh";
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
 import { fillWorkflow, sparkleLabels } from "./init";
+import { releaseSecrets } from "./hubpr";
 import { everyFromFlow } from "./schedule";
 
 export type Check = { name: string; ok: boolean; fix: string; note?: string };
@@ -228,7 +229,8 @@ async function apiChecks(gh: GitHub, hub: string, owner: string, config: HubConf
       const note = p.protection === "dependabot" ? `branches named dependabot/... are open on ${p.repo}, so a stolen App key could run its workflows on code of its own there` : undefined;
       checks.push(problems.length ? bad(`${p.repo} is protected`, `${problems.join("; ")}. Run tapster add in a clone of ${p.repo}.`) : ok(`${p.repo} is protected`, note));
     }
-    const leftovers = (await list<{ name: string }>(gh, `/repos/${p.repo}/actions/secrets?per_page=100`, "secrets")).map((x) => x.name).filter((n) => /^(HOMEBREW_TAP_|MACOS_)/.test(n));
+    const names = (await list<{ name: string }>(gh, `/repos/${p.repo}/actions/secrets?per_page=100`, "secrets")).map((x) => x.name);
+    const leftovers = releaseSecrets(names);
     checks.push(leftovers.length ? bad(`${p.repo} holds no release secrets`, `Delete ${leftovers.join(", ")}: gh secret delete <name> --repo ${p.repo}`) : ok(`${p.repo} holds no release secrets`));
   }
   return checks;

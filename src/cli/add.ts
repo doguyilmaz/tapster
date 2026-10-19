@@ -15,7 +15,7 @@ import appTemplate from "../../templates/project/app-release.yml" with { type: "
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
-import { autoTagSteps, binName, bunEntry, goEntry, hubName, installOnProject, proposeEntry, releaseEntry, suggestDescription } from "./hubpr";
+import { autoTagSteps, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubAppSlug, hubName, installOnProject, proposeEntry, releaseEntry, releaseSecrets } from "./hubpr";
 import { descProblems } from "../render";
 import { ask } from "./prompt";
 
@@ -282,7 +282,7 @@ async function writeTemplate(dir: string, file: string, text: string, force: boo
 
 type Prepared = { kind: "go" | "bun" | "app"; entry: string | null; reason: string | null; notes: string[]; goreleaser: string | null; bin?: string | null };
 
-async function prepare(dir: string, repo: string, name: string, opts: AddOptions): Promise<Prepared> {
+export async function prepare(dir: string, repo: string, name: string, opts: AddOptions): Promise<Prepared> {
   const app = findApp(dir);
   if (app) {
     const build = app.build ?? `echo "Set the build command in .github/workflows/release.yml" && exit 1`;
@@ -372,30 +372,26 @@ export async function add(args: string[]): Promise<void> {
   const dir = process.cwd();
   const repo = await currentRepo(dir);
   const name = repo.split("/")[1]!.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-  const prepared = await prepare(dir, repo, name, opts);
-  for (const n of prepared.notes) console.log(n);
   const gh = await userGitHub();
   const hub = await resolveHub(dir, opts.hub);
-  const branch = (await gh.getRepo(repo)).default_branch;
+  const slug = await hubAppSlug(gh, hub);
+  const prepared = await prepare(dir, repo, name, opts);
+  for (const n of prepared.notes) console.log(n);
+  const project = await gh.getRepo(repo);
   console.log(await protectProject(gh, repo, opts.autoTag, opts.dependabot));
   if (!opts.dependabot && [".github/dependabot.yml", ".github/dependabot.yaml"].some((f) => existsSync(join(dir, f)))) {
     console.log("- Dependabot cannot open pull requests here now: GitHub does not let personal repositories exempt it from the rules.");
     console.log("  To keep it, run tapster add --allow-dependabot. Branches named dependabot/... then stay open to anything with write access, the hub's App included, so a stolen App key could run your workflows on its own code there.");
   }
-  if (opts.autoTag) console.log(await setupAutoTag(gh, repo, branch));
+  if (opts.autoTag) console.log(await setupAutoTag(gh, repo, project.default_branch));
   let { entry, reason } = prepared;
   if (prepared.kind === "go") ({ entry, reason } = goEntry(name, repo, prepared.goreleaser, await latestDraftOrRelease(gh, repo)));
   if (prepared.kind === "bun" && prepared.bin) ({ entry, reason } = releaseEntry(name, repo, "bun", [prepared.bin], await latestDraftOrRelease(gh, repo)));
-  if (entry && opts.dependabot) entry = `${entry}\n    protection: dependabot`;
-  const repoDesc = (await gh.getRepo(repo)).description;
-  if (entry && descProblems(repoDesc ?? name, name).length) {
-    const better = suggestDescription(repoDesc, name);
-    if (better) {
-      entry = `${entry}\n    description: ${JSON.stringify(better)}`;
-      console.log(`- Homebrew would reject the repository's description (${descProblems(repoDesc ?? name, name).join(" and ")}); the entry says "${better}" instead`);
-    } else console.log(`- Homebrew would reject the repository's description (${descProblems(repoDesc ?? name, name).join(" and ")}); add description: to the hub entry before the first release`);
-  }
   if (entry) {
+    entry = entryExtras(entry, { kind: prepared.kind, workflow: opts.workflow, dependabot: opts.dependabot });
+    const desc = descriptionNote(project.description, name);
+    if (desc.line) console.log(desc.line);
+    if (desc.add) entry = `${entry}\n${desc.add}`;
     try {
       console.log(`- proposed the hub entry in ${await proposeEntry(gh, hub, name, repo, entry)}; merge it to start publishing`);
     } catch (e) {
@@ -408,6 +404,8 @@ export async function add(args: string[]): Promise<void> {
     await setRepoVariable(repo, "TAPSTER_DOORBELL", bell);
     console.log("- the release workflow rings the hub's doorbell, so the hub publishes right after the draft opens");
   }
-  console.log(await installOnProject(gh, hub, repo));
+  const secrets = await gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${repo}/actions/secrets?per_page=100`).then((r) => releaseSecrets(r.secrets.map((x) => x.name)), () => []);
+  if (secrets.length) console.log(`- ${repo} still holds release secrets that the hub replaces: ${secrets.join(", ")}. Delete them once the hub has published a release: gh secret delete <name> --repo ${repo}`);
+  console.log(await installOnProject(gh, slug, repo));
   console.log("\nReview the changes with git diff, commit and push them, then push a tag to release.");
 }

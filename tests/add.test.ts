@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { parse } from "yaml";
-import { add, adaptGoreleaser, adaptReleaseWorkflow, appEntry, appWorkflow, bunWorkflow, findApp } from "../src/cli/add";
+import { adaptGoreleaser, adaptReleaseWorkflow, addOptions, appEntry, appWorkflow, bunWorkflow, findApp, prepare } from "../src/cli/add";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,13 +110,7 @@ test("an existing Bun release workflow is not overwritten", async () => {
   writeFileSync(join(dir, "bun.lock"), "{}");
   mkdirSync(join(dir, ".github/workflows"), { recursive: true });
   writeFileSync(join(dir, ".github/workflows/release.yml"), "mine\n");
-  const cwd = process.cwd();
-  process.chdir(dir);
-  try {
-    await expect(add([])).rejects.toBeInstanceOf(TapsterError);
-  } finally {
-    process.chdir(cwd);
-  }
+  await expect(prepare(dir, "o/tool", "tool", addOptions([]))).rejects.toBeInstanceOf(TapsterError);
   expect(readFileSync(join(dir, ".github/workflows/release.yml"), "utf8")).toBe("mine\n");
 });
 

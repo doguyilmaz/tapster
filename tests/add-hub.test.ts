@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { autoTagSteps, binName, bunEntry, goEntry, hubName, installLink, withEntry } from "../src/cli/hubpr";
+import { autoTagSteps, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubName, installLink, releaseSecrets, withEntry } from "../src/cli/hubpr";
 import { parseHub } from "../src/config";
 import { rulesetBodies } from "../src/rulesets";
 
@@ -100,7 +100,7 @@ test("add links to the App's install page with the project preselected", async (
     getRepo: async () => ({ id: 22 }),
     json: async (_m: string, path: string) => (path === "/users/o" ? { id: 11 } : { variables: [{ name: "TAPSTER_APP_SLUG", value: "tapster-o-tap" }] }),
   } as never;
-  const said = await installOnProject(gh, "o/hub", "o/p");
+  const said = await installOnProject(gh, "tapster-o-tap", "o/p");
   expect(said).toContain("unless the hub's App already reaches o/p");
   expect(said).toContain("https://github.com/apps/tapster-o-tap/installations/new/permissions?suggested_target_id=11&repository_ids[]=22");
 });
@@ -143,4 +143,32 @@ test("a Bun project with its own release workflow gets its entry from the real r
   expect(p).toMatchObject({ kind: "bun", binaries: ["tapster"], scoop: false });
   expect(Object.keys(p.assets).sort()).toEqual(["darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64"]);
   expect(releaseEntry("tapster", "o/tapster", "bun", ["tapster"], null).reason).toContain("first draft");
+});
+
+test("a Go project released by another workflow names it in the entry", () => {
+  const entry = "  - name: t\n    repo: o/t";
+  expect(entryExtras(entry, { kind: "go", workflow: "ci.yml", dependabot: false })).toBe(`${entry}\n    workflow: ci.yml`);
+  expect(entryExtras(entry, { kind: "go", workflow: "release.yml", dependabot: true })).toBe(`${entry}\n    protection: dependabot`);
+  expect(entryExtras(entry, { kind: "bun", workflow: "ci.yml", dependabot: false })).toBe(entry);
+});
+
+test("a missing description is named as missing, a fixable one is fixed", () => {
+  expect(descriptionNote(null, "tool")).toEqual({ line: "- the repository has no description, which Homebrew needs; set one on GitHub or add description: to the hub entry before the first release" });
+  expect(descriptionNote("", "tool").line).toContain("has no description");
+  expect(descriptionNote("A tool that cleans disks.", "cleaner")).toEqual({ line: '- Homebrew would reject the repository\'s description (it starts with an article and it ends with a full stop); the entry says "Tool that cleans disks" instead', add: '    description: "Tool that cleans disks"' });
+  expect(descriptionNote("Cleans disks", "tool")).toEqual({});
+});
+
+test("old release secrets are the ones the hub replaces", () => {
+  expect(releaseSecrets(["HOMEBREW_TAP_GITHUB_TOKEN", "MACOS_SIGN_P12", "NPM_TOKEN", "CODECOV"])).toEqual(["HOMEBREW_TAP_GITHUB_TOKEN", "MACOS_SIGN_P12"]);
+});
+
+test("add stops before touching the project when the hub has no App", async () => {
+  const { hubAppSlug } = await import("../src/cli/hubpr");
+  const { GitHubError } = await import("../src/errors");
+  const withVars = (variables: unknown[]) => ({ json: async () => ({ variables }) }) as never;
+  expect(await hubAppSlug(withVars([{ name: "TAPSTER_APP_SLUG", value: "tapster-o-tap" }]), "o/hub")).toBe("tapster-o-tap");
+  await expect(hubAppSlug(withVars([]), "o/hub")).rejects.toThrow("o/hub has no App yet");
+  const missing = { json: async () => { throw new GitHubError("not found", "check it", 404); } } as never;
+  await expect(hubAppSlug(missing, "o/hub")).rejects.toThrow("o/hub has no App yet");
 });
