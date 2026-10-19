@@ -96,11 +96,17 @@ export function withEntry(hubYaml: string, entry: string, name: string): string 
   if (raw.some((p) => p?.name === name)) throw new TapsterError(`${name} is already in the hub's tapster.yml`, "Edit its entry there instead.");
   const packages = doc.get("packages", true);
   if (!isSeq(packages)) throw new TapsterError("the hub's tapster.yml has no packages list", "Add packages: [] to it.");
+  const [start, end] = packages.range ?? [0, 0];
+  if (packages.flow && packages.items.length === 0) return `${hubYaml.slice(0, start).replace(/[ \t]+$/, "")}\n${entry}${hubYaml.slice(end)}`;
+  if (!packages.flow) {
+    const head = hubYaml.slice(0, end);
+    return `${head}${head.endsWith("\n") ? "" : "\n"}${entry}\n${hubYaml.slice(end)}`;
+  }
   const item = parseDocument(entry).contents;
   if (!isSeq(item) || item.items.length !== 1) throw new TapsterError("the entry is not one package", "Report this as a tapster bug.");
   packages.flow = false;
   packages.items.push(item.items[0] as never);
-  return doc.toString({ flowCollectionPadding: false });
+  return doc.toString();
 }
 
 export function suggestDescription(desc: string | null, name: string): string | null {

@@ -127,3 +127,10 @@ test("a repository description Homebrew would reject becomes a suggested one in 
   expect(suggestDescription("pix does things", "pix")).toBeNull();
   expect(suggestDescription(null, "pix")).toBeNull();
 });
+
+test("adding an entry leaves every other byte of the hub's file as it was", () => {
+  const hub = `version: 1\ntap: o/tap # mine\nlinux: { maintainer: "O <o@x.yz>" }\npackages:\n${bunEntry("other", "o/other", "other")}\n\nlater: { a: [1, 2] }\n`;
+  const entry = bunEntry("tool", "o/tool", "tool");
+  expect(withEntry(hub, entry, "tool")).toBe(hub.replace(`${bunEntry("other", "o/other", "other")}\n`, `${bunEntry("other", "o/other", "other")}\n${entry}\n`));
+  expect(withEntry("version: 1\npackages: []\nlater: 1\n", entry, "tool")).toBe(`version: 1\npackages:\n${entry}\nlater: 1\n`);
+});
