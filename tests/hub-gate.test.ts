@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { foreignWrites, installationProblems } from "../src/action/check";
+import { installationProblems } from "../src/action/check";
+import { foreignWrites } from "../src/foreign";
 import type { GitHub } from "../src/github";
 
 const ownerPush = { actor: { login: "o", type: "User" }, before: "a", after: "b", activity_type: "push" };

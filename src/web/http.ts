@@ -12,7 +12,7 @@ const BASE: Record<string, string> = {
   "cross-origin-resource-policy": "same-origin",
 };
 
-export function respond(body: BodyInit | null, status: number, type: string | null, extra: Record<string, string> = {}): Response {
+export function respond(body: string | Uint8Array | null, status: number, type: string | null, extra: Record<string, string> = {}): Response {
   return new Response(body, { status, headers: { ...BASE, ...(type ? { "content-type": type } : {}), ...extra } });
 }
 
