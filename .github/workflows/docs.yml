@@ -2,14 +2,13 @@ name: docs
 on:
   push:
     branches: [main]
-    paths: [README.md, "site/**", "templates/wrangler/**"]
+    paths: [README.md, "site/**"]
   workflow_dispatch:
 permissions: {}
-concurrency: { group: docs, cancel-in-progress: true }
+concurrency: { group: docs, cancel-in-progress: false }
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-24.04
-    environment: docs
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -17,10 +16,13 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with: { bun-version: 1.4.3 }
       - run: bun site/build.ts
-      - run: bun install --frozen-lockfile --ignore-scripts
-        working-directory: templates/wrangler
-      - name: Deploy to tapster.doguyilmaz.com
-        run: templates/wrangler/node_modules/.bin/wrangler deploy --config site/wrangler.jsonc
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with: { path: site/dist }
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions: { pages: write, id-token: write }
+    environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
