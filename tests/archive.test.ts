@@ -183,3 +183,17 @@ test("owners are read and a plain tar reads like a gzipped one", () => {
   expect(e!.gid).toBe(0);
   expect(readTar(gunzipSync(gz))[0]!.name).toBe("usr/bin/x");
 });
+
+test("owner names are read so packages can be checked for them", () => {
+  const [e] = readTarGz(rawTarGz([{ name: "usr/bin/x", data: "a", uname: "nobody" }]));
+  expect(e!.uname).toBe("nobody");
+  expect(e!.gname).toBe("");
+});
+
+test("an archive that goes on after its end or names a file like a folder is refused", () => {
+  const block = Buffer.alloc(512);
+  block.write("hidden");
+  expect(() => readTarGz(rawTarGz([{ name: "a", data: "1" }], block))).toThrow(TapsterError);
+  expect(() => readTarGz(rawTarGz([{ name: "a", data: "1" }], Buffer.alloc(9216)))).not.toThrow();
+  expect(() => readTarGz(rawTarGz([{ name: "usr/bin/x/", data: "1" }]))).toThrow(TapsterError);
+});

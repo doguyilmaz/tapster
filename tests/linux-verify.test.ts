@@ -9,8 +9,8 @@ const files: ExpectedFile[] = [
   { path: "usr/share/bash-completion/completions/aims", mode: 0o644, sha256: sha("b") },
 ];
 const exp: Expected = { name: "aims", version: "0.1.5", debArch: "amd64", rpmArch: "x86_64", maintainer: "Dogu Yilmaz <dogu@example.com>", description: "Several accounts", homepage: "https://github.com/o/aims", deb: files, rpm: files };
-const file = (name: string, data: string, mode: number, uid = 0): TarEntry => ({ name, type: "file", mode, data: Buffer.from(data), uid, gid: 0 });
-const dir = (name: string): TarEntry => ({ name, type: "dir", mode: 0o755, data: Buffer.alloc(0), uid: 0, gid: 0 });
+const file = (name: string, data: string, mode: number, uid = 0): TarEntry => ({ name, type: "file", mode, data: Buffer.from(data), uid, gid: 0, uname: "root", gname: "root" });
+const dir = (name: string): TarEntry => ({ name, type: "dir", mode: 0o755, data: Buffer.alloc(0), uid: 0, gid: 0, uname: "root", gname: "root" });
 const goodData = () => [dir("usr"), dir("usr/bin"), file("usr/bin/aims", "bin", 0o755), dir("usr/share"), dir("usr/share/bash-completion"), dir("usr/share/bash-completion/completions"), file("usr/share/bash-completion/completions/aims", "b", 0o644)];
 const control = `Package: aims
 Version: 0.1.5-1
@@ -22,7 +22,8 @@ Installed-Size: 12
 Homepage: https://github.com/o/aims
 Description: Several accounts
 `;
-const deb = (over: Partial<{ control: string; members: string[]; data: TarEntry[] }> = {}) => ({
+const deb = (over: Partial<{ control: string; members: string[]; data: TarEntry[]; ar: string[] }> = {}) => ({
+  ar: over.ar ?? ["debian-binary", "control.tar.gz", "data.tar.gz"],
   control: parseControl(over.control ?? control),
   controlMembers: over.members ?? ["control", "md5sums"],
   data: over.data ?? goodData(),
@@ -43,6 +44,8 @@ test.each([
   ["a changed binary", { data: goodData().map((e) => (e.name === "usr/bin/aims" ? file("usr/bin/aims", "evil", 0o755) : e)) }, /usr\/bin\/aims/],
   ["a setuid binary", { data: goodData().map((e) => (e.name === "usr/bin/aims" ? file("usr/bin/aims", "bin", 0o4755) : e)) }, /mode/],
   ["a file owned by a user", { data: goodData().map((e) => (e.name === "usr/bin/aims" ? file("usr/bin/aims", "bin", 0o755, 1000) : e)) }, /owned/],
+  ["a file owned by name by a user", { data: goodData().map((e) => (e.name === "usr/bin/aims" ? { ...file("usr/bin/aims", "bin", 0o755), uname: "nobody" } : e)) }, /owned/],
+  ["a second data archive", { ar: ["debian-binary", "control.tar.gz", "data.tar.gz", "data.tar.xz"] }, /data.tar.xz/],
   ["a symlink", { data: [...goodData(), { name: "usr/bin/x", type: "symlink" as const, mode: 0o777, data: Buffer.alloc(0), linkname: "aims", uid: 0, gid: 0 }] }, /usr\/bin\/x/],
 ])("a deb with %s is refused", (_, over, reason) => {
   expect(() => checkDeb(deb(over), exp)).toThrow(reason);
@@ -52,7 +55,7 @@ const rpm = (over: Partial<{ tags: string; scripts: string; deps: Record<string,
   tags: over.tags ?? "aims|0.1.5|1|x86_64|(none)",
   scripts: over.scripts ?? "",
   deps: { requires: [], provides: ["aims = 0.1.5-1", "aims(x86-64) = 0.1.5-1"], obsoletes: [], conflicts: [], recommends: [], suggests: [], supplements: [], enhances: [], ...over.deps },
-  files: over.files ?? "/usr/bin/aims\t100755\troot\troot\t0\n/usr/share/bash-completion/completions/aims\t100644\troot\troot\t0\n",
+  files: over.files ?? "/usr/bin/aims\t100755\troot\troot\t0\t\n/usr/share/bash-completion/completions/aims\t100644\troot\troot\t0\t\n",
   payload: over.payload ?? [file("usr/bin/aims", "bin", 0o755), file("usr/share/bash-completion/completions/aims", "b", 0o644)],
 });
 
@@ -68,8 +71,9 @@ test.each([
   ["a foreign provide", { deps: { provides: ["aims = 0.1.5-1", "sudo = 9"] } }, /provides/],
   ["another architecture", { tags: "aims|0.1.5|1|aarch64|(none)" }, /aarch64/],
   ["an epoch", { tags: "aims|0.1.5|1|x86_64|9" }, /epoch/],
-  ["a config file flag", { files: "/usr/bin/aims\t100755\troot\troot\t1\n/usr/share/bash-completion/completions/aims\t100644\troot\troot\t0\n" }, /flags/],
-  ["a file owned by a user", { files: "/usr/bin/aims\t100755\tdogu\troot\t0\n/usr/share/bash-completion/completions/aims\t100644\troot\troot\t0\n" }, /owned/],
+  ["a config file flag", { files: "/usr/bin/aims\t100755\troot\troot\t1\t\n/usr/share/bash-completion/completions/aims\t100644\troot\troot\t0\t\n" }, /flags/],
+  ["a file owned by a user", { files: "/usr/bin/aims\t100755\tdogu\troot\t0\t\n/usr/share/bash-completion/completions/aims\t100644\troot\troot\t0\t\n" }, /owned/],
+  ["a file capability", { files: "/usr/bin/aims\t100755\troot\troot\t0\tcap_setuid=ep\n/usr/share/bash-completion/completions/aims\t100644\troot\troot\t0\t\n" }, /capabilit/],
   ["a payload that differs from the header", { payload: [file("usr/bin/aims", "evil", 0o755), file("usr/share/bash-completion/completions/aims", "b", 0o644)] }, /usr\/bin\/aims/],
   ["an extra payload file", { payload: [file("usr/bin/aims", "bin", 0o755), file("usr/share/bash-completion/completions/aims", "b", 0o644), file("etc/x", "x", 0o644)] }, /etc\/x/],
 ])("an rpm with %s is refused", (_, over, reason) => {

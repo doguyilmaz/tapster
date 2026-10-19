@@ -65,7 +65,8 @@ function checkFiles(file: string, entries: TarEntry[], expected: ExpectedFile[])
   const dirs = new Set(expected.flatMap((f) => f.path.split("/").slice(0, -1).map((_, i, parts) => parts.slice(0, i + 1).join("/"))));
   const seen = new Set<string>();
   for (const e of entries) {
-    if ((e.uid ?? 0) !== 0 || (e.gid ?? 0) !== 0) throw refuse(file, `has ${e.name} owned by a user other than root`);
+    const named = (n: string | undefined) => n === undefined || n === "" || n === "root";
+    if ((e.uid ?? 0) !== 0 || (e.gid ?? 0) !== 0 || !named(e.uname) || !named(e.gname)) throw refuse(file, `has ${e.name} owned by a user other than root`);
     if (e.type === "dir") {
       if (!dirs.has(e.name)) throw refuse(file, `has the folder ${e.name}, which the release does not ship`);
       if (e.mode !== 0o755) throw refuse(file, `has the folder ${e.name} with mode ${e.mode.toString(8)}`);
@@ -82,10 +83,28 @@ function checkFiles(file: string, entries: TarEntry[], expected: ExpectedFile[])
 
 const DEB_FIELDS = new Set(["Package", "Version", "Section", "Priority", "Architecture", "Maintainer", "Installed-Size", "Homepage", "Description"]);
 
-export type DebParts = { control: Record<string, string>; controlMembers: string[]; data: TarEntry[] };
+export type DebParts = { ar: string[]; control: Record<string, string>; controlMembers: string[]; data: TarEntry[] };
+
+const AR_MEMBERS = [/^debian-binary$/, /^control\.tar\.(gz|xz|zst)$/, /^data\.tar\.(gz|xz|zst)$/];
+
+export function arMembers(data: Buffer): string[] {
+  if (data.subarray(0, 8).toString("latin1") !== "!<arch>\n") throw new TapsterError("a deb is not an ar archive", "Check the linux-build job.");
+  const names: string[] = [];
+  let off = 8;
+  while (off + 60 <= data.length) {
+    const name = data.subarray(off, off + 16).toString("latin1").trim().replace(/\/$/, "");
+    const size = Number(data.subarray(off + 48, off + 58).toString("latin1").trim());
+    if (!Number.isSafeInteger(size) || size < 0) throw new TapsterError("a deb has a damaged ar header", "Check the linux-build job.");
+    names.push(name);
+    off += 60 + size + (size % 2);
+  }
+  if (off !== data.length) throw new TapsterError("a deb has data after its last member", "Check the linux-build job.");
+  return names;
+}
 
 export function checkDeb(parts: DebParts, exp: Expected): void {
   const file = debName(exp);
+  if (parts.ar.length !== AR_MEMBERS.length || !parts.ar.every((m, i) => AR_MEMBERS[i]!.test(m))) throw refuse(file, `holds the members ${parts.ar.join(", ")}`);
   for (const k of Object.keys(parts.control)) if (!DEB_FIELDS.has(k)) throw refuse(file, `sets the control field ${k}`);
   const want: Record<string, string> = { Package: exp.name, Version: `${exp.version}-1`, Architecture: exp.debArch, Maintainer: exp.maintainer, Homepage: exp.homepage, Description: exp.description };
   for (const [k, v] of Object.entries(want)) if (parts.control[k] !== v) throw refuse(file, `has ${k} ${JSON.stringify(parts.control[k] ?? null)}, not ${JSON.stringify(v)}`);
@@ -117,8 +136,8 @@ export function checkRpm(parts: RpmParts, exp: Expected): void {
     .split("\n")
     .filter((l) => l.trim() !== "")
     .map((l) => {
-      const [path, mode, user, group, flags] = l.split("\t");
-      return { path: path!.replace(/^\//, ""), mode: Number.parseInt(mode!, 8), user, group, flags };
+      const [path, mode, user, group, flags, caps] = l.split("\t");
+      return { path: path!.replace(/^\//, ""), mode: Number.parseInt(mode!, 8), user, group, flags, caps: caps ?? "" };
     });
   const want = new Map(exp.rpm.map((f) => [f.path, f]));
   for (const h of headers) {
@@ -126,6 +145,7 @@ export function checkRpm(parts: RpmParts, exp: Expected): void {
     if (!f) throw refuse(file, `lists ${h.path}, which the release does not ship`);
     if (h.user !== "root" || h.group !== "root") throw refuse(file, `has ${h.path} owned by ${h.user}:${h.group}`);
     if (h.flags !== "0") throw refuse(file, `marks ${h.path} with flags ${h.flags}`);
+    if (h.caps.trim() !== "" && h.caps.trim() !== "(none)") throw refuse(file, `gives ${h.path} the capabilities ${h.caps}`);
     if (h.mode !== (0o100000 | f.mode)) throw refuse(file, `lists ${h.path} with mode ${h.mode.toString(8)}`);
   }
   if (headers.length !== exp.rpm.length) throw refuse(file, "lists a different set of files");
@@ -138,7 +158,7 @@ export async function readDeb(path: string): Promise<DebParts> {
   const control = parseControl((await run("dpkg-deb", ["-f", path], LIMIT)).stdout);
   const ctrl = readTar((await run("dpkg-deb", ["--ctrl-tarfile", path], LIMIT)).bytes);
   const data = readTar((await run("dpkg-deb", ["--fsys-tarfile", path], LIMIT)).bytes);
-  return { control, controlMembers: ctrl.filter((e) => e.type !== "dir").map((e) => e.name), data };
+  return { ar: arMembers(await readFile(path)), control, controlMembers: ctrl.filter((e) => e.type !== "dir").map((e) => e.name), data };
 }
 
 const DEPS = ["requires", "provides", "obsoletes", "conflicts", "recommends", "suggests", "supplements", "enhances"];
@@ -149,9 +169,9 @@ export async function readRpm(path: string): Promise<RpmParts> {
   for (const d of DEPS) deps[d] = (await q([`--${d}`])).split("\n");
   return {
     tags: await q(["--qf", "%{NAME}|%{VERSION}|%{RELEASE}|%{ARCH}|%{EPOCH}\\n"]),
-    scripts: await q(["--scripts", "--triggers"]),
+    scripts: await q(["--scripts", "--triggers", "--filetriggers"]),
     deps,
-    files: await q(["--qf", "[%{FILENAMES}\\t%{FILEMODES:octal}\\t%{FILEUSERNAME}\\t%{FILEGROUPNAME}\\t%{FILEFLAGS}\\n]"]),
+    files: await q(["--qf", "[%{FILENAMES}\\t%{FILEMODES:octal}\\t%{FILEUSERNAME}\\t%{FILEGROUPNAME}\\t%{FILEFLAGS}\\t%{FILECAPS}\\n]"]),
     payload: readTarGz((await run("rpm2archive", ["-"], { ...LIMIT, stdin: await readFile(path) })).bytes),
   };
 }
