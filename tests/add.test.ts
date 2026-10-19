@@ -90,10 +90,10 @@ test("existing job permissions are kept", () => {
   expect(y.jobs.release.permissions).toEqual({ contents: "write", packages: "write", "id-token": "write", attestations: "write" });
 });
 
-test("running add twice adds one attestation step", () => {
+test("running add twice adds one attestation step and one ring step", () => {
   const once = adaptReleaseWorkflow(goFlow, "a".repeat(40), "v4").text;
   const twice = adaptReleaseWorkflow(once, "a".repeat(40), "v4");
-  expect(parse(twice.text).jobs.release.steps.length).toBe(2);
+  expect(parse(twice.text).jobs.release.steps.length).toBe(3);
   expect(twice.notes.join(" ")).toContain("already");
 });
 

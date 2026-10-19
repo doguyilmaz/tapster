@@ -51,6 +51,12 @@ export function sparkleCheck(config: HubConfig, secrets: string[], workflow: str
   return ok(name);
 }
 
+export function doorbellCheck(hub: string, projects: Record<string, string | null>): Check {
+  const name = "every project rings the hub's doorbell";
+  const off = Object.entries(projects).filter(([, v]) => v !== hub).map(([repo]) => repo);
+  return off.length ? bad(name, off.map((r) => `gh variable set TAPSTER_DOORBELL --repo ${r} --body ${hub}`).join("; ")) : ok(name);
+}
+
 const SECRETS = ["MACOS_SIGN_P12", "MACOS_SIGN_PASSWORD", "MACOS_NOTARY_KEY", "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER_ID", "TAPSTER_APP_PRIVATE_KEY"];
 const VARIABLES = ["TAPSTER_APP_ID", "TAPSTER_APP_SLUG", "TAPSTER_TEAM_ID"];
 
@@ -74,6 +80,14 @@ async function apiChecks(gh: GitHub, hub: string, repos: string[], config: HubCo
   checks.push(exposed.length ? bad("credentials are secrets, not variables", `Variables are readable by anyone with access; delete ${exposed.join(", ")} and store them with tapster init --rotate.`) : ok("credentials are secrets, not variables"));
   const missingVars = VARIABLES.filter((v) => !vars.some((x) => x.name === v));
   checks.push(missingVars.length ? bad("the App and team variables are set", `Missing: ${missingVars.join(", ")}. Run tapster init.`) : ok("the App and team variables are set"));
+  const doorbell = vars.find((v) => v.name === "TAPSTER_DOORBELL")?.value;
+  if (doorbell) {
+    const values: Record<string, string | null> = {};
+    for (const repo of repos) {
+      values[repo] = await gh.json<{ value: string }>("GET", `/repos/${repo}/actions/variables/TAPSTER_DOORBELL`).then((v) => v.value).catch(() => null);
+    }
+    checks.push(doorbellCheck(doorbell, values));
+  }
   const perms = await gh.json<{ default_workflow_permissions: string }>("GET", `/repos/${hub}/actions/permissions/workflow`);
   checks.push(perms.default_workflow_permissions === "read" ? ok("the default workflow token is read-only") : bad("the default workflow token is read-only", "Run tapster init."));
   const rules = await gh.json<{ name: string }[]>("GET", `/repos/${hub}/rulesets`);

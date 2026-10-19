@@ -1,18 +1,19 @@
-import { createHash, createPrivateKey, createPublicKey, randomBytes } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
 import { join } from "node:path";
 import { type HubConfig, isApp, parseConfig } from "../config";
 import { TapsterError } from "../errors";
 import { GitHub } from "../github";
 import { decodeSparkleKey } from "../sparkle-key";
 import { appJwt } from "../token";
-import { run, runPath } from "../run";
+import { run } from "../run";
 import hubReadme from "../../templates/hub/README.md" with { type: "text" };
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
-import { currentRepo, setEnvSecret, setEnvVariable, userGitHub } from "./gh";
+import { appFromManifest, openUrl } from "./appflow";
+import { rotateDoorbell, setupDoorbell } from "./doorbell";
+import { currentRepo, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
 import { ask } from "./prompt";
 
 type Pins = typeof pinsJson;
@@ -66,41 +67,8 @@ export function fillWorkflow(template: string, pins: Pins, tapster: { sha: strin
     .replaceAll("__TAPSTER_TAG__", tapster.tag);
 }
 
-function openUrl(url: string): void {
-  console.log(`  ${url}`);
-  void runPath(process.platform === "darwin" ? "/usr/bin/open" : "/usr/bin/xdg-open", "open", [url], { allowFail: true }).catch(() => undefined);
-}
-
 async function createApp(owner: string, hub: string): Promise<void> {
-  const state = randomBytes(16).toString("hex");
-  const code = await new Promise<string>((resolve, reject) => {
-    const server = createServer((req, res) => {
-      const url = new URL(req.url ?? "/", "http://127.0.0.1");
-      if (url.pathname === "/start") {
-        const manifest = JSON.stringify(appManifest(owner, hub, `http://127.0.0.1:${(server.address() as { port: number }).port}/callback`)).replaceAll('"', "&quot;");
-        res.writeHead(200, { "content-type": "text/html" });
-        res.end(`<form id="f" method="post" action="https://github.com/settings/apps/new?state=${state}"><input type="hidden" name="manifest" value="${manifest}"></form><script>document.getElementById("f").submit()</script>`);
-        return;
-      }
-      if (url.pathname === "/callback") {
-        res.writeHead(200, { "content-type": "text/plain" });
-        res.end("tapster: the App was created. You can close this tab.");
-        server.close();
-        if (url.searchParams.get("state") !== state) reject(new TapsterError("the App creation answer did not match", "Run tapster init again."));
-        else resolve(url.searchParams.get("code") ?? "");
-        return;
-      }
-      res.writeHead(404).end();
-    });
-    server.listen(0, "127.0.0.1", () => {
-      const p = (server.address() as { port: number }).port;
-      console.log("Opening GitHub to create your tapster App. Click \"Create GitHub App\".");
-      openUrl(`http://127.0.0.1:${p}/start`);
-    });
-  });
-  const app = await fetch(`https://api.github.com/app-manifests/${code}/conversions`, { method: "POST", headers: { Accept: "application/vnd.github+json" } });
-  if (!app.ok) throw new TapsterError(`GitHub did not convert the App (status ${app.status})`, "Run tapster init again within an hour of creating the App.");
-  const created = (await app.json()) as { id: number; slug: string; pem: string };
+  const created = await appFromManifest((redirect) => appManifest(owner, hub, redirect), "your tapster App");
   await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", created.pem);
   await setEnvVariable(hub, "TAPSTER_APP_ID", String(created.id));
   await setEnvVariable(hub, "TAPSTER_APP_SLUG", created.slug);
@@ -244,13 +212,15 @@ export async function init(args: string[]): Promise<void> {
   if (rotate === "app") return rotateAppKey(gh, hub);
   if (rotate === "certificate") return storeCertificate(hub);
   if (rotate === "notary") return storeNotary(hub);
+  if (rotate === "doorbell") return rotateDoorbell(gh, hub);
+  if (args[0] === "--doorbell" && args.length === 1) return setupDoorbell(gh, hub, hubConfig(dir, hub), setRepoVariable);
   if (args[0] === "--sparkle" && args[1]) {
     const account = args[2] === "--account" && args[3] ? args[3] : args.length === 2 ? "ed25519" : null;
     if (account) return storeSparkleKey(gh, dir, hub, args[1], account);
   }
   if (args[0] === "--workflow" && args.length === 1) return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)));
   if (args.length) {
-    throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, init --rotate app|certificate|notary, init --sparkle <label> [--account <account>] or init --workflow.");
+    throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, init --rotate app|certificate|notary|doorbell, init --sparkle <label> [--account <account>], init --doorbell or init --workflow.");
   }
   await protectHub(gh, hub);
   await createApp(hub.split("/")[0]!, hub);
