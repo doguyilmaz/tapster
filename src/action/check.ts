@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { missingAttestations } from "../attest";
 import { parseChecksums } from "../checksums";
+import { isApp } from "../config";
 import { GitHub } from "../github";
 import { readSecret, requireVar } from "../mask";
 import { type WorkItem, planPackage } from "../plan";
@@ -42,7 +43,8 @@ export async function check(ctx: Context): Promise<void> {
       if (repo.private) privateRepos.add(pkg.name);
       for (const item of plan.items) {
         const release = pkg.attestation === "auto" && !repo.private && !item.resume ? await gh.getRelease(pkg.repo, item.releaseId) : null;
-        const missing = release ? await missingAttestations(pkg.repo, release.assets, tok.token) : [];
+        const attested = release?.assets.filter((a) => !(isApp(pkg) && Object.hasOwn(pkg.carry, a.name))) ?? [];
+        const missing = release ? await missingAttestations(pkg.repo, attested, tok.token) : [];
         if (missing.length) record({ item: pkg.name, result: "waiting", detail: `${item.tag}: no attestation yet for ${missing.join(", ")}` });
         else items.push(item);
       }

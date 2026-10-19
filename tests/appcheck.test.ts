@@ -112,9 +112,9 @@ test("a flat resource bundle without an identifier passes", async () => {
   expect((await appFacts(app(good, extra), pkg, cfg.packages, "v1.3.1", agree)).version).toBe("1.3.1");
 });
 
-test("an older macOS minimum maps to its Homebrew symbol", async () => {
-  expect((await appFacts(app({ ...good, LSMinimumSystemVersion: "10.15" }), pkg, cfg.packages, "v1.3.1", agree)).macos).toBe("catalina");
-  await expect(appFacts(app({ ...good, LSMinimumSystemVersion: "10.9" }), pkg, cfg.packages, "v1.3.1", agree)).rejects.toThrow(/LSMinimumSystemVersion/);
+test("a macOS minimum without a Homebrew symbol is refused", async () => {
+  expect((await appFacts(app({ ...good, LSMinimumSystemVersion: "26.0" }), pkg, cfg.packages, "v1.3.1", agree)).macos).toBe("tahoe");
+  await expect(appFacts(app({ ...good, LSMinimumSystemVersion: "10.15" }), pkg, cfg.packages, "v1.3.1", agree)).rejects.toThrow(/LSMinimumSystemVersion/);
 });
 
 test("symlinks cannot hide an Info.plist or borrow an app name", async () => {

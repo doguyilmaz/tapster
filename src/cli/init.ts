@@ -31,8 +31,10 @@ export function teamIdFromSubject(subject: string): string | null {
   return /(?:^|[,/]\s*)OU=([A-Z0-9]{10})(?:[,/]|$)/.exec(subject)?.[1] ?? null;
 }
 
-export function fillWorkflow(template: string, pins: Pins, tapster: { sha: string; tag: string }): string {
+export function fillWorkflow(template: string, pins: Pins, tapster: { sha: string; tag: string }, sparkleLabels: string[] = []): string {
+  const sparkleEnv = sparkleLabels.map((l) => `SPARKLE_KEY_${l.toUpperCase()}: "\${{ secrets.SPARKLE_KEY_${l.toUpperCase()} }}"`).join(", ");
   return template
+    .replaceAll("__SPARKLE_ENV__", `{${sparkleEnv ? ` ${sparkleEnv} ` : ""}}`)
     .replaceAll("__CHECKOUT_SHA__", pins["actions/checkout"].sha)
     .replaceAll("__CHECKOUT_TAG__", pins["actions/checkout"].tag)
     .replaceAll("__ATTEST_SHA__", pins["actions/attest-build-provenance"].sha)

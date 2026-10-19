@@ -1,14 +1,17 @@
 import * as core from "@actions/core";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { appAsset, dmgName } from "../appcheck";
 import { readTarGz, writeTarGz } from "../archive";
-import { sha256, writeChecksums } from "../checksums";
+import { type ChecksumLine, sha256, writeChecksums } from "../checksums";
+import { type AppPackage, isApp, versionOf } from "../config";
+import { TapsterError } from "../errors";
 import { GitHub } from "../github";
 import { commitToHub, readHubFile } from "../hubcommit";
 import { readSecret, requireVar } from "../mask";
 import { type Outgoing, assertRecorded, makeLatest, resumeSwap, stageAndSwap, waitDownloadable } from "../publish";
 import { failure, record, warn } from "../report";
-import { STATE_PATH, type StateEntry, parseState, recordedChecksums, serializeState, upsert } from "../state";
+import { STATE_PATH, type State, type StateEntry, parseState, recordedChecksums, serializeState, upsert } from "../state";
 import { type InstallationToken, installationToken } from "../token";
 import { loadManifest, workdir } from "../workdir";
 import type { Context } from "./context";
@@ -21,6 +24,20 @@ async function recordState(gh: GitHub, hub: string, pkg: string, entry: StateEnt
   });
 }
 
+export function appOutputs(pkg: AppPackage, tag: string, checksums: ChecksumLine[], dmg: Buffer, feed: Buffer | null): { files: Outgoing[]; remove: string[] } {
+  const version = versionOf(tag);
+  const files: Outgoing[] = [{ name: dmgName(pkg, version), data: dmg }, ...(feed ? [{ name: pkg.sparkle!.feed, data: feed }] : [])];
+  const carried = checksums.filter((l) => Object.hasOwn(pkg.carry, l.name));
+  const sums = writeChecksums([...files.map((f) => ({ sha256: sha256(f.data), name: f.name })), ...carried]);
+  return { files: [...files, { name: "checksums.txt", data: Buffer.from(sums) }], remove: [appAsset(pkg, version)] };
+}
+
+function recordedApp(state: State, pkg: string, releaseId: number): StateEntry["app"] {
+  const app = state.packages[pkg]?.find((e) => e.releaseId === releaseId)?.app;
+  if (!app) throw new TapsterError("the state has no app facts for this release", "Delete the draft and release again.");
+  return app;
+}
+
 export async function publishMode(ctx: Context): Promise<void> {
   const appId = requireVar("TAPSTER_APP_ID");
   const pem = readSecret("TAPSTER_APP_PRIVATE_KEY");
@@ -28,19 +45,30 @@ export async function publishMode(ctx: Context): Promise<void> {
   const out = join(workdir(), "out");
   await mkdir(out, { recursive: true, mode: 0o700 });
   let attest = false;
-  for (const item of (await loadManifest()).items.filter((i) => i.status === "signed")) {
-    const pkg = ctx.config.packages.find((p) => p.name === item.package)!;
+  for (const item of (await loadManifest()).items) {
+    const pkg = ctx.config.packages.find((p) => p.name === item.package);
+    if (!pkg || item.status !== (isApp(pkg) ? "sparkled" : "signed")) continue;
     let tok: InstallationToken | undefined;
     try {
       tok = await installationToken(appId, pem, pkg.repo, { contents: "write" });
       const gh = new GitHub(tok.token);
       const release = await gh.getRelease(pkg.repo, item.releaseId);
       let expected: string | undefined;
+      let app: StateEntry["app"];
       const signed: Outgoing[] = [];
       if (item.resume) {
         const state = parseState(await readHubFile(hubGh, ctx.hub, STATE_PATH, "main"));
         expected = recordedChecksums(state, pkg.name, item.releaseId);
-        await resumeSwap(gh, pkg.repo, release, expected);
+        if (isApp(pkg)) app = recordedApp(state, pkg.name, item.releaseId);
+        await resumeSwap(gh, pkg.repo, release, expected, isApp(pkg) ? [appAsset(pkg, versionOf(item.tag))] : []);
+      } else if (isApp(pkg)) {
+        const work = item.app!;
+        const out = appOutputs(pkg, item.tag, item.checksums, await readFile(work.dmg!), work.feed ? await readFile(work.feed) : null);
+        signed.push(...out.files.filter((f) => f.name !== "checksums.txt"));
+        expected = sha256(out.files.find((f) => f.name === "checksums.txt")!.data);
+        app = { macos: work.facts.macos, identifiers: work.identifiers };
+        await recordState(hubGh, ctx.hub, pkg.name, { tag: item.tag, releaseId: item.releaseId, checksums: expected, status: "publishing", app });
+        await stageAndSwap(gh, pkg.repo, item.releaseId, out.files, item.before, out.remove);
       } else {
         const dir = join(workdir(), pkg.name, item.tag);
         const mtime = Math.floor(Date.parse(release.created_at) / 1000);
@@ -67,7 +95,7 @@ export async function publishMode(ctx: Context): Promise<void> {
       const sumsAsset = published.assets.find((a) => a.name === "checksums.txt")!;
       const publishedSums = await gh.downloadAsset(pkg.repo, sumsAsset.id);
       assertRecorded(publishedSums, expected!);
-      await recordState(hubGh, ctx.hub, pkg.name, { tag: item.tag, releaseId: item.releaseId, checksums: expected!, status: "published" });
+      await recordState(hubGh, ctx.hub, pkg.name, { tag: item.tag, releaseId: item.releaseId, checksums: expected!, status: "published", ...(app ? { app } : {}) });
       for (const f of signed) await writeFile(join(out, f.name), f.data);
       attest ||= signed.length > 0;
       record({ item: `${pkg.name} ${item.tag}`, result: "published", detail: "" });

@@ -55,7 +55,7 @@ export async function buildDmg(appDir: string, out: string, opts: DmgOptions): P
 }
 
 export async function sealDmg(kc: Keychain, dmg: string, key: NotaryKey): Promise<void> {
-  await run("codesign", ["--force", "--timestamp", "--keychain", kc.path, "--sign", kc.identity, dmg]);
+  await run("codesign", ["--force", "--timestamp", ...(kc.path ? ["--keychain", kc.path] : []), "--sign", kc.identity, dmg]);
   await notarize(dmg, key);
   await run("xcrun", ["stapler", "staple", dmg]);
   await run("xcrun", ["stapler", "validate", dmg]);

@@ -1,35 +1,31 @@
-import { cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { openKeychain } from "../keychain";
-import { readSecret, register, requireVar } from "../mask";
-import { failure, info } from "../report";
-import { PRESETS, entitlementsPlist, notarize, signFile, verifySigned, zipForNotary } from "../sign";
+import { signApp, verifyApp } from "../appsign";
 import { isApp } from "../config";
-import { TapsterError } from "../errors";
+import { failure, info, warn } from "../report";
+import { PRESETS, entitlementsPlist, notarize, signFile, verifySigned, zipForNotary } from "../sign";
 import { loadManifest, saveManifest, workdir } from "../workdir";
+import { withApple } from "./apple";
 import type { Context } from "./context";
 
 export async function signMode(ctx: Context): Promise<void> {
   const manifest = await loadManifest();
-  for (const i of manifest.items) if (i.status === "fetched" && (i.resume || i.archives.length === 0)) i.status = "signed";
+  for (const i of manifest.items) if (i.status === "fetched" && (i.resume || (!i.app && i.archives.length === 0))) i.status = "signed";
   const todo = manifest.items.filter((i) => i.status === "fetched");
   if (todo.length > 0) {
-    const p12 = readSecret("MACOS_SIGN_P12");
-    const password = readSecret("MACOS_SIGN_PASSWORD");
-    const rawKey = readSecret("MACOS_NOTARY_KEY");
-    const keyId = readSecret("MACOS_NOTARY_KEY_ID");
-    const issuer = readSecret("MACOS_NOTARY_ISSUER_ID");
-    const team = requireVar("TAPSTER_TEAM_ID");
-    const p8 = rawKey.includes("BEGIN PRIVATE KEY") ? rawKey : Buffer.from(rawKey, "base64").toString("utf8");
-    register(p8);
-    const kc = await openKeychain(p12, password, team, workdir());
-    const p8Path = join(workdir(), "notary.p8");
-    await writeFile(p8Path, p8, { mode: 0o600 });
-    try {
+    await withApple(async (kc, notary, team) => {
       for (const item of todo) {
         try {
           const pkg = ctx.config.packages.find((p) => p.name === item.package)!;
-          if (isApp(pkg)) throw new TapsterError("this tapster version cannot sign apps yet", "Update tapster.");
+          if (isApp(pkg)) {
+            const signed = await signApp(kc, item.app!.dir, pkg, team);
+            await verifyApp(item.app!.dir, signed, team);
+            item.app!.identifiers = signed.identifiers;
+            for (const d of signed.dropped) warn(`${item.package} ${item.tag}: the entitlement ${d} is not in code, so it was not signed`);
+            item.status = "signed";
+            info(`${item.package} ${item.tag}: signed ${signed.items.length} pieces of code`);
+            continue;
+          }
           const keys = [...new Set([...PRESETS[pkg.kind], ...pkg.entitlements])];
           const ent = keys.length ? join(workdir(), `${pkg.name}.entitlements.plist`) : null;
           if (ent) await writeFile(ent, entitlementsPlist(keys));
@@ -43,7 +39,7 @@ export async function signMode(ctx: Context): Promise<void> {
           await mkdir(root, { recursive: true, mode: 0o700 });
           for (const a of item.archives) await cp(a.dir, join(root, a.asset), { recursive: true });
           await zipForNotary(root, `${root}.zip`);
-          await notarize(`${root}.zip`, { p8Path, keyId, issuer });
+          await notarize(`${root}.zip`, notary);
           item.status = "signed";
           info(`${item.package} ${item.tag}: signed and notarized`);
         } catch (e) {
@@ -51,10 +47,7 @@ export async function signMode(ctx: Context): Promise<void> {
           failure(`${item.package} ${item.tag}`, e);
         }
       }
-    } finally {
-      await rm(p8Path, { force: true });
-      await kc.close();
-    }
+    });
   }
   await saveManifest(manifest);
 }

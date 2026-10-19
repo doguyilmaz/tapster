@@ -1,11 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AppFacts } from "./appcheck";
 import type { ChecksumLine } from "./checksums";
 import type { Platform } from "./config";
 import type { Asset } from "./github";
 
 export type DarwinArchive = { asset: string; platform: Platform; dir: string; binaries: string[] };
+export type AppWork = { dir: string; facts: AppFacts; created: string; identifiers: string[]; dmg: string | null; feed: string | null };
 export type Fetched = {
   package: string;
   tag: string;
@@ -14,7 +16,8 @@ export type Fetched = {
   before: Asset[];
   checksums: ChecksumLine[];
   archives: DarwinArchive[];
-  status: "fetched" | "signed" | "failed";
+  app?: AppWork;
+  status: "fetched" | "signed" | "packaged" | "sealed" | "sparkled" | "failed";
 };
 export type Manifest = { items: Fetched[] };
 

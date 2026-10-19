@@ -2,7 +2,7 @@ name: tapster
 description: Sign, notarize and publish releases from a Homebrew tap hub
 inputs:
   mode:
-    description: check | fetch | sign | publish | render | cleanup
+    description: check | fetch | sign | package | seal | sparkle | publish | render | cleanup
     required: true
   work:
     description: Work list from the check job (JSON)
@@ -22,9 +22,9 @@ outputs:
   render:
     description: "true when the render job has something to do (check mode)"
   attest:
-    description: "true when publish wrote archives to attest"
+    description: "true when publish wrote files to attest"
   attest-path:
-    description: Glob of the archives to attest
+    description: Glob of the files to attest
 runs:
   using: node24
   main: dist/index.js

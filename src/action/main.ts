@@ -5,9 +5,12 @@ import { check } from "./check";
 import { cleanupMode } from "./cleanup";
 import { loadContext } from "./context";
 import { fetchMode } from "./fetch";
+import { packageMode } from "./package";
 import { publishMode } from "./publish";
 import { renderMode } from "./render";
+import { sealMode } from "./seal";
 import { signMode } from "./sign";
+import { sparkleMode } from "./sparkle";
 
 async function main(): Promise<void> {
   if (process.env.RUNNER_ENVIRONMENT !== "github-hosted") {
@@ -19,9 +22,12 @@ async function main(): Promise<void> {
   if (mode === "check") return check(ctx);
   if (mode === "fetch") return fetchMode(ctx);
   if (mode === "sign") return signMode(ctx);
+  if (mode === "package") return packageMode(ctx);
+  if (mode === "seal") return sealMode(ctx);
+  if (mode === "sparkle") return sparkleMode(ctx);
   if (mode === "publish") return publishMode(ctx);
   if (mode === "render") return renderMode(ctx);
-  throw new TapsterError(`unknown mode ${mode}`, "Use check, fetch, sign, publish, render or cleanup.");
+  throw new TapsterError(`unknown mode ${mode}`, "Use check, fetch, sign, package, seal, sparkle, publish, render or cleanup.");
 }
 
 try {

@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import type { TarEntry } from "./archive";
-import { type AppPackage, type PackageConfig, isApp, versionOf } from "./config";
+import type { ChecksumLine } from "./checksums";
+import { type AppPackage, type PackageConfig, type Platform, assetName, isApp, versionOf } from "./config";
 import { TapsterError } from "./errors";
 import { bundleIdAllowed } from "./identity";
 import { type PlistValue, parsePlist } from "./plist";
@@ -10,9 +11,6 @@ import { run } from "./run";
 export type AppFacts = { version: string; build: string; minimumSystemVersion: string; macos: string; publicKey: string | null };
 
 const MACOS: Record<string, string> = {
-  "10.13": "high_sierra",
-  "10.14": "mojave",
-  "10.15": "catalina",
   "11": "big_sur",
   "12": "monterey",
   "13": "ventura",
@@ -55,6 +53,24 @@ export function checkArchiveRoot(entries: TarEntry[], pkg: AppPackage): void {
 }
 
 type Kind = "dir" | "file" | "link";
+
+export const appAsset = (pkg: AppPackage, version: string) => assetName(pkg, appPlatform(pkg), version)!;
+export const appPlatform = (pkg: AppPackage) => Object.keys(pkg.assets)[0] as Platform;
+export const dmgName = (pkg: AppPackage, version: string) => pkg.dmg.name.replaceAll("{version}", version);
+
+export function carryCheck(assets: { name: string }[], checksums: ChecksumLine[], pkg: AppPackage, version: string): void {
+  const outputs = new Set([appAsset(pkg, version), dmgName(pkg, version), "checksums.txt", ...(pkg.sparkle ? [pkg.sparkle.feed] : [])]);
+  const fix = "Attach only the app archive, checksums.txt and the files listed in carry.";
+  for (const name of Object.keys(pkg.carry)) {
+    if (outputs.has(name)) throw new TapsterError(`the carried file ${name} has the name of a file tapster writes`, "Rename it or remove it from carry.");
+    if (!assets.some((a) => a.name === name)) throw new TapsterError(`the carried file ${name} is not attached`, fix);
+    const line = checksums.find((l) => l.name === name);
+    if (!line || `sha256:${line.sha256}` !== pkg.carry[name]) throw new TapsterError(`the carried file ${name} differs from the digest pinned in tapster.yml`, "Attach the pinned file unchanged.");
+  }
+  for (const a of assets) {
+    if (a.name !== "checksums.txt" && a.name !== appAsset(pkg, version) && !Object.hasOwn(pkg.carry, a.name)) throw new TapsterError(`the draft holds ${a.name}, which is neither the app archive nor a carried file`, fix);
+  }
+}
 
 function walk(dir: string, visit: (path: string, kind: Kind) => void): void {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -102,8 +118,7 @@ export async function appFacts(
   if (str("CFBundleShortVersionString") !== version) throw refuse(`the app's version is ${str("CFBundleShortVersionString") ?? "missing"}, but the tag says ${version}`);
   if (str("CFBundleVersion") !== version) throw refuse(`the app's CFBundleVersion is ${str("CFBundleVersion") ?? "missing"}, but the tag says ${version}`, "Stamp CFBundleVersion with the tag version, as today.");
   const minimum = str("LSMinimumSystemVersion") ?? "";
-  const parts = minimum.split(".");
-  const macos = MACOS[parts[0] === "10" ? parts.slice(0, 2).join(".") : (parts[0] ?? "")];
+  const macos = MACOS[minimum.split(".")[0] ?? ""];
   if (!/^\d+(\.\d+){0,2}$/.test(minimum) || !macos) throw refuse(`LSMinimumSystemVersion ${minimum || "is missing"} is not a macOS version tapster knows`);
   for (const k of FORBIDDEN) if (k in info) throw refuse(`the app sets ${k}, which would bypass the hub's update signature`);
   let publicKey: string | null = null;

@@ -43,7 +43,7 @@ spec.
   `SUVerifyUpdateBeforeExtraction`, so both are set together. After `SUSignedFeedFailureExpirationInterval` (20 days by
   default) of feed failures Sparkle falls back to an unsigned "safe mode" feed.
 - **Install source.** Sparkle's installer looks through an update for a directory named like the installed app or a
-  bundle with its bundle identifier, and with `SUVerifyUpdateBeforeExtraction` it accepts a validly signed bundle whose
+  bundle with its bundle identifier. With `SUVerifyUpdateBeforeExtraction` it accepts a validly signed bundle whose
   EdDSA key matches. A nested app named like another app is therefore an attack, not a curiosity.
 
 ### Success criteria
@@ -80,15 +80,23 @@ When fetching, the hub checks the following and stops the item on any mismatch:
   `SUVerifyUpdateBeforeExtraction` are both true; `SUSignedFeedFailureExpirationInterval` is absent or at least 20 days;
   `SUPublicDSAKey`, `SUPublicDSAKeyFile` and `NSUpdateSecurityPolicy` are absent; the embedded `Sparkle.framework` is
   2.9.0 or newer;
-- no `InfoPlist.strings` in the app mentions any key tapster checks, because Sparkle reads localized values;
+- no localized Info.plist in the app (`InfoPlist.strings`, `InfoPlist.loctable` and the like, in `Contents/Resources` or
+  an `.lproj` folder) mentions any key tapster checks in any encoding or behind an escape, because Sparkle reads
+  localized values;
+- without a `sparkle` section, the app sets neither `SUFeedURL` nor `SUPublicEDKey`, so it cannot keep an update channel
+  the hub does not sign;
 - these values read the same through tapster's parser and `/usr/bin/plutil -extract`. Duplicate keys and DTD
   entities are refused;
 - the archive holds exactly one top-level `<App>.app`;
-- every directory with an Info.plist (with or without an executable) has a `CFBundleIdentifier` in the app's namespace,
-  or in `org.sparkle-project.` inside `Contents/Frameworks/Sparkle.framework/Versions/<V>/`;
-- no nested bundle carries `SUFeedURL`, `SUPublicEDKey` or a DSA key, and no nested bundle is named like any app in
-  `tapster.yml` (`<App>.app` or the same `CFBundleName`);
-- every path in `code` matches code tapster finds, and no two items get the same identifier;
+- every `CFBundleIdentifier` in a nested Info.plist (with or without an executable) is in the app's namespace or in
+  `org.sparkle-project.` inside `Contents/Frameworks/Sparkle.framework/Versions/<V>/`. A resource bundle without an
+  identifier (as Swift packages build them) passes, since Sparkle can only match it by name, which the next rule checks;
+- no Info.plist is a symlink;
+- no nested bundle carries `SUFeedURL`, `SUPublicEDKey` or a DSA key;
+- no nested bundle or symlink is named like any app in `tapster.yml`, this one included (`<App>.app` or the same
+  `CFBundleName`);
+- every path in `code` matches code tapster finds;
+- no two items get the same identifier;
 - no file is named `embedded.provisionprofile`.
 
 ## 3. Hub config additions
@@ -194,7 +202,7 @@ tapster never drives Finder or AppleScript and never mounts an image a project m
 1. Read every `SPARKLE_KEY_*` variable once (§1.12.2). Decode each to 32 bytes (a seed) or 96 bytes (Sparkle's older
    format: a 64-byte expanded private key and the 32-byte public key). Anything else stops the step without printing
    the value.
-2. The DMG is signed with the key whose public half equals the app's `SUPublicEDKey` (the current key, or the next key
+2. The DMG is signed with the key whose public half equals the app's `SUPublicEDKey` (the current key or the next key
    during a rotation). The feed is always signed with the current key, which installed copies know. A key whose public
    half differs from the configured one stops the item: "the Sparkle key `<label>` does not belong to this app;
    installed copies would reject the update".
@@ -383,7 +391,7 @@ length: <number of those bytes>
 - **Leak test:** plain and masked Sparkle keys reach the sparkle step's success, its key mismatch failure and a
   malformed key.
 - **End to end:** a Sparkle fixture app on the test hub with real credentials: `spctl`, `stapler validate`, the feed
-  signature, an older installed build with both keys updating in place, and a build from before the hub updating to the
+  signature, an older installed build with both keys updating in place and a build from before the hub updating to the
   first hub release.
 
 ## 11. Migration
