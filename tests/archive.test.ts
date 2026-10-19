@@ -149,3 +149,28 @@ test("archives built to make the symlink checks slow finish quickly", () => {
     expect(Date.now() - started).toBeLessThan(3000);
   }
 });
+
+test("link chains that keep growing the path are cut off quickly", () => {
+  const wide = Array.from({ length: 500 }, () => "b").join("/");
+  const started = Date.now();
+  expect(() => readTarGz(rawTarGz([{ name: "a", type: "2", linkname: wide }, { name: "b", type: "2", linkname: wide }]))).toThrow(TapsterError);
+  expect(Date.now() - started).toBeLessThan(1000);
+});
+
+test("oversized long-name and extended headers are refused before they are read", () => {
+  const huge = "a".repeat(200_000);
+  expect(() => readTarGz(rawTarGz([{ name: "././@LongLink", type: "L", data: huge }, { name: "x", data: "1" }]))).toThrow(TapsterError);
+  expect(() => readTarGz(rawTarGz([{ name: "PaxHeader", type: "x", data: paxRecord("comment", huge) }, { name: "x", data: "1" }]))).toThrow(TapsterError);
+});
+
+test("forty links that each add 500 folders are cut off quickly", () => {
+  const pad = Array.from({ length: 500 }, () => "d").join("/");
+  const links = Array.from({ length: 40 }, (_, i) => ({ name: `L${i}`, type: "2", linkname: i < 39 ? `L${i + 1}/${pad}` : pad }));
+  const started = Date.now();
+  try {
+    readTarGz(rawTarGz(links));
+  } catch (e) {
+    expect(e).toBeInstanceOf(TapsterError);
+  }
+  expect(Date.now() - started).toBeLessThan(1000);
+});
