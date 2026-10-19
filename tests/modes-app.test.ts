@@ -12,7 +12,7 @@ import { signMode } from "../src/action/sign";
 import { readSparkleKeys, sparkleFeed, sparkleMode } from "../src/action/sparkle";
 import { carryCheck } from "../src/appcheck";
 import { extractFeed } from "../src/appcast";
-import { fillWorkflow } from "../src/cli/init";
+import { fillWorkflow } from "../src/cli/hubfiles";
 import { type AppPackage, parseConfig } from "../src/config";
 import { resetMaskForTests } from "../src/mask";
 import { resetReportForTests } from "../src/report";

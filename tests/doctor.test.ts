@@ -59,7 +59,7 @@ test("an environment named Tapster is the same environment", () => {
 
 test("doctor compares the workflow byte for byte when the hub runs this tapster", async () => {
   const { workflowCheck } = await import("../src/cli/doctor");
-  const { fillWorkflow } = await import("../src/cli/init");
+  const { fillWorkflow } = await import("../src/cli/hubfiles");
   const pins = (await import("../templates/pins.json")).default;
   const template = await Bun.file("templates/hub/tapster.yml").text();
   const me = { version: "1.0.0", sha: "a".repeat(40) };

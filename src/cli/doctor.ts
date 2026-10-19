@@ -8,7 +8,7 @@ import type { GitHub } from "../github";
 import { currentRepo, userGitHub } from "./gh";
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
-import { fillWorkflow, sparkleLabels } from "./init";
+import { fillWorkflow, sparkleLabels } from "./hubfiles";
 import { releaseSecrets } from "./hubpr";
 import { everyFromFlow } from "./schedule";
 

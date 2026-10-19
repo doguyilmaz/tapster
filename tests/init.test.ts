@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { appKeyFingerprint, appManifest, fillWorkflow, keyPins, sparkleEnv, sparkleLabels, teamIdFromSubject } from "../src/cli/init";
+import { teamIdFromSubject } from "../src/cli/apple";
+import { appKeyFingerprint, keyPins } from "../src/cli/init";
+import { appManifest } from "../src/cli/hubapp";
+import { fillWorkflow, sparkleEnv, sparkleLabels } from "../src/cli/hubfiles";
 import { parseConfig } from "../src/config";
 import { generateKeyPairSync } from "node:crypto";
 import { TapsterError } from "../src/errors";
@@ -66,21 +69,22 @@ test("a stored Sparkle key must match every package that pins it", () => {
   expect(() => keyPins(apps, "other", K1)).toThrow(/no package/);
 });
 
-test("rewriting the workflow keeps the Sparkle labels, even with an invalid package in tapster.yml", async () => {
-  const { hubLabels } = await import("../src/cli/init");
-  const { mkdtempSync, writeFileSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
-  const dir = mkdtempSync(join(tmpdir(), "labels-"));
-  expect(hubLabels(dir, "o")).toEqual([]);
-  writeFileSync(
-    join(dir, "tapster.yml"),
-    `version: 1
+test("the hub files keep the Sparkle labels, even with an invalid package in tapster.yml, and only add missing files", async () => {
+  const { hubFiles, FLOW } = await import("../src/cli/hubfiles");
+  const gh = { json: async () => ({ status: "ahead" }) } as never;
+  const sha = "a".repeat(40);
+  const config = `version: 1
 tap: o/tap
 packages:
   - { name: a, repo: o/a, kind: app, app: A.app, bundle_id: com.o.A, assets: { darwin-arm64: "A-{version}.tar.gz" }, dmg: { name: "A-{version}.dmg" }, sparkle: { key: shared, public_key: "${"A".repeat(43)}=" } }
   - { name: broken, repo: o/b, binaries: [b], assets: { darwin-arm64: "b.zip" } }
-`,
-  );
-  expect(hubLabels(dir, "o")).toEqual(["shared"]);
+`;
+  const empty = await hubFiles(gh, "o/homebrew-tap", async () => null, sha, { every: null, isPrivate: false });
+  expect(empty.files.map((f) => f.path)).toEqual(["tapster.yml", ".tapster/state.json", "README.md", FLOW]);
+  expect(empty.files[0]!.content).toBe("version: 1\ntap: o/tap\npackages: []\n");
+  expect(empty.files[3]!.content).toContain('env: {}');
+  const set = await hubFiles(gh, "o/homebrew-tap", async (p) => (p === "tapster.yml" ? config : p === "README.md" ? "# mine" : null), sha, { every: null, isPrivate: false });
+  expect(set.kept).toEqual(["tapster.yml", "README.md"]);
+  expect(set.files.map((f) => f.path)).toEqual([".tapster/state.json", FLOW]);
+  expect(set.files[1]!.content).toContain('SPARKLE_KEY_SHARED: "${{ secrets.SPARKLE_KEY_SHARED }}"');
 });

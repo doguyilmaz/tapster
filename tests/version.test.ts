@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { patchSparkleEnv, pinChange, tapsterPin } from "../src/cli/init";
+import { patchSparkleEnv, pinChange, tapsterPin } from "../src/cli/hubfiles";
 import { TapsterError } from "../src/errors";
 import type { GitHub } from "../src/github";
 
@@ -58,7 +58,7 @@ test("rewriting the workflow names the old and the new pin", () => {
 });
 
 test("the sparkle step of the real template is found and patched", async () => {
-  const { fillWorkflow } = await import("../src/cli/init");
+  const { fillWorkflow } = await import("../src/cli/hubfiles");
   const pins = (await import("../templates/pins.json")).default;
   const template = await Bun.file("templates/hub/tapster.yml").text();
   const written = fillWorkflow(template, pins, { sha, tag: "v1.0.0" });

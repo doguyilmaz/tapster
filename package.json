@@ -20,13 +20,15 @@
   },
   "scripts": {
     "test": "bun test",
-    "typecheck": "bunx tsc --noEmit",
+    "typecheck": "bunx tsc --noEmit && bunx tsc --noEmit -p src/web/client",
     "build:action": "bun build ./src/action/main.ts --target=node --format=esm --minify --outfile dist/index.js",
-    "build:cli": "bun build ./src/cli/main.ts --target=bun --minify --outfile dist/cli.js"
+    "build:cli": "bun scripts/build.ts cli"
   },
   "devDependencies": {
     "@actions/core": "3.0.1",
+    "@preact/signals": "2.11.3",
     "@types/bun": "1.4.3",
+    "preact": "10.29.8",
     "typescript": "7.0.2",
     "yaml": "2.9.1",
     "zod": "4.6.7"
