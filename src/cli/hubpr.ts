@@ -164,17 +164,8 @@ export async function installOnProject(gh: GitHub, hub: string, repo: string): P
   const slug = vars.variables.find((v) => v.name === "TAPSTER_APP_SLUG")?.value;
   if (!slug) throw new TapsterError("the hub has no App yet", "Run tapster init in a clone of the hub first.");
   const project = await gh.getRepo(repo);
-  const installation = vars.variables.find((v) => v.name === "TAPSTER_APP_INSTALLATION_ID")?.value;
-  if (installation && /^\d+$/.test(installation)) {
-    try {
-      await gh.json("PUT", `/user/installations/${installation}/repositories/${project.id}`);
-      return `- the hub's App can reach ${repo}`;
-    } catch (e) {
-      if (!(e instanceof GitHubError)) throw e;
-    }
-  }
   const owner = await gh.json<{ id: number }>("GET", `/users/${repo.split("/")[0]}`);
-  return `- make sure the hub's App is installed on ${repo}; this page has it preselected (keep "Only select repositories"):\n  ${installLink(slug, owner.id, project.id)}`;
+  return `- open this page and choose Install, unless the hub's App already reaches ${repo}; the project is preselected (keep "Only select repositories"):\n  ${installLink(slug, owner.id, project.id)}`;
 }
 
 export function platformsOf(entry: string): Platform[] {

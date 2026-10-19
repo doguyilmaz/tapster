@@ -151,10 +151,9 @@ entry stopped the whole hub. A new project touched about six places.
      or the latest release or draft; apps: project.yml or the pbxproj), validates it with the hub's parser and opens a
      pull request on the hub with it;
   4. sets `TAPSTER_DOORBELL` on the project when the hub has a doorbell;
-  5. adds the project to the App's installation with the owner's token
-     (`PUT /user/installations/<id>/repositories/<repo id>`); when GitHub refuses that, it opens
-     `https://github.com/apps/<slug>/installations/new/permissions?suggested_target_id=<owner id>&repository_ids[]=<repo id>`
-     and says that the hub reports a missing installation by name.
+  5. prints `https://github.com/apps/<slug>/installations/new/permissions?suggested_target_id=<owner id>&repository_ids[]=<repo id>`,
+     which preselects the project. GitHub refuses `PUT /user/installations/<id>/repositories/<repo id>` with the
+     GitHub CLI's token (verified, 403), so one click stays.
 - The hub validates each package on its own: a bad package fails with its reason, the others keep working. Cross-package
   conflicts fail every package involved.
 - The Bun binary name comes from `package.json` `bin`; Go projects may name another workflow file with `--workflow`.

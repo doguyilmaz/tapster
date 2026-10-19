@@ -76,7 +76,7 @@ bunx @doguyilmaz/tapster add
    `--allow-dependabot` leaves its `dependabot/...` branches open instead and adds `protection: dependabot` to the
    entry, so the hub accepts that opening only where you wrote it down;
 2. opens a pull request on the hub with the project's entry, checked the way the hub checks it;
-3. installs the hub's App on the project or opens the install page with the project selected;
+3. opens the App's install page with the project selected, for one click;
 4. points the release workflow at the doorbell, if the hub has one.
 
 Releases that a workflow tags by itself still work: `add --auto-tag` gives the project a deploy key that only its
