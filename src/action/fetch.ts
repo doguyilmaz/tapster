@@ -8,7 +8,8 @@ import { macCodeIn } from "../maccode";
 import { parseChecksums, sha256 } from "../checksums";
 import { type AppPackage, type Platform, assetName, isApp, versionOf } from "../config";
 import { TapsterError } from "../errors";
-import { GitHub } from "../github";
+import { GitHub, type Release } from "../github";
+import { type WorkItem, draftOrigin } from "../plan";
 import { writeTree } from "../extract";
 import { readSecret, requireVar } from "../mask";
 import { failure, warn } from "../report";
@@ -23,6 +24,14 @@ async function unpackApp(ctx: Context, pkg: AppPackage, tag: string, archive: Bu
   const appDir = join(dir, "app", pkg.app);
   const facts = await appFacts(appDir, pkg, ctx.config.packages, tag, systemPlist);
   return { dir: appDir, facts, created, identifiers: [], dmg: null, feed: null };
+}
+
+export function assertFetchable(release: Release, item: WorkItem, owner: string): void {
+  if (!release.draft || release.tag_name !== item.tag) {
+    throw new TapsterError("the release is no longer the draft that was checked", "The next run checks again.");
+  }
+  const foreign = item.resume ? null : draftOrigin(release, owner);
+  if (foreign) throw new TapsterError(foreign, "Delete the draft and release again from the project's workflow.");
 }
 
 export async function fetchMode(ctx: Context): Promise<void> {
@@ -40,9 +49,7 @@ export async function fetchMode(ctx: Context): Promise<void> {
       tok = await installationToken(appId, pem, pkg.repo, { contents: "write", attestations: "read" });
       const gh = new GitHub(tok.token);
       const release = await gh.getRelease(pkg.repo, item.releaseId);
-      if (!release.draft || release.tag_name !== item.tag) {
-        throw new TapsterError("the release is no longer the draft that was checked", "The next run checks again.");
-      }
+      assertFetchable(release, item, ctx.owner);
       const fetched: Fetched = { ...item, before: release.assets, checksums: [], archives: [], status: "fetched" };
       if (!item.resume) {
         const repo = await gh.getRepo(pkg.repo);

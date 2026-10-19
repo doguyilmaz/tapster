@@ -8,6 +8,10 @@ inputs:
   mode:
     description: check | fetch | sign | package | seal | sparkle | publish | render | linux-build | linux-sign | cleanup
     required: true
+  template:
+    description: Version of the hub workflow template; tapster init writes it
+    required: false
+    default: ""
   work:
     description: Work list from the check job (JSON)
     required: false

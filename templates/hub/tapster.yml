@@ -30,7 +30,7 @@ jobs:
         with: { persist-credentials: false, ref: main }
       - id: check
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: check, package: "${{ inputs.package }}", linux: "${{ inputs.linux }}" }
+        with: { mode: check, template: 2, package: "${{ inputs.package }}", linux: "${{ inputs.linux }}" }
         env:
           TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
           TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
@@ -44,13 +44,13 @@ jobs:
       - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
       - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: fetch, work: "${{ needs.check.outputs.work }}" }
+        with: { mode: fetch, template: 2, work: "${{ needs.check.outputs.work }}" }
         env:
           TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
           TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
       - if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: sign }
+        with: { mode: sign, template: 2 }
         env:
           TAPSTER_TEAM_ID: ${{ vars.TAPSTER_TEAM_ID }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
@@ -60,10 +60,10 @@ jobs:
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
       - if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: package }
+        with: { mode: package, template: 2 }
       - if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: seal }
+        with: { mode: seal, template: 2 }
         env:
           TAPSTER_TEAM_ID: ${{ vars.TAPSTER_TEAM_ID }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
@@ -73,12 +73,12 @@ jobs:
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
       - if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: sparkle }
+        with: { mode: sparkle, template: 2 }
         env: __SPARKLE_ENV__
       - id: publish
         if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: publish }
+        with: { mode: publish, template: 2 }
         env:
           TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
           TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
@@ -88,7 +88,7 @@ jobs:
         with: { subject-path: "${{ steps.publish.outputs.attest-path }}" }
       - if: always()
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: cleanup }
+        with: { mode: cleanup, template: 2 }
   render:
     needs: [check, sign]
     if: ${{ !cancelled() && needs.check.outputs.render == 'true' }}
@@ -98,7 +98,7 @@ jobs:
       - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
       - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: render }
+        with: { mode: render, template: 2 }
         env:
           GITHUB_TOKEN: ${{ github.token }}
   linux-build:
@@ -113,7 +113,7 @@ jobs:
         with: { persist-credentials: false, ref: main }
       - id: build
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: linux-build }
+        with: { mode: linux-build, template: 2 }
       - if: ${{ steps.build.outputs.changed == 'true' }}
         uses: actions/upload-artifact@__UPLOAD_SHA__ # __UPLOAD_TAG__
         with: { name: linux-unsigned, path: "${{ runner.temp }}/tapster-linux", if-no-files-found: error, retention-days: 1 }
@@ -131,7 +131,7 @@ jobs:
       - uses: actions/download-artifact@__DOWNLOAD_SHA__ # __DOWNLOAD_TAG__
         with: { name: linux-unsigned, path: "${{ runner.temp }}/tapster-linux" }
       - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: linux-sign }
+        with: { mode: linux-sign, template: 2 }
         env:
           TAPSTER_LINUX_KEY: ${{ secrets.TAPSTER_LINUX_KEY }}
       - uses: actions/upload-artifact@__UPLOAD_SHA__ # __UPLOAD_TAG__

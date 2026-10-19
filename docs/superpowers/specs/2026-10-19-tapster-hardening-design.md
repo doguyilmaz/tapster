@@ -22,26 +22,33 @@ Finding: a leaked App key can push a `v*` tag (or a commit for the owner's next 
 release workflow then builds and attests the attacker's code and the hub signs it.
 
 - `tapster add` creates two rulesets on the project, both with the repository admin role as the only bypass actor:
-  - **tags:** target `tag`, `refs/tags/v*`; creation, update and deletion restricted;
-  - **default branch:** target `branch`, `~DEFAULT_BRANCH`; update, deletion and non-fast-forward restricted.
-  The owner (admin) keeps pushing and tagging as before. The App, `GITHUB_TOKEN` and anyone without the admin role
-  cannot create tags or push to the default branch.
+  - **tags:** target `tag`, all tags (`~ALL`); creation, update and deletion restricted;
+  - **branches:** target `branch`, all branches (`~ALL`); creation, update, deletion and non-fast-forward restricted.
+  The owner (admin) keeps pushing and tagging as before. The App, `GITHUB_TOKEN` and other bots cannot create or move
+  any tag or branch, so they cannot start a project workflow on code of their own (a push to a new branch would run
+  every workflow without a branch filter). Bots that open pull requests from branches in the same repository
+  (Dependabot) stop working unless the owner adds them as bypass actors; `add` says so.
 - Before planning a package, `check` reads the project's rulesets with the installation token (metadata read is
   enough): `GET /rulesets?targets=tag` and `?targets=branch`, then each ruleset. It refuses the package ("failed",
   with the `tapster add` command that fixes it) unless a tag ruleset and a branch ruleset are active, cover
-  `refs/tags/v*` and the default branch, hold the rules above and answer `current_user_can_bypass: never` for the App.
+  all tags and all branches, hold the rules above and answer `current_user_can_bypass: never` for the App.
   GitHub returns the bypass list only to admins, so "the App cannot bypass" is what the hub checks.
 - Rulesets need a public repository or a paid plan for private ones. `add` and `check` say so plainly when GitHub
   refuses to create them. They do the same when `GET /rules/branches/<default>` shows no rules although the ruleset
   exists. The owner then has three choices: make the project public, move to a plan that enforces rulesets or set
   `protection: off` on the package to accept the risk in writing. `doctor` keeps reporting the last one.
-- The App can still create drafts and upload files to them. `check` therefore takes a draft only when its tag exists
+- The App can still create drafts and upload files to them, and `fetch` reads the draft again before it downloads. `check` therefore takes a draft only when its tag exists
   (the ruleset keeps the App from creating tags, and publishing a draft whose tag is missing would create it) and when
   the draft and every file on it come from `github-actions[bot]` or the owner. Files uploaded by the App itself, or by
   any other App, make the draft invalid. Attestations prove the same for public projects; this check also covers
   private ones, which GitHub gives no attestations on personal accounts.
-- A project whose release workflow tags by itself with `GITHUB_TOKEN` (battistics today) must start releases with a tag
-  the owner pushes or with `workflow_dispatch` on a tag; the migration notes say so.
+- Releases stay automatic where the owner wants them. On a personal account GitHub refuses GitHub Actions as a bypass
+  actor, but accepts deploy keys. `tapster add --auto-tag` creates an Ed25519 deploy key with write access, stores its
+  private half as `TAPSTER_TAG_KEY` in a `release` environment that only the default branch may use, adds `DeployKey`
+  to both rulesets' bypass list and prints the step that pushes the tag with it. A tag pushed with a deploy key starts
+  the release workflow (one pushed with `GITHUB_TOKEN` does not), so the attestation stays bound to the tag. The App
+  cannot read the key, add deploy keys or push code to any branch, so only the owner's code on the default branch can
+  tag. battistics moves to this during its migration.
 - The same two rulesets protect `doguyilmaz/tapster` itself, set once by hand and checked by its CI.
 
 ## 3. Which tapster runs
@@ -62,16 +69,19 @@ Finding: `init --workflow`, `--sparkle` and `--linux` pinned "the latest tapster
 Finding: jobs that hold a writing token also run code that does not need it (Homebrew in render, the attestation
 action in sign); the App installed on the hub only produced a warning.
 
-- **check** stops the whole run (fails closed) when the App is installed on the hub. It also lists the installation's
+- **check** stops the whole run (fails closed) when the App is installed on the hub: it fails before it writes any
+  output, so no later job runs. Package failures turn the run red but keep the other packages' outputs, so one bad
+  draft cannot stop the rest. It also lists the installation's
   repositories next to `tapster.yml` and warns about extra ones.
 - **sign** keeps `contents: write` only for the publish step's state commits. It loses `id-token` and `attestations`.
   Publish outputs the SHA-256 lines of the files to attest.
 - **attest** (new job, ubuntu, `id-token: write`, `attestations: write`, no checkout) writes those lines to a file and
-  runs `actions/attest-build-provenance` with `subject-checksums`. It is skipped when publish asked for nothing.
-- **render** becomes read-only (`contents: read`): it renders and runs `brew style` and `brew audit`. It outputs the
-  SHA-256 of every file that passed.
-- **commit** (new job, ubuntu, `contents: write`, no Homebrew) renders again with tapster's code and commits only the
-  files whose bytes match a passed digest, plus the state and heartbeat changes.
+  runs `actions/attest-build-provenance` with `subject-checksums`; the lines pass through `env`, never into the script. It is skipped when publish asked for nothing.
+- **render** runs on ubuntu and runs no Homebrew: Homebrew is third-party code that has no business next to a writing
+  token. `brew style` and `brew audit` move to tapster's own CI, which renders fixture casks for every package kind and
+  audits them on macOS on every change and once a week.
+- **check** refuses to run when the last commit that touched `tapster.yml` or `.github/` on the hub was made by a bot,
+  since the jobs' `GITHUB_TOKEN` can commit to the hub but only the owner may change what it signs.
 - The action refuses to run unless `GITHUB_WORKFLOW_REF` is `<hub>/.github/workflows/tapster.yml@refs/heads/main`
   and the event is `schedule` or `workflow_dispatch`. Every step passes `template: 2`; a workflow written for another
   tapster version is refused with `tapster init --workflow` as the fix, so a pin changed by hand never runs half a
@@ -85,13 +95,17 @@ name only and did not look at the actions policy, collaborators or deploy keys.
 
 - `init` also sets the hub's actions policy: allowed actions `selected`, GitHub-owned actions and
   `doguyilmaz/tapster@*` only, SHA pinning required.
-- `doctor` reads `tapster.yml` and the workflows from `main` through the API. It renders the workflow from the
-  template with the pinned SHA and labels found in the file and reports any byte that differs. It compares environment
+- `doctor` reads `tapster.yml` and the workflows from `main` through the API. When the hub pins the tapster that runs
+  `doctor`, it renders the workflow from the template with the labels found in the file and reports any byte that
+  differs; otherwise it says which tapster the hub pins and which one is running, and that `init --workflow` moves
+  the hub to the running one. It compares environment
   names without case, inspects every ruleset's enforcement, rules and bypass list, lists collaborators and deploy keys,
   checks the actions policy and the project rulesets of §2. It also checks that a scheduled run happened in the last day.
 
 ## 6. Supply chain outside the hub
 
+- tapster's own `release.yml` splits the same way: a `build` job without write permissions installs, tests and builds;
+  a `release` job attests the built files and opens the draft.
 - The Bun template splits like the app template: a `build` job with `contents: read` installs and builds; a `release`
   job without third-party code writes `checksums.txt`, attests and opens the draft.
 - The npm package ships one bundled file built by Bun (`dist/cli.js`) with no runtime dependencies. The release
@@ -111,14 +125,16 @@ release and always asked for Apple credentials.
 - Apple credentials are asked only when the owner says the hub will sign macOS software (default yes);
   `init --rotate certificate` and `--rotate notary` add them later. `doctor` asks for them only when a package ships
   macOS code, and a macOS package on a hub without them fails with that command.
-- The check job picks the runner for sign and render: macOS only when this run signs macOS code or renders casks,
-  ubuntu otherwise. The workflow accepts no other value.
+- The check job picks the runner for sign: macOS only when this run signs macOS code, ubuntu otherwise. The workflow
+  accepts no other value.
 - Prompts say where each file comes from. Paths accept quotes and escaped spaces from drag and drop. A missing file is a
   clear error, not "unexpected error".
 - The certificate must be a "Developer ID Application" certificate; its expiry is stored as `TAPSTER_CERT_EXPIRES` and
   `check` warns 30 days ahead. On macOS, `init` checks the notary key with `notarytool history` before storing it.
 - The App install page is opened with the instruction "Only select repositories" and the reason (the App must not be
   on the hub).
+- Environments, environment secrets and deployment branch rules need a public hub or GitHub Pro. `init` says so when
+  GitHub refuses them on a private hub, instead of failing on the first secret.
 
 ## 8. Adding a project
 
@@ -133,8 +149,10 @@ entry stopped the whole hub. A new project touched about six places.
      or the latest release or draft; apps: project.yml or the pbxproj), validates it with the hub's parser and opens a
      pull request on the hub with it;
   4. sets `TAPSTER_DOORBELL` on the project when the hub has a doorbell;
-  5. opens `https://github.com/apps/<slug>/installations/new/permissions?suggested_target_id=<owner id>&repository_ids[]=<repo id>`,
-     which preselects the project. It also says that the hub reports a missing installation by name.
+  5. adds the project to the App's installation with the owner's token
+     (`PUT /user/installations/<id>/repositories/<repo id>`); when GitHub refuses that, it opens
+     `https://github.com/apps/<slug>/installations/new/permissions?suggested_target_id=<owner id>&repository_ids[]=<repo id>`
+     and says that the hub reports a missing installation by name.
 - The hub validates each package on its own: a bad package fails with its reason, the others keep working. Cross-package
   conflicts fail every package involved.
 - The Bun binary name comes from `package.json` `bin`; Go projects may name another workflow file with `--workflow`.
@@ -162,8 +180,9 @@ copy. GitHub never returns secrets.
 - `init --linux` stores the armored key in the keychain too (service `tapster-linux-key`, account the hub). On Linux the
   CLI uses Secret Service (`secret-tool store`, secret on stdin). On other systems tapster refuses to create keys it
   could not keep, with the reason.
-- Linux key rotation keeps the previous key as `TAPSTER_LINUX_KEY_PREVIOUS` for a transition: `Release` is signed by
-  both keys and both public keys are published, so apt and dnf users keep working while they fetch the new key.
+- Linux key rotation keeps the previous key as `TAPSTER_LINUX_KEY_PREVIOUS` for a transition: apt's `Release` and dnf's
+  `repomd.xml` are signed by both keys and both public keys are published. Packages carry one signature, from the new
+  key, so dnf asks once to import it.
 - Sparkle documents key changes: an update may change the EdDSA key or the Developer ID certificate, not both. With
   `SUVerifyUpdateBeforeExtraction` it does so only through a Developer ID signed DMG, which the hub always produces. An app moving
   to the hub may therefore get a new key from `--new` instead of recovering an old one. Copies that already require
@@ -184,8 +203,9 @@ Finding: on the test hub the 10-minute schedule had not run once in hours, while
 scheduled runs as best effort; community reports describe new repositories whose schedules never start.
 
 - The doorbell Worker also runs on a Cloudflare cron trigger (free plan) and dispatches the hub on the same interval,
-  so a hub with a doorbell does not depend on GitHub's scheduler. It re-enables the workflow before each dispatch, so a
-  schedule paused after 60 days of inactivity comes back too.
+  so a hub with a doorbell does not depend on GitHub's scheduler. It skips a tick when a run started within the
+  interval, so the two never double the runs. It re-enables the workflow only when GitHub paused it for inactivity
+  (`disabled_inactivity`); a workflow the owner disabled stays off.
 - Every run is a check job. On a private hub each one is billed as at least a minute, so 10 minutes costs about 4,300
   minutes a month, more than the free 2,000. `init` keeps 10 minutes for public hubs and proposes every hour for
   private ones (`--every <minutes>`, also used by the Worker) and says why. The doorbell keeps releases immediate.

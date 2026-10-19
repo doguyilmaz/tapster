@@ -5,6 +5,7 @@ import { check } from "./check";
 import { cleanupMode } from "./cleanup";
 import { loadContext } from "./context";
 import { fetchMode } from "./fetch";
+import { guardRun } from "./guard";
 import { linuxBuildMode, linuxSignMode } from "./linux";
 import { packageMode } from "./package";
 import { publishMode } from "./publish";
@@ -14,9 +15,7 @@ import { signMode } from "./sign";
 import { sparkleMode } from "./sparkle";
 
 async function main(): Promise<void> {
-  if (process.env.RUNNER_ENVIRONMENT !== "github-hosted") {
-    throw new TapsterError("tapster runs only on GitHub-hosted runners", "Use runs-on: ubuntu-24.04 or macos-15.");
-  }
+  guardRun(process.env, core.getInput("template"));
   const mode = core.getInput("mode", { required: true });
   if (mode === "cleanup") return cleanupMode();
   const ctx = await loadContext(core.getInput("config") || "tapster.yml");

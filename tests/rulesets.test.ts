@@ -7,7 +7,7 @@ type Set = Record<string, unknown> & { id: number; target: string };
 const admin = [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }];
 const tags = (over: Record<string, unknown> = {}): Set => ({ id: 1, ...TAG_RULESET, current_user_can_bypass: "never", ...over });
 const branch = (over: Record<string, unknown> = {}): Set => ({ id: 2, ...BRANCH_RULESET, current_user_can_bypass: "never", ...over });
-const enforced = [{ type: "update" }, { type: "deletion" }, { type: "non_fast_forward" }];
+const enforced = [{ type: "creation" }, { type: "update" }, { type: "deletion" }, { type: "non_fast_forward" }];
 
 function fake(sets: Set[], branchRules: { type: string }[] = enforced, onWrite?: (m: string, p: string, b: unknown) => void) {
   const writes: [string, string, unknown][] = [];
@@ -37,12 +37,14 @@ test("two good rulesets protect a project", async () => {
 test.each([
   ["no tag ruleset", [branch()], /no active tag ruleset/],
   ["an inactive tag ruleset", [tags({ enforcement: "evaluate" }), branch()], /no active tag ruleset/],
-  ["a tag ruleset for other tags", [tags({ conditions: { ref_name: { include: ["refs/tags/release-*"], exclude: [] } } }), branch()], /refs\/tags\/v\*/],
-  ["a tag ruleset with exclusions", [tags({ conditions: { ref_name: { include: ["~ALL"], exclude: ["refs/tags/v9*"] } } }), branch()], /refs\/tags\/v\*/],
+  ["a tag ruleset for v* tags only", [tags({ conditions: { ref_name: { include: ["refs/tags/v*"], exclude: [] } } }), branch()], /every tag/],
+  ["a tag ruleset with exclusions", [tags({ conditions: { ref_name: { include: ["~ALL"], exclude: ["refs/tags/9*"] } } }), branch()], /every tag/],
   ["a tag ruleset without creation", [tags({ rules: [{ type: "update" }, { type: "deletion" }] }), branch()], /creation/],
   ["a tag ruleset the App can bypass", [tags({ current_user_can_bypass: "always" }), branch()], /can bypass tapster tags/],
   ["no branch ruleset", [tags()], /no active branch ruleset/],
-  ["a branch ruleset without update", [tags(), branch({ rules: [{ type: "deletion" }, { type: "non_fast_forward" }] })], /update/],
+  ["a branch ruleset without update", [tags(), branch({ rules: [{ type: "creation" }, { type: "deletion" }, { type: "non_fast_forward" }] })], /update/],
+  ["a branch ruleset that lets anyone create branches", [tags(), branch({ rules: [{ type: "update" }, { type: "deletion" }, { type: "non_fast_forward" }] })], /creation/],
+  ["a ruleset for the default branch only", [tags(), branch({ conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } } })], /every branch/],
 ])("%s is a problem", async (_, sets, reason) => {
   const problems = await protectionProblems(fake(sets).gh, "o/p", "main", "app");
   expect(problems.join("; ")).toMatch(reason);
@@ -56,13 +58,10 @@ test("rulesets that GitHub does not enforce are a problem", async () => {
 test("the owner's view checks the bypass list instead", async () => {
   const owner = { current_user_can_bypass: "always", bypass_actors: admin };
   expect(await protectionProblems(fake([tags(owner), branch(owner)]).gh, "o/p", "main", "admin")).toEqual([]);
+  const keys = { current_user_can_bypass: "always", bypass_actors: [...admin, { actor_id: null, actor_type: "DeployKey", bypass_mode: "always" }] };
+  expect(await protectionProblems(fake([tags(keys), branch(keys)]).gh, "o/p", "main", "admin")).toEqual([]);
   const app = { current_user_can_bypass: "always", bypass_actors: [...admin, { actor_id: 99, actor_type: "Integration", bypass_mode: "always" }] };
   expect((await protectionProblems(fake([tags(app), branch(owner)]).gh, "o/p", "main", "admin")).join()).toMatch(/can bypass tapster tags/);
-});
-
-test("the default branch may be named by its ref", async () => {
-  const named = branch({ conditions: { ref_name: { include: ["refs/heads/main"], exclude: [] } } });
-  expect(await protectionProblems(fake([tags(), named]).gh, "o/p", "main", "app")).toEqual([]);
 });
 
 test("create posts the exact rulesets and reports when they already protect", async () => {
@@ -99,10 +98,10 @@ test("the rulesets let only the admin role bypass", () => {
     expect(r.enforcement).toBe("active");
     expect(r.bypass_actors).toEqual(admin);
   }
-  expect(TAG_RULESET.conditions.ref_name.include).toEqual(["refs/tags/v*"]);
+  expect(TAG_RULESET.conditions.ref_name.include).toEqual(["~ALL"]);
   expect(TAG_RULESET.rules.map((r) => r.type)).toEqual(["creation", "update", "deletion"]);
-  expect(BRANCH_RULESET.conditions.ref_name.include).toEqual(["~DEFAULT_BRANCH"]);
-  expect(BRANCH_RULESET.rules.map((r) => r.type)).toEqual(["update", "deletion", "non_fast_forward"]);
+  expect(BRANCH_RULESET.conditions.ref_name.include).toEqual(["~ALL"]);
+  expect(BRANCH_RULESET.rules.map((r) => r.type)).toEqual(["creation", "update", "deletion", "non_fast_forward"]);
 });
 
 test("check refuses an unprotected package and names both ways out", async () => {
@@ -126,7 +125,9 @@ test("add says what the protection changes, or why GitHub refused it", async () 
     if (m === "POST") sets.push({ id: sets.length + 1, ...(b as { target: string }), bypass_actors: admin });
   });
   const withRepo = Object.assign(gh, { getRepo: async () => ({ default_branch: "main" }) }) as GitHub;
-  expect(await protectProject(withRepo, "o/p")).toContain("only you can push to main and create, move or delete v* tags");
+  const said = await protectProject(withRepo, "o/p");
+  expect(said).toContain("only you can create, move or delete branches and tags");
+  expect(said).toContain("Dependabot");
   expect(await protectProject(withRepo, "o/p")).toContain("already protected");
   const refused = Object.assign(fake([], []).gh, { getRepo: async () => ({ default_branch: "main" }) }) as GitHub;
   expect(await protectProject(refused, "o/p")).toContain("protection: off");

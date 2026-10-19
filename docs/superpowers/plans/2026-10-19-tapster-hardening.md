@@ -16,8 +16,9 @@ render, commit) and the CLI (init, add, doctor); the hub workflow template gains
 ## Global Constraints
 
 - Ruleset bypass actor: `{ "actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always" }` (admin).
-- Tag ruleset rules: `creation`, `update`, `deletion` on `refs/tags/v*`. Branch ruleset: `update`, `deletion`,
-  `non_fast_forward` on `~DEFAULT_BRANCH`.
+- Tag ruleset rules: `creation`, `update`, `deletion` on `~ALL` tags. Branch ruleset: `creation`, `update`, `deletion`,
+  `non_fast_forward` on `~ALL` branches.
+- Every task that changes `src/action` rebuilds `dist/index.js`; `src/version.ts` is never imported by the action.
 - The hub accepts a project only when its rulesets answer `current_user_can_bypass: "never"` to the App's token.
 - Actions policy: `allowed_actions: selected`, `sha_pinning_required: true`, `github_owned_allowed: true`,
   `verified_allowed: false`, `patterns_allowed: ["<tapster repo>@*"]`.
@@ -84,6 +85,14 @@ protected); `createProtection(gh, repo): Promise<"created" | "exists" | "unavail
 - [ ] tapster's own repository gets the same two rulesets (by hand, owner's token) and its CI checks them.
 - [ ] Implement, green, commit "Refuse projects whose tags a stolen App key could move".
 
+### Task 3b (review rulings): all refs, fetch re-check
+
+- [ ] Rulesets cover `~ALL` tags and `~ALL` branches (branch creation restricted too); `add` names Dependabot.
+- [ ] fetch refuses a draft whose origin changed after check.
+- [ ] `add --auto-tag`: deploy key (private half only in the `release` environment, default branch only), `DeployKey`
+  bypass on both rulesets, the tag-push step printed; check and doctor accept a `DeployKey` bypass and doctor lists the
+  repository's deploy keys.
+
 ### Task 4: The action runs only from the hub workflow on main
 
 **Files:** Modify `src/action/main.ts`, `src/action/check.ts`, `action.yml`, `templates/hub/tapster.yml`; Create
@@ -94,7 +103,8 @@ protected); `createProtection(gh, repo): Promise<"created" | "exists" | "unavail
 - [ ] Failing tests: another workflow file, another branch, `pull_request`, `push` or `workflow_run` events are refused
   before any secret is read; the hub workflow on main with `schedule` or `workflow_dispatch` passes; a missing or
   different `template` input is refused with `tapster init --workflow`; check fails the run when the App is installed
-  on the hub and warns about installation repositories that `tapster.yml` does not list.
+  on the hub, before writing any output, and warns about installation repositories that `tapster.yml` does not list;
+  check refuses when the last commit touching `tapster.yml` or `.github/` on the hub is by a bot.
 - [ ] Implement, green, commit "Run only from the hub workflow on main".
 
 ### Task 5: Attest in its own job
@@ -108,16 +118,13 @@ Test `tests/hub-workflow.test.ts`, `tests/attest.test.ts`.
   only.
 - [ ] Implement, green, commit "Attest in a job of its own".
 
-### Task 6: Render reads, commit writes
+### Task 6: Render without Homebrew
 
-**Files:** Modify `src/action/render.ts`, `src/action/main.ts`, `templates/hub/tapster.yml`; Create
-`src/action/commit.ts`; Test `tests/render-commit.test.ts`.
+**Files:** Modify `src/action/render.ts`, `templates/hub/tapster.yml`, `.github/workflows/ci.yml`,
+`.github/workflows/leak.yml`; Create `tests/brew/audit.ts`; Test `tests/render.test.ts`, `tests/hub-workflow.test.ts`.
 
-**Interfaces:** render mode outputs `passed` (JSON `{ path: sha256 }`), `changes` (bool); commit mode recomputes the
-same changes with tapster's code and commits only paths whose bytes match `passed`, plus state and heartbeat.
-
-- [ ] Failing tests: render never writes and its job has `contents: read`; commit drops a file whose bytes differ
-  from the audited ones and reports it; state and heartbeat still commit; the commit job runs no Homebrew.
+- [ ] Failing tests: render runs on `ubuntu-24.04`; the render mode never starts `brew`; CI renders fixture casks
+  (Go, Bun, app, Linux-only) and runs `brew style` and `brew audit` on macOS on push and weekly.
 - [ ] Implement, green, commit "Keep Homebrew away from the hub's write token".
 
 ### Task 7: init as resumable steps
@@ -128,11 +135,12 @@ same changes with tapster's code and commits only paths whose bytes match `passe
 **Interfaces:** `initSteps(state)` returns the steps still to do from the hub's variables and secrets;
 `cleanPath(input)` handles quotes and escaped spaces; certificate check `checkCertificate(subject, notAfter)`.
 
-- [ ] Failing tests: check outputs `macos` true only when the run signs macOS code or renders casks, and the template
+- [ ] Failing tests: check outputs `macos` true only when the run signs macOS code, and the template
   maps it to `macos-15` or `ubuntu-24.04` only; a macOS package on a hub without Apple credentials fails with
   `tapster init --rotate certificate`; an existing `TAPSTER_APP_ID` with a stored key skips App creation; stored certificate and notary
   steps are skipped unless rotated; drag-and-drop paths with quotes and `\ ` resolve; a missing file names the path; a
-  non "Developer ID Application" certificate is refused; the expiry is stored; "no macOS" skips both Apple steps; the
+  non "Developer ID Application" certificate is refused; the expiry is stored and check warns within 30 days; a
+  private hub where GitHub refuses environments gets the "public or GitHub Pro" message; "no macOS" skips both Apple steps; the
   App page message says "Only select repositories".
 - [ ] Implement (on macOS the notary key is checked with `xcrun notarytool history`), green, commit "Let init resume
   and check credentials before storing them".
@@ -147,7 +155,8 @@ same changes with tapster's code and commits only paths whose bytes match `passe
 - [ ] Failing tests: Bun entries use the template's asset names and the `bin` name; Go entries use GoReleaser's
   archive template or the latest release or draft; `kind` is always present; an entry that fails validation is never
   printed or proposed; the hub PR body holds the entry; a missing ring step is added without `--force`; the doorbell
-  variable is set when the hub has one; `--help` changes nothing.
+  variable is set when the hub has one; the project is added to the App installation through the API and the
+  preselected link is the fallback; `--help` changes nothing.
 - [ ] Implement, green, commit "Add a project to the hub in one command".
 
 ### Task 9: Failures are visible
@@ -181,8 +190,8 @@ public key is published next to the current one.
 **Files:** Modify `src/doorbell/worker.ts`, `src/cli/doorbell.ts`, `src/cli/init.ts` (`--every`),
 `templates/hub/tapster.yml`, `src/cli/doctor.ts`; Test `tests/doorbell.test.ts`, `tests/doorbell-setup.test.ts`.
 
-- [ ] Failing tests: the Worker's `scheduled` handler enables the workflow and dispatches; a ring enables before
-  dispatching; the wrangler config carries the cron for `--every`; init writes the cron for the interval; doctor reports
+- [ ] Failing tests: the Worker's `scheduled` handler dispatches unless a run started within the interval; it enables
+  the workflow only when its state is `disabled_inactivity`; the wrangler config carries the cron for `--every`; init writes the cron for the interval; doctor reports
   no scheduled or Worker-started run in a day.
 - [ ] Implement, green, commit "Keep the hub running when GitHub's scheduler does not".
 
@@ -191,7 +200,7 @@ public key is published next to the current one.
 **Files:** Modify `src/cli/doctor.ts`, `src/cli/init.ts` (actions policy); Test `tests/doctor.test.ts`.
 
 - [ ] Failing tests: files are read from `main` through the API; a byte change in the workflow is reported with
-  `init --workflow`; environment names compare without case; a ruleset with rules removed, enforcement off or bypass
+  `init --workflow` when the pin is this CLI's commit, and a different pin is reported as such; environment names compare without case; a ruleset with rules removed, enforcement off or bypass
   actors is reported; collaborators and deploy keys are listed; the actions policy is checked and set by init; Apple
   checks only when a package ships macOS code; every finding names its exact command; private projects get one
   consistent message.
@@ -202,7 +211,8 @@ public key is published next to the current one.
 **Files:** Modify `templates/project/bun-release.yml`, `src/cli/*.ts`, `src/github.ts`, `src/run.ts`, `README.md`,
 specs (phase 2 §6.3, phase 3 §5.8 wording); Test `tests/add.test.ts`, `tests/cli-args.test.ts`.
 
-- [ ] Failing tests: the Bun template has a read-only build job and a release job without third-party code; every
+- [ ] Failing tests: the Bun template and tapster's own `release.yml` have a read-only build job and a release job
+  without third-party code; the attest job passes checksums through `env`; every
   command answers `--help`; unknown arguments are refused before any change; a missing `gh` says to install it; token
   hints name the right token; temporary folders are removed on SIGINT.
 - [ ] Implement, docs, green, commit "Split the Bun template and tidy the CLI".
@@ -210,5 +220,6 @@ specs (phase 2 §6.3, phase 3 §5.8 wording); Test `tests/add.test.ts`, `tests/c
 ### Task 14: End to end again
 
 - [ ] Release tapster v0.2.0 from `hardening`, rewrite the test hub workflow, run `add` against both fixtures, then:
-  a normal release, a stolen-App-key simulation (a token for the CI App tries to create a `v*` tag on a fixture and
-  must be refused by GitHub), an invalid draft that must fail with a note, and the leak scan.
+  a normal release, a stolen-App-key simulation (an installation token tries to create a `v*` tag, a `9.9.9` tag and a
+  new branch on a fixture and upload to a draft; GitHub refuses the refs and the hub refuses the draft), an invalid
+  draft that must fail with a note, and the leak scan.

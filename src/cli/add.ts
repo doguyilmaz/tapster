@@ -255,9 +255,12 @@ async function addApp(dir: string, repo: string, name: string, app: FoundApp, fo
 export async function protectProject(gh: GitHub, repo: string): Promise<string> {
   const branch = (await gh.getRepo(repo)).default_branch;
   const result = await createProtection(gh, repo, branch);
-  if (result === "exists") return `- ${repo} is already protected: only an admin can push to ${branch} or touch v* tags`;
+  if (result === "exists") return `- ${repo} is already protected: only an admin can create, move or delete its branches and tags`;
   if (result === "created") {
-    return `- protected ${repo}: only you can push to ${branch} and create, move or delete v* tags; workflows and Apps, the hub's included, cannot. Push release tags yourself.`;
+    return [
+      `- protected ${repo}: only you can create, move or delete branches and tags; workflows and Apps, the hub's included, cannot. Push release tags yourself.`,
+      "  Bots that open pull requests from their own branches here (Dependabot) need to be added as bypass actors to the ruleset \"tapster branches\" in the repository settings.",
+    ].join("\n");
   }
   return `- GitHub does not enforce rulesets on ${repo} (private repositories need a paid plan for them), so a stolen App key could tag code the hub would sign. Make it public, use a paid plan, or set protection: off for this package in the hub's tapster.yml to accept that; until then the hub refuses it.`;
 }
