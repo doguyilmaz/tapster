@@ -182,6 +182,10 @@ jobs:
         continue-on-error: true
         uses: ./
         with: { mode: fetch, template: 2, config: tests/leak/hub/stub.yml, work: "${{ steps.check.outputs.work }}" }
+      - name: sign (nothing to sign)
+        continue-on-error: true
+        uses: ./
+        with: { mode: sign, template: 2, config: tests/leak/hub/stub.yml }
       - name: publish through the stub
         continue-on-error: true
         uses: ./
