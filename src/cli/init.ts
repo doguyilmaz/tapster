@@ -7,6 +7,7 @@ import { GitHubError, TapsterError } from "../errors";
 import { GitHub } from "../github";
 import { decodeSparkleKey } from "../sparkle-key";
 import { appJwt } from "../token";
+import { TAPSTER } from "../version";
 import { run, runPath } from "../run";
 import hubReadme from "../../templates/hub/README.md" with { type: "text" };
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
@@ -159,11 +160,31 @@ async function protectHub(gh: GitHub, hub: string): Promise<void> {
   }
 }
 
-async function tapsterRef(gh: GitHub): Promise<{ sha: string; tag: string }> {
-  const latest = await gh.json<{ tag_name: string }>("GET", "/repos/doguyilmaz/tapster/releases/latest");
-  const ref = await gh.json<{ object: { sha: string; type: string } }>("GET", `/repos/doguyilmaz/tapster/git/ref/tags/${latest.tag_name}`);
-  const sha = ref.object.type === "tag" ? (await gh.json<{ object: { sha: string } }>("GET", `/repos/doguyilmaz/tapster/git/tags/${ref.object.sha}`)).object.sha : ref.object.sha;
-  return { sha, tag: latest.tag_name };
+export async function tapsterPin(gh: GitHub, build: typeof TAPSTER, flag: string | null): Promise<{ sha: string; tag: string }> {
+  if (flag === null) {
+    if (build.sha) return { sha: build.sha, tag: `v${build.version}` };
+    throw new TapsterError("this tapster was built from a checkout, so it does not know which tapster the hub should run", "Pass --tapster <commit> with a full commit SHA from tapster's main, or use a released tapster.");
+  }
+  if (!/^[0-9a-f]{40}$/.test(flag)) throw new TapsterError(`${flag} is not a full commit SHA`, "Pass all 40 characters of the commit.");
+  const cmp = await gh.json<{ status: string }>("GET", `/repos/doguyilmaz/tapster/compare/${flag}...main`);
+  if (cmp.status !== "ahead" && cmp.status !== "identical") throw new TapsterError(`${flag} is not on tapster's main`, "Pin a commit that is on main.");
+  return { sha: flag, tag: "main" };
+}
+
+const PIN = /doguyilmaz\/tapster@([0-9a-f]{40}) # (\S+)/;
+
+export function pinChange(before: string | null, after: string): string {
+  const show = (m: RegExpExecArray) => `${m[2]} (${m[1]!.slice(0, 7)})`;
+  const next = PIN.exec(after)!;
+  const prev = before === null ? null : PIN.exec(before);
+  if (!prev) return `tapster ${show(next)}`;
+  return prev[1] === next[1] && prev[2] === next[2] ? `tapster ${show(prev)}, unchanged` : `tapster ${show(prev)} -> ${show(next)}`;
+}
+
+export function patchSparkleEnv(flow: string, labels: string[]): string {
+  const step = /(\n\s+with: \{ mode: sparkle \}\n\s+env: ).*\n/;
+  if (!step.test(flow)) throw new TapsterError("the hub workflow has no sparkle step", "Run tapster init --workflow to rewrite it from the template.");
+  return flow.replace(step, (_, head: string) => `${head}${sparkleEnv(labels)}\n`);
 }
 
 function hubConfig(dir: string, hub: string): HubConfig {
@@ -172,11 +193,22 @@ function hubConfig(dir: string, hub: string): HubConfig {
   return parseConfig(readFileSync(path, "utf8"), hub.split("/")[0]!);
 }
 
-async function writeWorkflow(gh: GitHub, dir: string, labels: string[]): Promise<void> {
+const FLOW = ".github/workflows/tapster.yml";
+
+async function writeWorkflow(gh: GitHub, dir: string, labels: string[], flag: string | null): Promise<void> {
+  const ref = await tapsterPin(gh, TAPSTER, flag);
+  const before = existsSync(join(dir, FLOW)) ? readFileSync(join(dir, FLOW), "utf8") : null;
+  const after = fillWorkflow(hubWorkflow, pinsJson, ref, labels);
   await mkdir(join(dir, ".github/workflows"), { recursive: true });
-  const ref = await tapsterRef(gh);
-  await writeFile(join(dir, ".github/workflows/tapster.yml"), fillWorkflow(hubWorkflow, pinsJson, ref, labels));
-  console.log(`wrote .github/workflows/tapster.yml from the template, pinned to tapster ${ref.tag}; hand edits in it are replaced`);
+  await writeFile(join(dir, FLOW), after);
+  console.log(`wrote ${FLOW} from the template, ${pinChange(before, after)}; hand edits in it are replaced`);
+}
+
+async function updateSparkleEnv(dir: string, labels: string[]): Promise<void> {
+  const path = join(dir, FLOW);
+  if (!existsSync(path)) throw new TapsterError(`${FLOW} is missing`, "Run tapster init --workflow first.");
+  await writeFile(path, patchSparkleEnv(readFileSync(path, "utf8"), labels));
+  console.log(`updated the sparkle step in ${FLOW}`);
 }
 
 async function storeSparkleKey(gh: GitHub, dir: string, hub: string, label: string, account: string): Promise<void> {
@@ -193,7 +225,7 @@ async function storeSparkleKey(gh: GitHub, dir: string, hub: string, label: stri
   if (backup !== "yes") throw new TapsterError("no offline backup confirmed", "Back the key up first (generate_keys -x exports it), then run this again.");
   await setEnvSecret(hub, `SPARKLE_KEY_${label.toUpperCase()}`, text);
   console.log(`Stored SPARKLE_KEY_${label.toUpperCase()}.`);
-  await writeWorkflow(gh, dir, sparkleLabels(config));
+  await updateSparkleEnv(dir, sparkleLabels(config));
   console.log("Review and commit the workflow change, then push.");
 }
 
@@ -227,10 +259,9 @@ async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean)
     await rm(home, { recursive: true, force: true });
   }
   if (!config.packages.some((p) => !isApp(p) && p.linux)) console.log("No package sets linux: true yet; add it to the CLI packages that should ship to apt and dnf.");
-  await writeWorkflow(gh, dir, sparkleLabels(config));
 }
 
-async function writeFiles(gh: GitHub, dir: string, hub: string): Promise<void> {
+async function writeFiles(gh: GitHub, dir: string, hub: string, flag: string | null): Promise<void> {
   const [owner, repo] = hub.split("/") as [string, string];
   const tap = `${owner}/${repo.replace(/^homebrew-/, "")}`;
   const write = async (path: string, content: string) => {
@@ -242,10 +273,16 @@ async function writeFiles(gh: GitHub, dir: string, hub: string): Promise<void> {
   await write("tapster.yml", `version: 1\ntap: ${tap}\npackages: []\n`);
   await write(".tapster/state.json", `${JSON.stringify({ version: 1, packages: {} }, null, 2)}\n`);
   await write("README.md", hubReadme.replaceAll("__TAP__", tap).replaceAll("__OWNER__", owner).replaceAll("__HUB__", hub));
-  await writeWorkflow(gh, dir, []);
+  await writeWorkflow(gh, dir, [], flag);
 }
 
-export async function init(args: string[]): Promise<void> {
+export async function init(argv: string[]): Promise<void> {
+  const at = argv.indexOf("--tapster");
+  const flag = at >= 0 ? (argv[at + 1] ?? "") : null;
+  const args = at >= 0 ? argv.filter((_, i) => i !== at && i !== at + 1) : argv;
+  if (flag !== null && args.length > 0 && !(args[0] === "--workflow" && args.length === 1)) {
+    throw new TapsterError("--tapster goes only with tapster init or init --workflow", "Those are the commands that write the workflow.");
+  }
   const dir = process.cwd();
   const hub = await currentRepo(dir);
   const gh = await userGitHub();
@@ -261,7 +298,7 @@ export async function init(args: string[]): Promise<void> {
     const account = args[2] === "--account" && args[3] ? args[3] : args.length === 2 ? "ed25519" : null;
     if (account) return storeSparkleKey(gh, dir, hub, args[1], account);
   }
-  if (args[0] === "--workflow" && args.length === 1) return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)));
+  if (args[0] === "--workflow" && args.length === 1) return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)), flag);
   if (args.length) {
     throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, init --rotate app|certificate|notary|doorbell|linux, init --sparkle <label> [--account <account>], init --doorbell, init --linux or init --workflow.");
   }
@@ -269,6 +306,6 @@ export async function init(args: string[]): Promise<void> {
   await createApp(hub.split("/")[0]!, hub);
   await storeCertificate(hub);
   await storeNotary(hub);
-  await writeFiles(gh, dir, hub);
+  await writeFiles(gh, dir, hub, flag);
   console.log("\nDone. Review and commit the new files, push, then run tapster add in each project.");
 }

@@ -5,9 +5,13 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "tapster": "./src/cli/main.ts"
+    "tapster": "./dist/cli.js"
   },
-  "files": ["src", "templates", "README.md", "LICENSE"],
+  "files": [
+    "dist/cli.js",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "bun": ">=1.4.0"
   },
@@ -17,15 +21,14 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit",
-    "build:action": "bun build ./src/action/main.ts --target=node --format=esm --minify --outfile dist/index.js"
-  },
-  "dependencies": {
-    "@actions/core": "3.0.1",
-    "yaml": "2.9.1",
-    "zod": "4.6.7"
+    "build:action": "bun build ./src/action/main.ts --target=node --format=esm --minify --outfile dist/index.js",
+    "build:cli": "bun build ./src/cli/main.ts --target=bun --minify --outfile dist/cli.js"
   },
   "devDependencies": {
+    "@actions/core": "3.0.1",
     "@types/bun": "1.4.3",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
   }
 }
