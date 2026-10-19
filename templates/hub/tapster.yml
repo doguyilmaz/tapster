@@ -63,6 +63,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
       - if: ${{ !cancelled() && steps.publish.outputs.attest == 'true' }}
         uses: actions/attest-build-provenance@__ATTEST_SHA__ # __ATTEST_TAG__
+        continue-on-error: ${{ github.event.repository.private }}
         with: { subject-path: "${{ steps.publish.outputs.attest-path }}" }
       - if: always()
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__

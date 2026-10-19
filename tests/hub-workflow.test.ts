@@ -17,3 +17,8 @@ test("one failed item never stops the steps and jobs after it", () => {
     expect(step.if ?? "", JSON.stringify(step.with)).toMatch(/!cancelled\(\)|always\(\)/);
   }
 });
+
+test("the hub's attestation does not fail a private hub, where GitHub offers none", () => {
+  const attest = flow.jobs.sign!.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
+  expect((attest as { "continue-on-error"?: string })["continue-on-error"]).toBe("${{ github.event.repository.private }}");
+});
