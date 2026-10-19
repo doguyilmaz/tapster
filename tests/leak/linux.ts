@@ -1,0 +1,32 @@
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { writeTarGz } from "../../src/archive";
+import { parseConfig } from "../../src/config";
+import { buildLinux } from "../../src/linux/build";
+import { NFPM, installNfpm, nfpmPackager } from "../../src/linux/nfpm";
+import { emptyState, serializeState, upsert } from "../../src/state";
+
+const [temp, workspace] = process.argv.slice(2) as [string, string];
+const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+const config = parseConfig(readFileSync("tests/leak/hub/linux.yml", "utf8"), "doguyilmaz");
+const archive = writeTarGz([{ name: "fixture", type: "file", mode: 0o755, data: Buffer.from("#!/bin/sh\necho fixture\n") }], 0);
+const files: Record<string, Buffer> = { "fixture_1.2.3_linux_amd64.tar.gz": archive };
+files["checksums.txt"] = Buffer.from(`${sha(archive)}  fixture_1.2.3_linux_amd64.tar.gz\n`);
+const releases = join(temp, "releases", "doguyilmaz", "tapster-fixture", "releases", "download", "v1.2.3");
+mkdirSync(releases, { recursive: true });
+for (const [name, data] of Object.entries(files)) writeFileSync(join(releases, name), data);
+const state = upsert(emptyState(), "fixture", { tag: "v1.2.3", releaseId: 1, checksums: sha(files["checksums.txt"]), status: "published" });
+mkdirSync(join(workspace, ".tapster"), { recursive: true });
+writeFileSync(join(workspace, ".tapster", "state.json"), serializeState(state));
+const local = (async (url: string | URL | Request) => {
+  const name = String(url).split("/").pop()!;
+  return files[name] ? new Response(files[name]) : new Response("no", { status: 404 });
+}) as typeof fetch;
+const tools = join(temp, "nfpm-tools");
+mkdirSync(tools, { recursive: true });
+const out = join(temp, "linux-unsigned");
+mkdirSync(out, { recursive: true });
+const built = await buildLinux(config, state, "doguyilmaz/tapster", { fetch: local, out, packager: nfpmPackager(await installNfpm(fetch, tools, NFPM.x64)) });
+if (!built.changed) throw new Error(`the fixture did not build: ${built.failed.join("; ")}`);
+console.log("built the unsigned fixture repository");

@@ -32,5 +32,5 @@ export async function linuxSignMode(ctx: Context): Promise<void> {
   const key = readSecret("TAPSTER_LINUX_KEY");
   const state = parseState(await readFile(join(ctx.workspace, STATE_PATH), "utf8").catch(() => null));
   const signed = await signLinux({ dir: linuxDir(), config: ctx.config, state, owner: ctx.owner.toLowerCase(), url: linuxUrl(ctx.config, ctx.hub), key, fetch });
-  info(`linux: checked and signed ${signed.packages} packages with ${signed.fingerprint}`);
+  info(`linux: signed ${signed.packages} checked package${signed.packages === 1 ? "" : "s"} with key ${signed.fingerprint}`);
 }
