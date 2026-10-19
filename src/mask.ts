@@ -38,7 +38,8 @@ export function readSecret(name: string): string {
   const value = process.env[name];
   delete process.env[name];
   if (!value) {
-    throw new TapsterError(`${name} is not set`, `Add ${name} to the hub's "tapster" environment; tapster doctor shows how.`);
+    const fix = name === "GITHUB_TOKEN" ? "The hub workflow passes it; run tapster init --workflow to restore the workflow." : `Add ${name} to the hub's "tapster" environment; tapster doctor shows how.`;
+    throw new TapsterError(`${name} is not set`, fix);
   }
   register(value);
   return value;

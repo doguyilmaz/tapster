@@ -110,7 +110,7 @@ export async function renderMode(ctx: Context): Promise<void> {
       }
       const input = { pkg, version: versionOf(latest.tag), downloads: buildDownloads(pkg, latest.tag, lines), ...text, license: pkg.license ?? null };
       const cask = renderCask(input);
-      if ((await readIfExists(join(ws, caskPath(pkg.name)))) !== cask) changes.push({ path: caskPath(pkg.name), content: cask });
+      if (cask && (await readIfExists(join(ws, caskPath(pkg.name)))) !== cask) changes.push({ path: caskPath(pkg.name), content: cask });
       const scoop = renderScoop(input);
       if (scoop && (await readIfExists(join(ws, scoopPath(pkg.name)))) !== scoop) changes.push({ path: scoopPath(pkg.name), content: scoop });
       rendered.push(`${pkg.name} ${latest.tag}`);

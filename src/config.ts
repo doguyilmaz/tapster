@@ -136,6 +136,12 @@ function checkPackage(p: PackageConfig, top: Omit<HubConfig, "packages">, hubOwn
       throw new TapsterError(`${p.name}: the ${platform} asset must be a .tar.gz`, "Pack macOS builds as tar.gz; tapster reads them itself.");
     }
   }
+  if (isApp(p) && /[{}]/.test(p.dmg.name.replaceAll("{version}", ""))) {
+    throw new TapsterError(`${p.name}: ${p.dmg.name} uses a placeholder other than {version}`, "Only {version} is replaced in dmg.name.");
+  }
+  if (!isApp(p) && p.scoop && !Object.keys(p.assets).some((k) => k.startsWith("windows-"))) {
+    throw new TapsterError(`${p.name}: scoop needs a Windows asset`, "Map windows-amd64 or windows-arm64. Otherwise remove scoop: true.");
+  }
   if (isApp(p) || !p.linux) return;
   if (!Object.keys(p.assets).some((k) => k.startsWith("linux-"))) throw new TapsterError(`${p.name}: linux needs a Linux asset`, "Map linux-amd64 or linux-arm64. Otherwise remove linux: true.");
   if (!top.linux) throw new TapsterError(`${p.name} ships Linux packages, but tapster.yml names no linux.maintainer`, 'Add linux: { maintainer: "Name <address>" } at the top of tapster.yml.');
@@ -180,8 +186,9 @@ export function parseHub(text: string, hubOwner: string): { config: HubConfig; i
   let raw: unknown;
   try {
     raw = parse(text);
-  } catch {
-    throw new TapsterError("tapster.yml is not valid YAML", "Fix the YAML syntax; tapster doctor shows the line.");
+  } catch (e) {
+    const line = (e as { linePos?: { line: number }[] }).linePos?.[0]?.line;
+    throw new TapsterError(`tapster.yml is not valid YAML${line ? ` at line ${line}` : ""}`, "Fix the YAML syntax there.");
   }
   const top = hub.extend({ packages: z.array(z.unknown()) }).safeParse(raw);
   if (!top.success) throw new TapsterError(`tapster.yml is invalid: ${issueText(top.error.issues)}`, "Fix the listed fields.");

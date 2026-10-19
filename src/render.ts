@@ -79,8 +79,9 @@ function os(lines: string[], name: "macos" | "linux", pkg: PackageConfig, downlo
   lines.push("  end");
 }
 
-export function renderCask(i: RenderInput): string {
+export function renderCask(i: RenderInput): string | null {
   const { pkg } = i;
+  if (!i.downloads.some((d) => d.platform.startsWith("darwin-") || d.platform.startsWith("linux-"))) return null;
   const lines = [`cask ${rubyString(pkg.name)} do`, `  version ${rubyString(i.version)}`, ""];
   os(lines, "macos", pkg, i.downloads);
   os(lines, "linux", pkg, i.downloads);
