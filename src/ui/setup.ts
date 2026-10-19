@@ -3,7 +3,7 @@ import { escape, head, LOGO_URI } from "./page";
 
 const CSS = `
 body { padding: 7vh 16px 48px; }
-.card { max-width: 580px; margin: 0 auto; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 2rem 2rem 1.4rem; box-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 14px 36px rgb(20 20 30 / 7%); }
+.card { max-width: 580px; margin: 0 auto; background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 2rem 2rem 1.4rem; box-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 14px 36px rgb(20 20 30 / 7%); }
 .card .brand { margin-bottom: 1.6rem; }
 .status { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; margin-bottom: 1rem; }
 .hero { display: block; width: 168px; height: 168px; margin: 0 0 1rem; border-radius: 22%; }
