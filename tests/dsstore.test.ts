@@ -58,7 +58,7 @@ test("the store holds the window, the icon size and both positions", () => {
   const { toc, tocName, out } = readStore(bytes);
   expect([toc, tocName]).toEqual([1, "DSDB"]);
   expect(out.map((r) => `${r.name} ${r.code}`)).toEqual([". bwsp", ". icvp", ". vSrn", "Applications Iloc", "HafifPix.app Iloc"]);
-  expect((out[0]!.value as { WindowBounds: string }).WindowBounds).toBe("{{200, 120}, {580, 380}}");
+  expect((out[0]!.value as { WindowBounds: string }).WindowBounds).toBe("{{200, 400}, {580, 380}}");
   expect((out[1]!.value as { iconSize: number }).iconSize).toBe(110);
   expect(out[3]!.value).toEqual([430, 170]);
   expect(out[4]!.value).toEqual([150, 170]);

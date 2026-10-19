@@ -128,7 +128,7 @@ When fetching, the hub checks the following and stops the item on any mismatch:
 - **`carry`:** asset names mapped to `sha256:<hex>`. Carried files must not hold macOS code (the phase 1 check of
   unsigned assets) and must not share a name with an output.
 - **`dmg.volume`:** `^[A-Za-z0-9 ._-]{1,27}$`, default the app name without `.app`. **`dmg.volume_icon`:** a path inside
-  the app. **`dmg.layout`:** the Finder window as `[left, top, right, bottom]` (the bounds the projects' AppleScript uses today), the icon size and the positions of the app and
+  the app. **`dmg.layout`:** the Finder window as `[left, top, right, bottom]` (the bounds the projects' AppleScript uses today; Finder measures from the bottom of the screen, so tapster converts with a reference height of 900 points), the icon size and the positions of the app and
   the `Applications` link, integers from 0 to 5000.
 - **`sparkle`:** `key` (`^[a-z0-9]+$`, the secret `SPARKLE_KEY_<LABEL>`), `feed` (default `appcast.xml`) and
   `public_key` (base64 of 32 bytes).

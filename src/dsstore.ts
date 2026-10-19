@@ -4,6 +4,7 @@ import { TapsterError } from "./errors";
 export type DmgLayout = { window: [number, number, number, number]; icon_size: number; app: [number, number]; applications: [number, number] };
 
 const real = ($real: number) => ({ $real });
+const SCREEN_HEIGHT = 900;
 const FREE = [6, 7, 8, 9, 10, 12, ...Array.from({ length: 17 }, (_, i) => 14 + i)];
 
 function utf16be(s: string): Buffer {
@@ -41,7 +42,7 @@ export function dsStore(layout: DmgLayout, appName: string): Buffer {
     ShowTabView: false,
     ShowToolbar: false,
     SidebarWidth: 0,
-    WindowBounds: `{{${left}, ${top}}, {${right - left}, ${bottom - top}}}`,
+    WindowBounds: `{{${left}, ${Math.max(0, SCREEN_HEIGHT - bottom)}}, {${right - left}, ${bottom - top}}}`,
   });
   const icvp = writeBplist({
     arrangeBy: "none",

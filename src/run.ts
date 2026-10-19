@@ -10,6 +10,10 @@ export const TOOLS = {
   openssl: "/usr/bin/openssl",
   ditto: "/usr/bin/ditto",
   git: "/usr/bin/git",
+  hdiutil: "/usr/bin/hdiutil",
+  xattr: "/usr/bin/xattr",
+  plutil: "/usr/bin/plutil",
+  spctl: "/usr/sbin/spctl",
 } as const;
 export type Tool = keyof typeof TOOLS;
 
