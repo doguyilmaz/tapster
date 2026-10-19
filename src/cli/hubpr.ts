@@ -57,20 +57,23 @@ type GoConfig = {
   universal_binaries?: { replace?: boolean }[];
 };
 
+export function releaseEntry(name: string, repo: string, kind: "go" | "bun", bins: string[], release: { assets: string[]; version: string } | null): { entry: string | null; reason: string | null } {
+  if (!release) return { entry: null, reason: "the project has its own release workflow and no release yet; run tapster add again after the first draft" };
+  const assets: [string, string][] = [];
+  for (const a of release.assets) {
+    const key = Object.keys(PLATFORM_OF).find((k) => a.includes(k));
+    if (key && !assets.some(([p]) => p === PLATFORM_OF[key])) assets.push([PLATFORM_OF[key]!, a.replaceAll(release.version, "{version}")]);
+  }
+  if (assets.length === 0) return { entry: null, reason: "the latest release has no archives tapster recognizes" };
+  return { entry: entryText(name, repo, kind, bins, assets, assets.some(([p, a]) => p.startsWith("windows") && a.endsWith(".zip"))), reason: null };
+}
+
 export function goEntry(name: string, repo: string, goreleaser: string | null, release: { assets: string[]; version: string } | null): { entry: string | null; reason: string | null } {
   const cfg = ((goreleaser ? parse(goreleaser) : null) ?? {}) as GoConfig;
   const project = cfg.project_name ?? name;
   const binaries = [...new Set((cfg.builds ?? []).map((b) => b.binary ?? project))];
   const bins = binaries.length ? binaries : [project];
-  if (release) {
-    const assets: [string, string][] = [];
-    for (const a of release.assets) {
-      const key = Object.keys(PLATFORM_OF).find((k) => a.includes(k));
-      if (key && !assets.some(([p]) => p === PLATFORM_OF[key])) assets.push([PLATFORM_OF[key]!, a.replaceAll(release.version, "{version}")]);
-    }
-    if (assets.length === 0) return { entry: null, reason: "the latest release has no archives tapster recognizes" };
-    return { entry: entryText(name, repo, "go", bins, assets, assets.some(([p, a]) => p.startsWith("windows") && a.endsWith(".zip"))), reason: null };
-  }
+  if (release) return releaseEntry(name, repo, "go", bins, release);
   if ((cfg.archives ?? []).some((a) => a.name_template !== undefined)) {
     return { entry: null, reason: "GoReleaser names the archives with its own template; run tapster add again after the first draft" };
   }

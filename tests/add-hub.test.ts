@@ -134,3 +134,13 @@ test("adding an entry leaves every other byte of the hub's file as it was", () =
   expect(withEntry(hub, entry, "tool")).toBe(hub.replace(`${bunEntry("other", "o/other", "other")}\n`, `${bunEntry("other", "o/other", "other")}\n${entry}\n`));
   expect(withEntry("version: 1\npackages: []\nlater: 1\n", entry, "tool")).toBe(`version: 1\npackages:\n${entry}\nlater: 1\n`);
 });
+
+test("a Bun project with its own release workflow gets its entry from the real release files", async () => {
+  const { releaseEntry } = await import("../src/cli/hubpr");
+  const assets = ["tapster_1.0.0_darwin_arm64.tar.gz", "tapster_1.0.0_darwin_amd64.tar.gz", "tapster_1.0.0_linux_amd64.tar.gz", "tapster_1.0.0_linux_arm64.tar.gz", "checksums.txt"];
+  const g = releaseEntry("tapster", "o/tapster", "bun", ["tapster"], { assets, version: "1.0.0" });
+  const p = valid(`version: 1\ntap: o/tap\npackages:\n${g.entry}\n`).packages[0]!;
+  expect(p).toMatchObject({ kind: "bun", binaries: ["tapster"], scoop: false });
+  expect(Object.keys(p.assets).sort()).toEqual(["darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64"]);
+  expect(releaseEntry("tapster", "o/tapster", "bun", ["tapster"], null).reason).toContain("first draft");
+});

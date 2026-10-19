@@ -15,7 +15,7 @@ import appTemplate from "../../templates/project/app-release.yml" with { type: "
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
-import { autoTagSteps, binName, bunEntry, goEntry, hubName, installOnProject, proposeEntry, suggestDescription } from "./hubpr";
+import { autoTagSteps, binName, bunEntry, goEntry, hubName, installOnProject, proposeEntry, releaseEntry, suggestDescription } from "./hubpr";
 import { descProblems } from "../render";
 import { ask } from "./prompt";
 
@@ -280,7 +280,7 @@ async function writeTemplate(dir: string, file: string, text: string, force: boo
   return `- wrote .github/workflows/${file} (build, attest, draft, ring the hub)`;
 }
 
-type Prepared = { kind: "go" | "bun" | "app"; entry: string | null; reason: string | null; notes: string[]; goreleaser: string | null };
+type Prepared = { kind: "go" | "bun" | "app"; entry: string | null; reason: string | null; notes: string[]; goreleaser: string | null; bin?: string | null };
 
 async function prepare(dir: string, repo: string, name: string, opts: AddOptions): Promise<Prepared> {
   const app = findApp(dir);
@@ -307,7 +307,8 @@ async function prepare(dir: string, repo: string, name: string, opts: AddOptions
     const found = binName(JSON.parse(await readFile(join(dir, "package.json"), "utf8")), name);
     if (!found) throw new TapsterError("package.json has no bin entry", "Add the CLI entry file to bin in package.json.");
     const note = await writeTemplate(dir, "release.yml", bunWorkflow(found.bin, found.entry, pinsJson), opts.force);
-    return { kind: "bun", entry: bunEntry(name, repo, found.bin), reason: null, notes: [note], goreleaser: null };
+    const own = note.startsWith("- kept");
+    return { kind: "bun", entry: own ? null : bunEntry(name, repo, found.bin), reason: null, notes: [note], goreleaser: null, bin: own ? found.bin : null };
   }
   throw new TapsterError("this project is not a GoReleaser-based Go CLI, a Bun CLI or an app with a Sparkle feed", "tapster add supports those three.");
 }
@@ -384,6 +385,7 @@ export async function add(args: string[]): Promise<void> {
   if (opts.autoTag) console.log(await setupAutoTag(gh, repo, branch));
   let { entry, reason } = prepared;
   if (prepared.kind === "go") ({ entry, reason } = goEntry(name, repo, prepared.goreleaser, await latestDraftOrRelease(gh, repo)));
+  if (prepared.kind === "bun" && prepared.bin) ({ entry, reason } = releaseEntry(name, repo, "bun", [prepared.bin], await latestDraftOrRelease(gh, repo)));
   if (entry && opts.dependabot) entry = `${entry}\n    protection: dependabot`;
   const repoDesc = (await gh.getRepo(repo)).description;
   if (entry && descProblems(repoDesc ?? name, name).length) {
