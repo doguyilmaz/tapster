@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { appleGate, macosCode } from "../src/action/check";
+import { appleGate } from "../src/action/check";
+import { macosCode } from "../src/config";
 import { cleanPath } from "../src/cli/paths";
 import { checkCertificate, initSteps, notaryArgs, privateHubError } from "../src/cli/init";
 import { parseConfig } from "../src/config";

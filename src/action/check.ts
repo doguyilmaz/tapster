@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { missingAttestations } from "../attest";
 import { parseChecksums } from "../checksums";
-import { type AppPackage, type HubConfig, type InvalidPackage, type PackageConfig, isApp } from "../config";
+import { type AppPackage, type HubConfig, type InvalidPackage, type PackageConfig, isApp, macosCode } from "../config";
 import { GitHub, type Release } from "../github";
 import { readSecret, requireVar } from "../mask";
 import { type Note, type WorkItem, planPackage } from "../plan";
@@ -27,7 +27,6 @@ export function feedWarning(latest: Release | null, state: State, pkg: AppPackag
   return `${pkg.name}: the latest release ${latest.tag_name} did not come from the hub; installed copies read its ${pkg.sparkle.feed}, so check who published it`;
 }
 
-export const macosCode = (p: PackageConfig) => isApp(p) || Object.keys(p.assets).some((k) => k.startsWith("darwin"));
 
 export const needsMacos = (work: WorkItem[], packages: PackageConfig[]) =>
   work.some((i) => !i.resume && packages.some((p) => p.name === i.package && macosCode(p)));

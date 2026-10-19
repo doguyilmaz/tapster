@@ -220,6 +220,8 @@ async function protectHub(gh: GitHub, hub: string, isPrivate: boolean): Promise<
     await gh.json("POST", `/repos/${hub}/environments/tapster/deployment-branch-policies`, { name: "main", type: "branch" });
   }
   await gh.json("PUT", `/repos/${hub}/actions/permissions/workflow`, { default_workflow_permissions: "read", can_approve_pull_request_reviews: false });
+  await gh.json("PUT", `/repos/${hub}/actions/permissions`, { enabled: true, allowed_actions: "selected", sha_pinning_required: true });
+  await gh.json("PUT", `/repos/${hub}/actions/permissions/selected-actions`, { github_owned_allowed: true, verified_allowed: false, patterns_allowed: ["doguyilmaz/tapster@*"] });
   const rules = await gh.json<{ name: string }[]>("GET", `/repos/${hub}/rulesets`);
   if (!rules.some((r) => r.name === "tapster main")) {
     await gh.json("POST", `/repos/${hub}/rulesets`, {

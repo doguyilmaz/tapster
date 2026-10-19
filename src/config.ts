@@ -111,6 +111,7 @@ export type CliPackage = z.infer<typeof cliPkg>;
 export type AppPackage = z.infer<typeof appPkg> & { dmg: { volume: string } };
 export type PackageConfig = CliPackage | AppPackage;
 export const isApp = (p: PackageConfig): p is AppPackage => p.kind === "app";
+export const macosCode = (p: PackageConfig) => isApp(p) || Object.keys(p.assets).some((k) => k.startsWith("darwin"));
 export type HubConfig = Omit<z.infer<typeof hub>, "packages"> & { packages: PackageConfig[] };
 export type Semver = { major: number; minor: number; patch: number; pre: string | null };
 

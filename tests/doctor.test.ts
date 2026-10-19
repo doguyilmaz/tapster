@@ -51,3 +51,65 @@ packages:
   expect(broken.config).toBeNull();
   expect(broken.checks[0]!.ok).toBe(false);
 });
+
+test("an environment named Tapster is the same environment", () => {
+  expect(otherWorkflowsCheck({ "x.yml": "jobs:\n  a:\n    environment: Tapster\n" }).ok).toBe(false);
+  expect(otherWorkflowsCheck({ "x.yml": "jobs:\n  a:\n    environment: { name: TAPSTER }\n" }).ok).toBe(false);
+});
+
+test("doctor compares the workflow byte for byte when the hub runs this tapster", async () => {
+  const { workflowCheck } = await import("../src/cli/doctor");
+  const { fillWorkflow } = await import("../src/cli/init");
+  const pins = (await import("../templates/pins.json")).default;
+  const template = await Bun.file("templates/hub/tapster.yml").text();
+  const me = { version: "1.0.0", sha: "a".repeat(40) };
+  const flow = fillWorkflow(template, pins, { sha: me.sha, tag: "v1.0.0" }, ["shared"], 60);
+  expect(workflowCheck(flow, me).ok).toBe(true);
+  const edited = workflowCheck(flow.replace("contents: read", "contents: write"), me);
+  expect(edited.ok).toBe(false);
+  expect(edited.fix).toContain("tapster init --workflow");
+  const older = workflowCheck(fillWorkflow(template, pins, { sha: "b".repeat(40), tag: "v0.9.0" }), me);
+  expect(older.ok).toBe(true);
+  expect(older.note).toContain("v0.9.0");
+  expect(older.note).toContain("tapster init --workflow");
+});
+
+test("the hub's own ruleset, actions policy and access are checked", async () => {
+  const { accessCheck, hubRulesetCheck, policyCheck } = await import("../src/cli/doctor");
+  const good = { enforcement: "active", target: "branch", conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } }, rules: [{ type: "deletion" }, { type: "non_fast_forward" }], bypass_actors: [] };
+  expect(hubRulesetCheck([good]).ok).toBe(true);
+  expect(hubRulesetCheck([{ ...good, enforcement: "evaluate" }]).ok).toBe(false);
+  expect(hubRulesetCheck([{ ...good, rules: [{ type: "deletion" }] }]).ok).toBe(false);
+  expect(hubRulesetCheck([{ ...good, bypass_actors: [{ actor_type: "Integration", actor_id: 9 }] }]).ok).toBe(false);
+  const policy = { enabled: true, allowed_actions: "selected", sha_pinning_required: true };
+  const selected = { github_owned_allowed: true, verified_allowed: false, patterns_allowed: ["doguyilmaz/tapster@*"] };
+  expect(policyCheck(policy, selected).ok).toBe(true);
+  expect(policyCheck({ ...policy, allowed_actions: "all" }, selected).fix).toContain("tapster init");
+  expect(policyCheck(policy, { ...selected, patterns_allowed: ["evil/*"] }).ok).toBe(false);
+  expect(accessCheck([{ login: "o" }], [], "o").ok).toBe(true);
+  const crowded = accessCheck([{ login: "o" }, { login: "friend" }], [{ title: "ci", read_only: false }], "o");
+  expect(crowded.ok).toBe(false);
+  expect(crowded.fix).toContain("friend");
+  expect(crowded.fix).toContain("ci");
+});
+
+test("a hub without a run in the last day is reported with the doorbell as the cure", async () => {
+  const { scheduleCheck } = await import("../src/cli/doctor");
+  const now = Date.parse("2026-10-19T12:00:00Z");
+  expect(scheduleCheck([{ event: "schedule", created_at: "2026-10-19T08:00:00Z" }], now, false).ok).toBe(true);
+  expect(scheduleCheck([{ event: "workflow_dispatch", created_at: "2026-10-19T08:00:00Z" }], now, true).ok).toBe(true);
+  const quiet = scheduleCheck([{ event: "schedule", created_at: "2026-10-17T08:00:00Z" }], now, false);
+  expect(quiet.ok).toBe(false);
+  expect(quiet.fix).toContain("tapster init --doorbell");
+});
+
+test("Apple credentials are asked for only when a package ships macOS code", async () => {
+  const { credentialsCheck } = await import("../src/cli/doctor");
+  const linux = parseConfig("version: 1\ntap: o/tap\nlinux: { maintainer: \"O <o@x.yz>\" }\npackages:\n  - { name: l, repo: o/l, binaries: [l], linux: true, assets: { linux-amd64: \"l.tar.gz\" } }\n", "o");
+  expect(credentialsCheck(linux, ["TAPSTER_APP_PRIVATE_KEY"], ["TAPSTER_APP_ID", "TAPSTER_APP_SLUG"]).ok).toBe(true);
+  const mac = parseConfig("version: 1\ntap: o/tap\npackages:\n  - { name: m, repo: o/m, binaries: [m], assets: { darwin-arm64: \"m.tar.gz\" } }\n", "o");
+  const missing = credentialsCheck(mac, ["TAPSTER_APP_PRIVATE_KEY"], ["TAPSTER_APP_ID", "TAPSTER_APP_SLUG"]);
+  expect(missing.ok).toBe(false);
+  expect(missing.fix).toContain("tapster init --rotate certificate");
+  expect(missing.fix).toContain("tapster init --rotate notary");
+});
