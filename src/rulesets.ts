@@ -48,7 +48,7 @@ function bypassable(r: Ruleset, viewer: Viewer): boolean {
   return (r.bypass_actors ?? []).some((a) => !(a.actor_type === "DeployKey" || (a.actor_type === "RepositoryRole" && a.actor_id === 5)));
 }
 
-async function kind(gh: GitHub, repo: string, target: "tag" | "branch", wanted: string[], viewer: Viewer): Promise<{ problems: string[]; ok: boolean }> {
+async function kind(gh: GitHub, repo: string, target: "tag" | "branch", wanted: string[], viewer: Viewer, dependabot: boolean): Promise<{ problems: string[]; ok: boolean }> {
   let list: Ruleset[];
   try {
     list = await gh.json<Ruleset[]>("GET", `/repos/${repo}/rulesets?targets=${target}`);
@@ -58,7 +58,7 @@ async function kind(gh: GitHub, repo: string, target: "tag" | "branch", wanted: 
   }
   const active = await Promise.all(list.filter((r) => r.target === target && r.enforcement === "active").map((r) => gh.json<Ruleset>("GET", `/repos/${repo}/rulesets/${r.id}`)));
   if (active.length === 0) return { problems: [`no active ${target} ruleset protects every ${target}`], ok: false };
-  const allowed = target === "branch" ? [DEPENDABOT_BRANCHES] : [];
+  const allowed = target === "branch" && dependabot ? [DEPENDABOT_BRANCHES] : [];
   const covering = active.filter((r) => (r.conditions?.ref_name?.include ?? []).includes("~ALL") && (r.conditions?.ref_name?.exclude ?? []).every((x) => allowed.includes(x)));
   if (covering.length === 0) return { problems: [`no active ${target} ruleset covers every ${target} (~ALL) without exclusions`], ok: false };
   const problems = covering.filter((r) => bypassable(r, viewer)).map((r) => `the App or another actor can bypass ${r.name}`);
@@ -68,9 +68,9 @@ async function kind(gh: GitHub, repo: string, target: "tag" | "branch", wanted: 
   return { problems, ok: problems.length === 0 };
 }
 
-async function assess(gh: GitHub, repo: string, branch: string, viewer: Viewer): Promise<{ tag: string[]; branch: string[] }> {
-  const tag = await kind(gh, repo, "tag", TAG_RULESET.rules.map((r) => r.type), viewer);
-  const head = await kind(gh, repo, "branch", BRANCH_RULESET.rules.map((r) => r.type), viewer);
+async function assess(gh: GitHub, repo: string, branch: string, viewer: Viewer, dependabot = false): Promise<{ tag: string[]; branch: string[] }> {
+  const tag = await kind(gh, repo, "tag", TAG_RULESET.rules.map((r) => r.type), viewer, false);
+  const head = await kind(gh, repo, "branch", BRANCH_RULESET.rules.map((r) => r.type), viewer, dependabot);
   if (head.ok) {
     const live = new Set((await gh.json<{ type: string }[]>("GET", `/repos/${repo}/rules/branches/${encodeURIComponent(branch)}`)).map((r) => r.type));
     if (!["update", "deletion", "non_fast_forward"].every((t) => live.has(t))) head.problems.push("GitHub does not enforce rulesets on this repository; private repositories need a paid plan for them");
@@ -78,13 +78,13 @@ async function assess(gh: GitHub, repo: string, branch: string, viewer: Viewer):
   return { tag: tag.problems, branch: head.problems };
 }
 
-export async function protectionProblems(gh: GitHub, repo: string, branch: string, viewer: Viewer): Promise<string[]> {
-  const found = await assess(gh, repo, branch, viewer);
+export async function protectionProblems(gh: GitHub, repo: string, branch: string, viewer: Viewer, dependabot = false): Promise<string[]> {
+  const found = await assess(gh, repo, branch, viewer, dependabot);
   return [...found.tag, ...found.branch];
 }
 
 export async function createProtection(gh: GitHub, repo: string, branch: string, deployKeys = false, dependabot = false): Promise<"created" | "exists" | "unavailable"> {
-  const before = await assess(gh, repo, branch, "admin");
+  const before = await assess(gh, repo, branch, "admin", dependabot);
   if (before.tag.concat(before.branch).some((p) => p.includes("offers no rulesets"))) return "unavailable";
   const existing = await gh.json<Ruleset[]>("GET", `/repos/${repo}/rulesets`);
   const rewrite = deployKeys || dependabot;
@@ -101,5 +101,5 @@ export async function createProtection(gh: GitHub, repo: string, branch: string,
     if (e instanceof GitHubError && (e.status === 403 || e.status === 422)) return "unavailable";
     throw e;
   }
-  return (await protectionProblems(gh, repo, branch, "admin")).length === 0 ? "created" : "unavailable";
+  return (await protectionProblems(gh, repo, branch, "admin", dependabot)).length === 0 ? "created" : "unavailable";
 }

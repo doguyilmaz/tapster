@@ -116,6 +116,9 @@ test("check refuses an unprotected package and names both ways out", async () =>
   resetReportForTests();
   await protectionGate(fake([]).gh, { ...pkg, protection: "off" }, "main");
   expect(rowsForTests()).toEqual([]);
+  const relaxed = branch({ conditions: { ref_name: { include: ["~ALL"], exclude: ["refs/heads/dependabot/**"] } } });
+  await expect(protectionGate(fake([tags(), relaxed]).gh, pkg, "main")).rejects.toBeDefined();
+  await protectionGate(fake([tags(), relaxed]).gh, { ...pkg, protection: "dependabot" }, "main");
 });
 
 test("add says what the protection changes, or why GitHub refused it", async () => {
@@ -138,7 +141,8 @@ test("letting Dependabot open branches excludes only its branch names", async ()
   const [, branches] = rulesetBodies(false, true);
   expect(branches.conditions.ref_name.exclude).toEqual(["refs/heads/dependabot/**"]);
   const relaxed = branch({ conditions: { ref_name: { include: ["~ALL"], exclude: ["refs/heads/dependabot/**"] } } });
-  expect(await protectionProblems(fake([tags(), relaxed]).gh, "o/p", "main", "app")).toEqual([]);
+  expect(await protectionProblems(fake([tags(), relaxed]).gh, "o/p", "main", "app", true)).toEqual([]);
+  expect((await protectionProblems(fake([tags(), relaxed]).gh, "o/p", "main", "app")).join()).toMatch(/every branch/);
   const wider = branch({ conditions: { ref_name: { include: ["~ALL"], exclude: ["refs/heads/feature/**"] } } });
   expect((await protectionProblems(fake([tags(), wider]).gh, "o/p", "main", "app")).join()).toMatch(/every branch/);
 });

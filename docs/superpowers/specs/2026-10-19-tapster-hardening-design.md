@@ -28,7 +28,8 @@ release workflow then builds and attests the attacker's code and the hub signs i
   any tag or branch, so they cannot start a project workflow on code of their own (a push to a new branch would run
   every workflow without a branch filter). GitHub refuses Dependabot as a bypass actor on personal repositories
   (verified, 422), so `add --allow-dependabot` excludes `refs/heads/dependabot/**` from the branch ruleset instead and
-  says what that opens; `check` accepts that one exclusion and no other.
+  says what that opens; `check` accepts that one exclusion only when the hub's entry says `protection: dependabot`,
+  and `doctor` keeps reporting it.
 - Before planning a package, `check` reads the project's rulesets with the installation token (metadata read is
   enough): `GET /rulesets?targets=tag` and `?targets=branch`, then each ruleset. It refuses the package ("failed",
   with the `tapster add` command that fixes it) unless a tag ruleset and a branch ruleset are active, cover

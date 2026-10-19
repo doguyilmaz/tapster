@@ -68,7 +68,7 @@ export async function protectionGate(gh: GitHub, pkg: Pick<PackageConfig, "name"
     warn(`${pkg.name}: protection is off, so a stolen App key could tag code in ${pkg.repo} that the hub would sign`);
     return;
   }
-  const problems = await protectionProblems(gh, pkg.repo, branch, "app");
+  const problems = await protectionProblems(gh, pkg.repo, branch, "app", pkg.protection === "dependabot");
   if (problems.length === 0) return;
   throw new TapsterError(
     `${pkg.repo} is not protected against a stolen App key: ${problems.join("; ")}`,

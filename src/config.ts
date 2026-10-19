@@ -35,7 +35,7 @@ const common = {
   homepage: z.url().optional(),
   license: z.string().regex(/^[A-Za-z0-9.+-]+$/).optional(),
   attestation: z.enum(["auto", "off"]).default("auto"),
-  protection: z.enum(["on", "off"]).default("on"),
+  protection: z.enum(["on", "off", "dependabot"]).default("on"),
 };
 
 const cliPkg = z

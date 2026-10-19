@@ -224,8 +224,9 @@ async function apiChecks(gh: GitHub, hub: string, owner: string, config: HubConf
     if (r.private) checks.push(ok(`${p.repo} is published by the hub`, `${p.repo} is private: the hub publishes its releases, but Homebrew, Scoop, apt and dnf users can only install from public projects`));
     if (p.protection === "off") checks.push(ok(`${p.repo} is protected`, `protection is off for ${p.name}: a stolen App key could tag code there that the hub would sign`));
     else {
-      const problems = await protectionProblems(gh, p.repo, r.default_branch, "admin");
-      checks.push(problems.length ? bad(`${p.repo} is protected`, `${problems.join("; ")}. Run tapster add in a clone of ${p.repo}.`) : ok(`${p.repo} is protected`));
+      const problems = await protectionProblems(gh, p.repo, r.default_branch, "admin", p.protection === "dependabot");
+      const note = p.protection === "dependabot" ? `branches named dependabot/... are open on ${p.repo}, so a stolen App key could run its workflows on code of its own there` : undefined;
+      checks.push(problems.length ? bad(`${p.repo} is protected`, `${problems.join("; ")}. Run tapster add in a clone of ${p.repo}.`) : ok(`${p.repo} is protected`, note));
     }
     const leftovers = (await list<{ name: string }>(gh, `/repos/${p.repo}/actions/secrets?per_page=100`, "secrets")).map((x) => x.name).filter((n) => /^(HOMEBREW_TAP_|MACOS_)/.test(n));
     checks.push(leftovers.length ? bad(`${p.repo} holds no release secrets`, `Delete ${leftovers.join(", ")}: gh secret delete <name> --repo ${p.repo}`) : ok(`${p.repo} holds no release secrets`));
