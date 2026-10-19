@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { descProblems, downloadUrl, renderCask, renderScoop, rubyString } from "../src/render";
-import { parseConfig } from "../src/config";
+import { type CliPackage, parseConfig } from "../src/config";
 
 const golden = (n: string) => readFileSync(new URL(`./golden/${n}`, import.meta.url), "utf8");
 const cfg = parseConfig(
@@ -29,7 +29,7 @@ packages:
 `,
   "o",
 );
-const [aims, ebb] = cfg.packages as [typeof cfg.packages[0], typeof cfg.packages[0]];
+const [aims, ebb] = cfg.packages as [CliPackage, CliPackage];
 const d = (platform: string, asset: string, n: string) => ({ platform: platform as never, url: downloadUrl("o/aims", "v0.1.5", asset), sha256: n.repeat(64) });
 const aimsInput = {
   pkg: aims,

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { auditArgs, auditEach, buildDownloads, renderNeeded } from "../src/action/render";
 import { signMode } from "../src/action/sign";
-import { parseConfig } from "../src/config";
+import { type CliPackage, parseConfig } from "../src/config";
 import { serializeState, upsert, emptyState } from "../src/state";
 import { loadManifest, saveManifest } from "../src/workdir";
 
@@ -22,9 +22,9 @@ packages:
 );
 
 test("downloads come from the published checksums", () => {
-  const d = buildDownloads(cfg.packages[0]!, "v1.0.0", [{ sha256: "a".repeat(64), name: "aims_1.0.0_darwin_arm64.tar.gz" }]);
+  const d = buildDownloads(cfg.packages[0] as CliPackage, "v1.0.0", [{ sha256: "a".repeat(64), name: "aims_1.0.0_darwin_arm64.tar.gz" }]);
   expect(d).toEqual([{ platform: "darwin-arm64", url: "https://github.com/o/aims/releases/download/v1.0.0/aims_1.0.0_darwin_arm64.tar.gz", sha256: "a".repeat(64) }]);
-  expect(() => buildDownloads(cfg.packages[0]!, "v1.0.0", [])).toThrow();
+  expect(() => buildDownloads(cfg.packages[0] as CliPackage, "v1.0.0", [])).toThrow();
 });
 
 test("render is needed when a cask is behind the state or an entry is publishing", async () => {

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { type ChecksumLine, parseChecksums, sha256 } from "../checksums";
-import { type PackageConfig, type Platform, parseTag, versionOf } from "../config";
+import { type CliPackage, type Platform, isApp, parseTag, versionOf } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import { GitHub, type Release } from "../github";
 import { commitToHub } from "../hubcommit";
@@ -24,7 +24,7 @@ async function readable(gh: GitHub, repo: string, id: number): Promise<Release |
   }
 }
 
-export function buildDownloads(pkg: PackageConfig, tag: string, lines: ChecksumLine[]): Download[] {
+export function buildDownloads(pkg: CliPackage, tag: string, lines: ChecksumLine[]): Download[] {
   const version = versionOf(tag);
   return (Object.entries(pkg.assets) as [Platform, string][]).map(([platform, template]) => {
     const name = template.replaceAll("{version}", version);
@@ -134,6 +134,7 @@ export async function renderMode(ctx: Context): Promise<void> {
   for (const pkg of ctx.config.packages) {
     const latest = latestPublished(state, pkg.name);
     if (!latest || parseTag(latest.tag) === null) continue;
+    if (isApp(pkg)) continue;
     try {
       const r = await readable(gh, pkg.repo, latest.releaseId);
       if (!r) {

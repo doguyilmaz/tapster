@@ -5,7 +5,7 @@ import { isMachO, readTarGz } from "../archive";
 import { verifyAttestation } from "../attest";
 import { macCodeIn } from "../maccode";
 import { parseChecksums, sha256 } from "../checksums";
-import { type Platform, assetName, versionOf } from "../config";
+import { type Platform, assetName, isApp, versionOf } from "../config";
 import { TapsterError } from "../errors";
 import { GitHub } from "../github";
 import { readSecret, requireVar } from "../mask";
@@ -22,6 +22,10 @@ export async function fetchMode(ctx: Context): Promise<void> {
     const pkg = ctx.config.packages.find((p) => p.name === item.package);
     if (!pkg) {
       failure(item.package, new TapsterError("the package is not in tapster.yml", "The config changed since the check; the next run checks again."));
+      continue;
+    }
+    if (isApp(pkg)) {
+      failure(`${item.package} ${item.tag}`, new TapsterError("this tapster version cannot publish apps yet", "Update tapster."));
       continue;
     }
     let tok: InstallationToken | undefined;

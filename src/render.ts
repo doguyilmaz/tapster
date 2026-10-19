@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { PackageConfig, Platform } from "./config";
+import type { CliPackage, PackageConfig, Platform } from "./config";
 import { TapsterError } from "./errors";
 
 export function rubyString(s: string): string {
@@ -20,7 +20,7 @@ export function rubyString(s: string): string {
 const list = (items: string[]) => (items.length === 1 ? rubyString(items[0]!) : `[${items.map(rubyString).join(", ")}]`);
 
 export type Download = { platform: Platform; url: string; sha256: string };
-export type RenderInput = { pkg: PackageConfig; version: string; downloads: Download[]; description: string; homepage: string; license: string | null };
+export type RenderInput = { pkg: CliPackage; version: string; downloads: Download[]; description: string; homepage: string; license: string | null };
 
 export const downloadUrl = (repo: string, tag: string, asset: string) => `https://github.com/${repo}/releases/download/${tag}/${asset}`;
 

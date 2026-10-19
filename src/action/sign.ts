@@ -4,6 +4,8 @@ import { openKeychain } from "../keychain";
 import { readSecret, register, requireVar } from "../mask";
 import { failure, info } from "../report";
 import { PRESETS, entitlementsPlist, notarize, signFile, verifySigned, zipForNotary } from "../sign";
+import { isApp } from "../config";
+import { TapsterError } from "../errors";
 import { loadManifest, saveManifest, workdir } from "../workdir";
 import type { Context } from "./context";
 
@@ -27,6 +29,7 @@ export async function signMode(ctx: Context): Promise<void> {
       for (const item of todo) {
         try {
           const pkg = ctx.config.packages.find((p) => p.name === item.package)!;
+          if (isApp(pkg)) throw new TapsterError("this tapster version cannot sign apps yet", "Update tapster.");
           const keys = [...new Set([...PRESETS[pkg.kind], ...pkg.entitlements])];
           const ent = keys.length ? join(workdir(), `${pkg.name}.entitlements.plist`) : null;
           if (ent) await writeFile(ent, entitlementsPlist(keys));

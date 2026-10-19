@@ -21,31 +21,72 @@ const relPath = z
   .refine((p) => !p.split("/").includes(".."), "must stay inside the archive");
 const label = z.string().regex(/^[A-Za-z0-9.-]+$/);
 
-const pkg = z
+const caskFields = {
+  uninstall: z.object({ launchctl: z.array(label).optional(), quit: z.array(label).optional() }).strict().optional(),
+  zap: z.object({ trash: z.array(z.string().regex(/^~\/[A-Za-z0-9 ._\/-]+$/)) }).strict().optional(),
+  caveats: z.string().min(1).max(2000).optional(),
+};
+const common = {
+  name: z.string().regex(NAME),
+  repo: z.string().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/),
+  workflow: z.string().regex(/^[A-Za-z0-9._-]+\.ya?ml$/).default("release.yml"),
+  assets: z.partialRecord(z.enum(PLATFORMS), z.string().regex(/^[A-Za-z0-9._{}-]+$/)),
+  description: z.string().min(1).max(200).optional(),
+  homepage: z.url().optional(),
+  license: z.string().regex(/^[A-Za-z0-9.+-]+$/).optional(),
+  attestation: z.enum(["auto", "off"]).default("auto"),
+};
+
+const cliPkg = z
   .object({
-    name: z.string().regex(NAME),
-    repo: z.string().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/),
-    kind: z.enum(["go", "bun"]).default("go"),
-    workflow: z.string().regex(/^[A-Za-z0-9._-]+\.ya?ml$/).default("release.yml"),
+    ...common,
+    kind: z.enum(["go", "bun"]),
     binaries: z.array(relPath).min(1),
-    assets: z.partialRecord(z.enum(PLATFORMS), z.string().regex(/^[A-Za-z0-9._{}-]+$/)),
-    description: z.string().min(1).max(200).optional(),
-    homepage: z.url().optional(),
-    license: z.string().regex(/^[A-Za-z0-9.+-]+$/).optional(),
     completions: z.object({ bash: relPath.optional(), zsh: relPath.optional(), fish: relPath.optional() }).strict().optional(),
     scoop: z.boolean().default(false),
-    attestation: z.enum(["auto", "off"]).default("auto"),
     entitlements: z.array(z.enum(ENTITLEMENTS)).default([]),
-    cask: z
-      .object({
-        uninstall: z.object({ launchctl: z.array(label).optional(), quit: z.array(label).optional() }).strict().optional(),
-        zap: z.object({ trash: z.array(z.string().regex(/^~\/[A-Za-z0-9 ._\/-]+$/)) }).strict().optional(),
-        caveats: z.string().min(1).max(2000).optional(),
-      })
-      .strict()
-      .default({}),
+    cask: z.object(caskFields).strict().default({}),
   })
   .strict();
+
+export const BUNDLE_ID = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+const coord = z.number().int().min(0).max(5000);
+const entitlementValue = z.union([z.boolean(), z.string().regex(/^[A-Za-z0-9._*{}-]+$/), z.array(z.string().regex(/^[A-Za-z0-9._*{}-]+$/))]);
+
+const appPkg = z
+  .object({
+    ...common,
+    kind: z.literal("app"),
+    app: z.string().regex(/^[A-Za-z0-9 ._-]+\.app$/),
+    bundle_id: z.string().regex(BUNDLE_ID),
+    carry: z.record(z.string().regex(/^[A-Za-z0-9._-]+$/), z.string().regex(/^sha256:[0-9a-f]{64}$/)).default({}),
+    dmg: z
+      .object({
+        name: z.string().regex(/^[A-Za-z0-9._{}-]+\.dmg$/),
+        volume: z.string().regex(/^[A-Za-z0-9 ._-]{1,27}$/).optional(),
+        volume_icon: relPath.optional(),
+        layout: z.object({ window: z.tuple([coord, coord, coord, coord]), icon_size: coord, app: z.tuple([coord, coord]), applications: z.tuple([coord, coord]) }).strict().optional(),
+      })
+      .strict(),
+    sparkle: z
+      .object({
+        key: z.string().regex(/^[a-z0-9]+$/),
+        feed: z.string().regex(/^[A-Za-z0-9._-]+\.xml$/).default("appcast.xml"),
+        public_key: z.string().regex(/^[A-Za-z0-9+/]{43}=$/),
+      })
+      .strict()
+      .optional(),
+    code: z
+      .record(relPath, z.object({ identifier: z.string().regex(BUNDLE_ID).optional(), entitlements: z.record(z.string().regex(/^[A-Za-z0-9.-]+$/), entitlementValue).optional() }).strict())
+      .default({}),
+    cask: z.object({ ...caskFields, binaries: z.array(relPath).optional(), auto_updates: z.boolean().optional() }).strict().default({}),
+  })
+  .strict();
+
+const pkg = z.preprocess(
+  (v) => (v && typeof v === "object" && !Array.isArray(v) && !("kind" in v) ? { ...v, kind: "go" } : v),
+  z.discriminatedUnion("kind", [cliPkg, appPkg]),
+);
 
 const hub = z
   .object({
@@ -55,8 +96,11 @@ const hub = z
   })
   .strict();
 
-export type PackageConfig = z.infer<typeof pkg>;
-export type HubConfig = z.infer<typeof hub>;
+export type CliPackage = z.infer<typeof cliPkg>;
+export type AppPackage = z.infer<typeof appPkg> & { dmg: { volume: string } };
+export type PackageConfig = CliPackage | AppPackage;
+export const isApp = (p: PackageConfig): p is AppPackage => p.kind === "app";
+export type HubConfig = Omit<z.infer<typeof hub>, "packages"> & { packages: PackageConfig[] };
 export type Semver = { major: number; minor: number; patch: number; pre: string | null };
 
 export function parseConfig(text: string, hubOwner: string): HubConfig {
@@ -66,17 +110,19 @@ export function parseConfig(text: string, hubOwner: string): HubConfig {
   } catch {
     throw new TapsterError("tapster.yml is not valid YAML", "Fix the YAML syntax; tapster doctor shows the line.");
   }
-  const result = hub.safeParse(raw);
-  if (!result.success) {
-    const issues = result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+  const parsed = hub.safeParse(raw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
     throw new TapsterError(`tapster.yml is invalid: ${issues}`, "Fix the listed fields.");
   }
+  const result = { data: parsed.data as HubConfig };
   const names = new Set<string>();
   const binaryOwners = new Map<string, string>();
   for (const p of result.data.packages) {
     if (names.has(p.name)) throw new TapsterError(`package ${p.name} is listed twice`, "Keep one entry per package.");
     names.add(p.name);
-    for (const b of p.binaries) {
+    if (isApp(p)) checkApp(p);
+    for (const b of isApp(p) ? [] : p.binaries) {
       const id = b.split("/").pop()!;
       const owner = binaryOwners.get(id);
       if (owner && owner !== p.name) throw new TapsterError(`${p.name} and ${owner} both ship a binary named ${id}`, "Signed tools are identified by name, so each name may belong to one package.");
@@ -98,7 +144,32 @@ export function parseConfig(text: string, hubOwner: string): HubConfig {
       }
     }
   }
+  const apps = result.data.packages.filter(isApp);
+  const overlaps = (a: string, b: string) => a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+  for (const [i, a] of apps.entries()) {
+    for (const b of apps.slice(i + 1)) {
+      if (overlaps(a.bundle_id, b.bundle_id)) throw new TapsterError(`${a.name} and ${b.name} have overlapping bundle ids`, "Each app needs its own bundle id, not one inside another.");
+    }
+    for (const id of binaryOwners.keys()) {
+      if (overlaps(id, a.bundle_id) && (id === a.bundle_id || id.startsWith(`${a.bundle_id}.`))) {
+        throw new TapsterError(`the binary ${id} would carry ${a.name}'s identity`, "Rename the binary.");
+      }
+    }
+  }
   return result.data;
+}
+
+function checkApp(p: AppPackage): void {
+  const darwin = Object.keys(p.assets).filter((k) => k.startsWith("darwin"));
+  if (darwin.length !== 1 || Object.keys(p.assets).length !== 1) {
+    throw new TapsterError(`${p.name}: an app needs exactly one darwin asset and nothing else`, "Map one of darwin-arm64, darwin-amd64 or darwin-universal to the app archive.");
+  }
+  p.dmg.volume ??= p.app.replace(/\.app$/, "").slice(0, 27);
+  for (const [path, c] of Object.entries(p.code)) {
+    if (c.identifier && !c.identifier.startsWith(`${p.bundle_id}.`)) {
+      throw new TapsterError(`${p.name}: the identifier for ${path} is outside ${p.bundle_id}`, `Use an identifier that starts with ${p.bundle_id}.`);
+    }
+  }
 }
 
 export function parseTag(tag: string): Semver | null {
