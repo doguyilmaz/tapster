@@ -123,4 +123,22 @@ test("an archive built to make the symlink checks slow finishes quickly", () => 
     expect(e).toBeInstanceOf(TapsterError);
   }
   expect(Date.now() - started).toBeLessThan(3000);
+test("framework links that chain through other links are fine", () => {
+  const entries = readTarGz(
+    rawTarGz([
+      { name: "S.framework/Versions/B/S", data: "x" },
+      { name: "S.framework/Versions/B/Resources/Info.plist", data: "p" },
+      { name: "S.framework/Versions/Current", type: "2", linkname: "B" },
+      { name: "S.framework/S", type: "2", linkname: "Versions/Current/S" },
+      { name: "S.framework/Resources", type: "2", linkname: "Versions/Current/Resources" },
+    ]),
+  );
+  expect(entries.filter((e) => e.type === "symlink").length).toBe(3);
+});
+
+test.each([
+  ["a chain that leaves", [{ name: "a", type: "2", linkname: "." }, { name: "b", type: "2", linkname: "a/.." }]],
+  ["a loop", [{ name: "a", type: "2", linkname: "b" }, { name: "b", type: "2", linkname: "a" }, { name: "c", type: "2", linkname: "a/x" }]],
+])("still rejects %s", (_, entries) => {
+  expect(() => readTarGz(rawTarGz(entries))).toThrow(TapsterError);
 });
