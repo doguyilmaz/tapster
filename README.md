@@ -7,6 +7,7 @@ tap token.
 It covers command line tools written in Go (with GoReleaser) or Bun. Releases get Developer ID signatures, Apple
 notarization, a Homebrew cask and, with Windows builds, a Scoop manifest. It also covers macOS apps that update
 through Sparkle: the hub signs every piece of code in the app, builds and notarizes the DMG and signs the update feed.
+Command line tools with Linux builds can also ship to apt and dnf from the hub's GitHub Pages site.
 
 ## How it works
 
@@ -27,7 +28,9 @@ project (push tag v1.2.3)              hub: you/homebrew-tap
 
 The design, including the security model, is in
 [docs/superpowers/specs/2026-10-18-tapster-design.md](docs/superpowers/specs/2026-10-18-tapster-design.md). Apps are in
-[docs/superpowers/specs/2026-10-19-tapster-phase2-design.md](docs/superpowers/specs/2026-10-19-tapster-phase2-design.md).
+[docs/superpowers/specs/2026-10-19-tapster-phase2-design.md](docs/superpowers/specs/2026-10-19-tapster-phase2-design.md),
+the doorbell and Linux packages in
+[docs/superpowers/specs/2026-10-19-tapster-phase3-design.md](docs/superpowers/specs/2026-10-19-tapster-phase3-design.md).
 
 ## Set up a hub
 
@@ -93,6 +96,41 @@ It reads the key without showing it, checks it against the public key pinned in 
 offline backup and stores it as the `SPARKLE_KEY_<LABEL>` secret. Apps that share a key share a label. Files that must
 stay in every release unchanged, such as a frozen feed for old builds, go under `carry` with their digest.
 
+## Faster releases
+
+The hub checks for drafts every 10 minutes. To start it within a minute instead, deploy the doorbell, a small
+Cloudflare Worker on the free plan:
+
+```sh
+bunx @doguyilmaz/tapster init --doorbell
+```
+
+It signs you in to Cloudflare with Wrangler, creates a second GitHub App that may only start the hub's workflow, deploys
+the Worker with that App's key and tells every project where the doorbell is. A project's release workflow then rings
+it after opening the draft: it sends a short-lived GitHub token that proves which repository and tag it comes from, and
+the Worker starts the hub. The schedule stays as the fallback.
+
+## apt and dnf
+
+Set `linux: true` on a command line tool with Linux builds and name a maintainer once:
+
+```yaml
+linux: { maintainer: "Your Name <you@example.com>" }
+packages:
+  - name: aims
+    linux: true
+```
+
+Then make the signing key and turn on GitHub Pages for the hub:
+
+```sh
+bunx @doguyilmaz/tapster init --linux
+```
+
+After each release the hub builds a `.deb` and an `.rpm` per architecture from the published Linux archives. A second
+job, which holds the key, checks every package against those archives itself, signs the rpms and the repository
+metadata and publishes the site. The site's front page shows users the two commands to add the repository.
+
 ## Check the setup
 
 ```sh
@@ -116,6 +154,11 @@ bunx @doguyilmaz/tapster doctor
   archives in their own release workflow. The hub verifies that before signing.
 - **Sparkle keys stay in the hub.** Only the step that signs the feed sees them. The key never reaches a command line
   or a file. The hub refuses a key whose public half differs from the one installed copies trust.
+- **Packages are checked before they are signed.** The job that builds the Linux packages has no key. The job that signs
+  them rebuilds what each one must contain from the release and refuses scripts, dependencies, extra files or changed
+  files.
+- **The doorbell can only knock.** Its App may start the hub's workflow and nothing else. It accepts only GitHub's own
+  tokens from your repositories, made for its address.
 - **Rendering holds no credential.** The job that runs Homebrew to check the casks has only the hub's own workflow
   token.
 
