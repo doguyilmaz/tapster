@@ -1,6 +1,6 @@
 import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type HubConfig, isApp, parseConfig } from "../config";
 import { GitHubError, TapsterError } from "../errors";
@@ -8,13 +8,15 @@ import { GitHub } from "../github";
 import { decodeSparkleKey } from "../sparkle-key";
 import { appJwt } from "../token";
 import { TAPSTER } from "../version";
-import { run, runPath } from "../run";
+import { TOOLS, run, runPath } from "../run";
+import { parseNotary } from "../sign";
 import hubReadme from "../../templates/hub/README.md" with { type: "text" };
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
 import { appFromManifest, openUrl } from "./appflow";
 import { rotateDoorbell, setupDoorbell } from "./doorbell";
 import { currentRepo, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
+import { cleanPath, readInput } from "./paths";
 import { ask } from "./prompt";
 
 type Pins = typeof pinsJson;
@@ -33,6 +35,43 @@ export function appManifest(owner: string, hub: string, redirect: string): objec
 
 export function teamIdFromSubject(subject: string): string | null {
   return /(?:^|[,/]\s*)OU=([A-Z0-9]{10})(?:[,/]|$)/.exec(subject)?.[1] ?? null;
+}
+
+const DAY = 86_400_000;
+
+export function checkCertificate(subject: string, notAfter: string, now = Date.now()): { team: string; expires: string } {
+  const cn = /(?:^|,)CN=((?:[^,\\]|\\.)*)/.exec(subject)?.[1] ?? "";
+  if (!cn.startsWith("Developer ID Application:")) {
+    throw new TapsterError(`the certificate is "${cn || "unnamed"}", not a Developer ID Application certificate`, "Create a Developer ID Application certificate at developer.apple.com, export it with its key from Keychain Access as .p12, then run this again.");
+  }
+  const team = teamIdFromSubject(subject);
+  if (!team) throw new TapsterError("the certificate has no team ID", "Export the Developer ID Application certificate from Keychain Access.");
+  const end = Date.parse(notAfter);
+  if (Number.isNaN(end)) throw new TapsterError("the certificate's expiry date cannot be read", "Export the certificate again from Keychain Access.");
+  const expires = new Date(end).toISOString().slice(0, 10);
+  if (end < now) throw new TapsterError(`the certificate expired on ${expires}`, "Create a new Developer ID Application certificate at developer.apple.com.");
+  return { team, expires };
+}
+
+export function initSteps(have: { vars: string[]; secrets: string[] }, mac: boolean): string[] {
+  const v = new Set(have.vars);
+  const s = new Set(have.secrets);
+  const steps = ["protect"];
+  if (!(v.has("TAPSTER_APP_ID") && s.has("TAPSTER_APP_PRIVATE_KEY"))) steps.push("app");
+  if (mac && !(v.has("TAPSTER_TEAM_ID") && s.has("MACOS_SIGN_P12") && s.has("MACOS_SIGN_PASSWORD"))) steps.push("certificate");
+  if (mac && !["MACOS_NOTARY_KEY", "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER_ID"].every((n) => s.has(n))) steps.push("notary");
+  steps.push("files");
+  return steps;
+}
+
+export const notaryArgs = (keyPath: string, keyId: string, issuer: string) => ["notarytool", "history", "--key", keyPath, "--key-id", keyId, "--issuer", issuer, "--output-format", "json"];
+
+export function privateHubError<T>(e: T, isPrivate: boolean): T | TapsterError {
+  if (!(e instanceof GitHubError) || !isPrivate || ![403, 404, 422].includes(e.status)) return e;
+  return new TapsterError(
+    "GitHub refused environments on this private hub",
+    "Environments and their secrets need a public hub or GitHub Pro. Make the hub public or upgrade at https://github.com/settings/billing, then run tapster init again.",
+  );
 }
 
 export function sparkleLabels(config: HubConfig): string[] {
@@ -77,11 +116,13 @@ export function fillWorkflow(template: string, pins: Pins, tapster: { sha: strin
 }
 
 async function createApp(owner: string, hub: string): Promise<void> {
+  console.log("GitHub creates a private App for your hub; it lets the hub publish your projects' releases. Confirm it on the page that opens.");
   const created = await appFromManifest((redirect) => appManifest(owner, hub, redirect), "your tapster App");
   await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", created.pem);
   await setEnvVariable(hub, "TAPSTER_APP_ID", String(created.id));
   await setEnvVariable(hub, "TAPSTER_APP_SLUG", created.slug);
-  console.log(`Install the App on the projects tapster should publish (not on ${hub}):`);
+  console.log("Stored the App and its key in the hub. Now install it: choose \"Only select repositories\" and pick the projects tapster should publish.");
+  console.log(`Never pick ${hub}: the App can write to every repository it is installed on, and the hub holds your signing keys. tapster add can also install it on a project later.`);
   openUrl(`https://github.com/apps/${created.slug}/installations/new`);
 }
 
@@ -104,8 +145,8 @@ async function rotateAppKey(gh: GitHub, hub: string): Promise<void> {
   if (!appId || !slug) throw new TapsterError("the hub has no App yet", "Run tapster init first.");
   console.log(`Open the App's settings, scroll to "Private keys" and click "Generate a private key":`);
   openUrl(`https://github.com/settings/apps/${slug}`);
-  const path = (await ask("Path of the downloaded .pem file: ")).replace(/^~(?=\/)/, process.env.HOME ?? "~");
-  const pem = await readFile(path, "utf8");
+  const path = cleanPath(await ask("Path of the downloaded .pem file (drag it here): "));
+  const pem = (await readInput(path, "the .pem file")).toString("utf8");
   const fingerprint = appKeyFingerprint(pem);
   await new GitHub(appJwt(appId, pem)).json("GET", "/app").catch(() => {
     throw new TapsterError("that key does not belong to the hub's App", `Generate the key on https://github.com/settings/apps/${slug}.`);
@@ -116,33 +157,61 @@ async function rotateAppKey(gh: GitHub, hub: string): Promise<void> {
 }
 
 async function storeCertificate(hub: string): Promise<void> {
-  const path = await ask("Developer ID Application .p12 file: ");
+  console.log("Apple certificate: a Developer ID Application certificate exported as .p12. In Keychain Access, open My Certificates,");
+  console.log("right-click \"Developer ID Application: ...\", choose Export and save it as .p12 with a password. Create one at");
+  console.log("https://developer.apple.com/account/resources/certificates if you have none. It stays in your hub's secrets only.");
+  const path = cleanPath(await ask(".p12 file (drag it here): "));
+  const data = await readInput(path, "the .p12 file");
   const password = await ask(".p12 password: ", true);
-  const data = await readFile(path.replace(/^~(?=\/)/, process.env.HOME ?? "~"));
-  const certs = await run("openssl", ["pkcs12", "-in", path.replace(/^~(?=\/)/, process.env.HOME ?? "~"), "-passin", "env:TAPSTER_P12", "-nokeys", "-clcerts"], { env: { TAPSTER_P12: password } });
-  const subject = (await run("openssl", ["x509", "-noout", "-subject", "-nameopt", "RFC2253"], { stdin: certs.stdout })).stdout.replace(/^subject=\s*/, "").trim();
-  const team = teamIdFromSubject(subject);
-  if (!team) throw new TapsterError("the certificate has no team ID", "Export the Developer ID Application certificate from Keychain Access.");
+  const certs = await run("openssl", ["pkcs12", "-in", path, "-passin", "env:TAPSTER_P12", "-nokeys", "-clcerts"], { env: { TAPSTER_P12: password }, allowFail: true });
+  if (certs.code !== 0 || !certs.stdout.includes("BEGIN CERTIFICATE")) throw new TapsterError("the .p12 could not be opened with that password", "Check the password you set when exporting it, or export it again.");
+  const info = await run("openssl", ["x509", "-noout", "-subject", "-enddate", "-nameopt", "RFC2253"], { stdin: certs.stdout });
+  const subject = /^subject=\s*(.*)$/m.exec(info.stdout)?.[1]?.trim() ?? "";
+  const notAfter = /^notAfter=(.*)$/m.exec(info.stdout)?.[1]?.trim() ?? "";
+  const { team, expires } = checkCertificate(subject, notAfter);
   await setEnvSecret(hub, "MACOS_SIGN_P12", data.toString("base64"));
   await setEnvSecret(hub, "MACOS_SIGN_PASSWORD", password);
   await setEnvVariable(hub, "TAPSTER_TEAM_ID", team);
-  console.log(`Certificate stored for team ${team}.`);
+  await setEnvVariable(hub, "TAPSTER_CERT_EXPIRES", expires);
+  console.log(`Certificate stored for team ${team}; it expires on ${expires}, and the hub warns 30 days before.`);
+}
+
+async function checkNotary(path: string, keyId: string, issuer: string): Promise<void> {
+  if (process.platform !== "darwin" || !existsSync(TOOLS.xcrun)) {
+    console.log("Not on macOS, so the key is checked at the first release instead.");
+    return;
+  }
+  const res = await runPath(TOOLS.xcrun, "xcrun", notaryArgs(path, keyId, issuer), { allowFail: true });
+  if (res.code !== 0) parseNotary("", res.stderr);
+  console.log("Apple accepted the key.");
 }
 
 async function storeNotary(hub: string): Promise<void> {
-  const path = await ask("App Store Connect API key (.p8) file: ");
-  const keyId = await ask("Key ID: ");
-  const issuer = await ask("Issuer ID: ");
-  const p8 = await readFile(path.replace(/^~(?=\/)/, process.env.HOME ?? "~"));
+  console.log("Notarization key: an App Store Connect API key. In App Store Connect open Users and Access, Integrations,");
+  console.log("App Store Connect API, Team Keys; create a key with Developer access and download AuthKey_<id>.p8 (Apple offers");
+  console.log("the download once). The Key ID is in the list and the Issuer ID above it. It stays in your hub's secrets only.");
+  const path = cleanPath(await ask(".p8 file (drag it here): "));
+  const p8 = await readInput(path, "the .p8 file");
   if (!p8.toString("utf8").includes("BEGIN PRIVATE KEY")) throw new TapsterError("that file is not an App Store Connect key", "Download the .p8 from App Store Connect, Users and Access, Integrations.");
+  const keyId = await ask("Key ID: ");
+  if (!/^[A-Z0-9]{10}$/.test(keyId)) throw new TapsterError(`${keyId || "an empty Key ID"} is not a Key ID`, "Copy the 10-character Key ID next to the key in App Store Connect.");
+  const issuer = (await ask("Issuer ID: ")).toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(issuer)) {
+    throw new TapsterError("that is not an Issuer ID", "Copy the Issuer ID shown above the key list in App Store Connect.");
+  }
+  await checkNotary(path, keyId, issuer);
   await setEnvSecret(hub, "MACOS_NOTARY_KEY", p8.toString("base64"));
   await setEnvSecret(hub, "MACOS_NOTARY_KEY_ID", keyId);
   await setEnvSecret(hub, "MACOS_NOTARY_ISSUER_ID", issuer);
-  console.log("Notarization key stored.");
+  console.log(`Notarization key stored. You may delete ${path} once you keep a backup.`);
 }
 
-async function protectHub(gh: GitHub, hub: string): Promise<void> {
-  await gh.json("PUT", `/repos/${hub}/environments/tapster`, { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } });
+async function protectHub(gh: GitHub, hub: string, isPrivate: boolean): Promise<void> {
+  try {
+    await gh.json("PUT", `/repos/${hub}/environments/tapster`, { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } });
+  } catch (e) {
+    throw privateHubError(e, isPrivate);
+  }
   const policies = await gh.json<{ branch_policies: { name: string }[] }>("GET", `/repos/${hub}/environments/tapster/deployment-branch-policies`);
   if (!policies.branch_policies.some((p) => p.name === "main")) {
     await gh.json("POST", `/repos/${hub}/environments/tapster/deployment-branch-policies`, { name: "main", type: "branch" });
@@ -276,6 +345,24 @@ async function writeFiles(gh: GitHub, dir: string, hub: string, flag: string | n
   await writeWorkflow(gh, dir, [], flag);
 }
 
+async function askYes(question: string): Promise<boolean> {
+  const answer = (await ask(question)).toLowerCase();
+  return answer === "" || answer === "y" || answer === "yes";
+}
+
+async function hubState(gh: GitHub, hub: string): Promise<{ vars: string[]; secrets: string[]; private: boolean }> {
+  const names = async (kind: "variables" | "secrets") => {
+    try {
+      const res = await gh.json<Record<string, { name: string }[]>>("GET", `/repos/${hub}/environments/tapster/${kind}?per_page=100`);
+      return (res[kind] ?? []).map((x) => x.name);
+    } catch (e) {
+      if (e instanceof GitHubError && e.status === 404) return [];
+      throw e;
+    }
+  };
+  return { vars: await names("variables"), secrets: await names("secrets"), private: (await gh.getRepo(hub)).private };
+}
+
 export async function init(argv: string[]): Promise<void> {
   const at = argv.indexOf("--tapster");
   const flag = at >= 0 ? (argv[at + 1] ?? "") : null;
@@ -302,10 +389,19 @@ export async function init(argv: string[]): Promise<void> {
   if (args.length) {
     throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, init --rotate app|certificate|notary|doorbell|linux, init --sparkle <label> [--account <account>], init --doorbell, init --linux or init --workflow.");
   }
-  await protectHub(gh, hub);
-  await createApp(hub.split("/")[0]!, hub);
-  await storeCertificate(hub);
-  await storeNotary(hub);
-  await writeFiles(gh, dir, hub, flag);
+  const have = await hubState(gh, hub);
+  const hasApple = have.vars.includes("TAPSTER_TEAM_ID") || have.secrets.includes("MACOS_NOTARY_KEY");
+  const mac = hasApple || (await askYes("Will this hub sign software for macOS (Mac apps or CLI tools with macOS builds)? [Y/n] "));
+  const steps = initSteps(have, mac);
+  const done = ["app", "certificate", "notary"].filter((x) => !steps.includes(x) && (x === "app" || mac));
+  if (done.length) console.log(`Already done: ${done.join(", ")}. To redo one, run tapster init --rotate <name>.`);
+  for (const step of steps) {
+    if (step === "protect") await protectHub(gh, hub, have.private);
+    if (step === "app") await createApp(hub.split("/")[0]!, hub);
+    if (step === "certificate") await storeCertificate(hub);
+    if (step === "notary") await storeNotary(hub);
+    if (step === "files") await writeFiles(gh, dir, hub, flag);
+  }
+  if (!mac) console.log("Skipped the Apple credentials. Add them later with tapster init --rotate certificate and tapster init --rotate notary.");
   console.log("\nDone. Review and commit the new files, push, then run tapster add in each project.");
 }

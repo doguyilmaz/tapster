@@ -26,6 +26,39 @@ export function feedWarning(latest: Release | null, state: State, pkg: AppPackag
   return `${pkg.name}: the latest release ${latest.tag_name} did not come from the hub; installed copies read its ${pkg.sparkle.feed}, so check who published it`;
 }
 
+export const macosCode = (p: PackageConfig) => isApp(p) || Object.keys(p.assets).some((k) => k.startsWith("darwin"));
+
+export const needsMacos = (work: WorkItem[], packages: PackageConfig[]) =>
+  work.some((i) => !i.resume && packages.some((p) => p.name === i.package && macosCode(p)));
+
+export function appleGate(
+  items: WorkItem[],
+  packages: PackageConfig[],
+  apple: { team: string; expires: string },
+  now: number,
+): { items: WorkItem[]; failed: { name: string; error: TapsterError }[]; warning: string | null; macos: boolean } {
+  const end = apple.expires ? Date.parse(`${apple.expires}T00:00:00Z`) : Number.NaN;
+  const out: WorkItem[] = [];
+  const failed: { name: string; error: TapsterError }[] = [];
+  for (const item of items) {
+    const pkg = packages.find((p) => p.name === item.package);
+    if (!pkg || item.resume || !macosCode(pkg)) {
+      out.push(item);
+      continue;
+    }
+    if (!apple.team) {
+      failed.push({ name: pkg.name, error: new TapsterError(`${pkg.name} ships macOS code, but this hub has no Apple credentials`, "Run tapster init --rotate certificate and tapster init --rotate notary in the hub clone.") });
+    } else if (end < now) {
+      failed.push({ name: pkg.name, error: new TapsterError(`the Developer ID certificate expired on ${apple.expires}`, "Create a new Developer ID Application certificate, then run tapster init --rotate certificate.") });
+    } else {
+      out.push(item);
+    }
+  }
+  const soon = apple.team && end >= now && end - now < 30 * 86_400_000;
+  const warning = soon ? `the Developer ID certificate expires on ${apple.expires}; renew it and run tapster init --rotate certificate` : null;
+  return { items: out, failed, warning, macos: needsMacos(out, packages) };
+}
+
 export function reportInvalid(invalid: InvalidPackage[], only: string): void {
   for (const i of invalid) if (!only || i.name === only) failure(i.name, new TapsterError(i.reason, i.fix));
 }
@@ -142,8 +175,13 @@ export async function check(ctx: Context): Promise<void> {
       await tok?.revoke();
     }
   }
-  if (items.length > 50) record({ item: "hub", result: "waiting", detail: `${items.length - 50} more drafts wait for the next run` });
-  core.setOutput("work", JSON.stringify(items.slice(0, 50)));
-  core.setOutput("render", String(items.length > 0 || (await renderNeeded(ctx, privateRepos))));
-  core.setOutput("linux", String(linuxNeeded(ctx.config, items.slice(0, 50), core.getInput("linux") === "true")));
+  const gate = appleGate(items, ctx.config.packages, { team: process.env.TAPSTER_TEAM_ID ?? "", expires: process.env.TAPSTER_CERT_EXPIRES ?? "" }, Date.now());
+  for (const f of gate.failed) failure(f.name, f.error);
+  if (gate.warning) warn(gate.warning);
+  const work = gate.items.slice(0, 50);
+  if (gate.items.length > 50) record({ item: "hub", result: "waiting", detail: `${gate.items.length - 50} more drafts wait for the next run` });
+  core.setOutput("work", JSON.stringify(work));
+  core.setOutput("macos", String(needsMacos(work, ctx.config.packages)));
+  core.setOutput("render", String(work.length > 0 || (await renderNeeded(ctx, privateRepos))));
+  core.setOutput("linux", String(linuxNeeded(ctx.config, work, core.getInput("linux") === "true")));
 }

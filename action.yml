@@ -31,6 +31,8 @@ inputs:
 outputs:
   work:
     description: Work list (JSON, check mode)
+  macos:
+    description: "true when this run signs macOS code (check mode)"
   render:
     description: "true when the render job has something to do (check mode)"
   attest:

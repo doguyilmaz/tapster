@@ -64,3 +64,12 @@ test("tapster's CI audits the casks the renderers produce, on every change and w
   expect(ci.jobs.macos!.steps.some((s) => s.run === "bun tests/brew/audit.ts")).toBe(true);
   expect(readFileSync("tests/brew/audit.ts", "utf8")).toContain('"brew", "trust"');
 });
+
+test("sign runs on macOS only when check says this run signs macOS code", () => {
+  const check = flow.jobs.check as unknown as { outputs: Record<string, string>; steps: { id?: string; env?: Record<string, string> }[] };
+  expect(check.outputs.macos).toBe("${{ steps.check.outputs.macos }}");
+  const env = check.steps.find((s) => s.id === "check")!.env!;
+  expect(env.TAPSTER_TEAM_ID).toBe("${{ vars.TAPSTER_TEAM_ID }}");
+  expect(env.TAPSTER_CERT_EXPIRES).toBe("${{ vars.TAPSTER_CERT_EXPIRES }}");
+  expect((flow.jobs.sign as unknown as { "runs-on": string })["runs-on"]).toBe("${{ needs.check.outputs.macos == 'false' && 'ubuntu-24.04' || 'macos-15' }}");
+});
