@@ -16,7 +16,7 @@ import pinsJson from "../../templates/pins.json";
 import { appFromManifest, openUrl } from "./appflow";
 import { rotateDoorbell, setupDoorbell } from "./doorbell";
 import { currentRepo, deleteEnvSecret, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
-import { type KeyRef, type Store, localStore, newSparkleKey, requireStore } from "./keystore";
+import { type KeyRef, type Store, localStore, newSparkleKey, previousKey, requireStore } from "./keystore";
 import { cleanPath, readInput } from "./paths";
 import { removeTemp, tempDir } from "./temp";
 import { cronFor, everyFromFlow } from "./schedule";
@@ -411,7 +411,7 @@ async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean)
     let old: string | null = null;
     if (rotate) {
       if (store.kind === "keychain") console.log("macOS asks whether tapster may read the previous key from your keychain; choose Allow.");
-      old = await store.read(linuxRef(hub));
+      old = await previousKey(store, linuxRef(hub));
     }
     const pending = { ...linuxRef(hub), account: `${hub} new`, label: `tapster Linux key for ${hub} (new)` };
     await store.remove(pending);

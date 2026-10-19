@@ -118,6 +118,15 @@ export function localStore(platform: string = process.platform, has: (path: stri
   return null;
 }
 
+export async function previousKey(store: Store, ref: KeyRef): Promise<string | null> {
+  const value = await store.read(ref);
+  if (value !== null || !(await store.exists(ref))) return value;
+  throw new TapsterError(
+    "the previous key is in your keychain, but tapster could not read it",
+    "Choose Allow when macOS asks, and run this where you can see that question (not over SSH). Nothing was changed.",
+  );
+}
+
 export function requireStore(what: string): Store {
   const store = localStore();
   if (store) return store;

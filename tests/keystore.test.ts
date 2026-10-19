@@ -42,3 +42,12 @@ test("systems without a keystore tapster can use are refused", () => {
   expect(localStore("linux", () => true)!.kind).toBe("secret-service");
   expect(localStore("darwin", () => true)!.kind).toBe("keychain");
 });
+
+test("a rotation stops when the old key exists but could not be read", async () => {
+  const { previousKey } = await import("../src/cli/keystore");
+  const store = (exists: boolean, value: string | null) => ({ kind: "keychain" as const, exists: async () => exists, read: async () => value, save: async () => {}, remove: async () => {} });
+  const ref = { service: "tapster-linux-key", account: "o/hub", label: "l" };
+  expect(await previousKey(store(true, "OLD"), ref)).toBe("OLD");
+  expect(await previousKey(store(false, null), ref)).toBeNull();
+  await expect(previousKey(store(true, null), ref)).rejects.toMatchObject({ fix: expect.stringContaining("Nothing was changed") });
+});
