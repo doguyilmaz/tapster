@@ -1,6 +1,6 @@
 export class DoorbellError extends Error {
   constructor(
-    readonly status: 401 | 502,
+    readonly status: 401 | 409 | 502,
     readonly reason: string,
   ) {
     super(reason);

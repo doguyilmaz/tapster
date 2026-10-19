@@ -1,7 +1,7 @@
 name: tapster
 on:
   schedule:
-    - cron: "7-59/10 * * * *"
+    - cron: "__CRON__"
   workflow_dispatch:
     inputs:
       package:

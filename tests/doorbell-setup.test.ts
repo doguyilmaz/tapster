@@ -16,14 +16,16 @@ test("the dispatch App is private and can only start workflows", () => {
 });
 
 test("the Worker config holds the variables and no secret", () => {
-  const text = doorbellConfig({ APP_ID: "1001", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42" });
-  const c = JSON.parse(text) as { name: string; main: string; vars: Record<string, string>; workers_dev: boolean };
+  const text = doorbellConfig({ APP_ID: "1001", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42", INTERVAL: "10" });
+  const c = JSON.parse(text) as { name: string; main: string; vars: Record<string, string>; workers_dev: boolean; triggers: { crons: string[] } };
+  expect(c.triggers).toEqual({ crons: ["*/10 * * * *"] });
+  expect(JSON.parse(doorbellConfig({ APP_ID: "1", INSTALLATION_ID: "7", HUB: "o/h", HUB_ID: "5", OWNER_ID: "4", INTERVAL: "60" })).triggers).toEqual({ crons: ["0 * * * *"] });
   expect(c.name).toBe("tapster-doorbell");
   expect(c.main).toBe("worker.ts");
   expect(c.workers_dev).toBe(true);
-  expect(c.vars).toEqual({ APP_ID: "1001", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42" });
+  expect(c.vars).toEqual({ APP_ID: "1001", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42", INTERVAL: "10" });
   expect(text).not.toContain("APP_KEY");
-  expect(() => doorbellConfig({ APP_ID: "x", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42" })).toThrow();
+  expect(() => doorbellConfig({ APP_ID: "x", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42", INTERVAL: "10" })).toThrow();
 });
 
 test("the Worker address comes from Wrangler's output file", () => {

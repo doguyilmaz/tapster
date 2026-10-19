@@ -108,32 +108,36 @@ test("the key set is cached for an hour, fetched again for an unknown kid at mos
 });
 
 type Call = { method: string; url: string; body: unknown; auth: string | null };
-function fakeGitHub(dispatchStatus = 204): { calls: Call[]; fetchImpl: typeof fetch } {
+function fakeGitHub(dispatchStatus = 204, state = "active", lastRun: number | null = null): { calls: Call[]; fetchImpl: typeof fetch } {
   const calls: Call[] = [];
   const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
     calls.push({ method: init?.method ?? "GET", url: u, body: init?.body ? JSON.parse(String(init.body)) : null, auth: new Headers(init?.headers).get("authorization") });
     if (u.endsWith("/app/installations/77/access_tokens")) return Response.json({ token: "ghs_installationtoken" }, { status: 201 });
     if (u.endsWith("/dispatches")) return new Response(null, { status: dispatchStatus });
+    if (u.endsWith("/actions/workflows/tapster.yml")) return Response.json({ state });
+    if (u.endsWith("/actions/workflows/tapster.yml/enable")) return new Response(null, { status: 204 });
+    if (u.includes("/actions/workflows/tapster.yml/runs")) return Response.json({ workflow_runs: lastRun === null ? [] : [{ created_at: new Date(lastRun * 1000).toISOString() }] });
     if (u.endsWith("/installation/token")) return new Response(null, { status: 204 });
     return new Response("no", { status: 404 });
   };
   return { calls, fetchImpl: fetchImpl as unknown as typeof fetch };
 }
 
-const env = () => ({ APP_ID: "1001", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42", APP_KEY: appPem });
+const env = () => ({ APP_ID: "1001", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42", INTERVAL: "10", APP_KEY: appPem });
 
 test("the dispatch asks for an Actions-only token on the hub and always revokes it", async () => {
   const gh = fakeGitHub();
   await dispatch(env(), gh.fetchImpl, NOW);
   expect(gh.calls.map((c) => `${c.method} ${c.url.replace("https://api.github.com", "")}`)).toEqual([
     "POST /app/installations/77/access_tokens",
+    "GET /repos/o/homebrew-tap/actions/workflows/tapster.yml",
     "POST /repos/o/homebrew-tap/actions/workflows/tapster.yml/dispatches",
     "DELETE /installation/token",
   ]);
   expect(gh.calls[0]!.body).toEqual({ repository_ids: [555], permissions: { actions: "write" } });
-  expect(gh.calls[1]!.body).toEqual({ ref: "main" });
-  expect(gh.calls[1]!.auth).toBe("Bearer ghs_installationtoken");
+  expect(gh.calls[2]!.body).toEqual({ ref: "main" });
+  expect(gh.calls[2]!.auth).toBe("Bearer ghs_installationtoken");
   const failing = fakeGitHub(422);
   await expect(dispatch(env(), failing.fetchImpl, NOW)).rejects.toThrow(DoorbellError);
   expect(failing.calls.at(-1)!.method).toBe("DELETE");
@@ -186,4 +190,32 @@ test("rings that arrive together share one key set fetch, and a failed fetch is 
   fail = false;
   expect(await broken("k1")).toEqual(jwk);
   expect(calls).toBe(3);
+});
+
+const paths = (gh: { calls: Call[] }) => gh.calls.map((c) => `${c.method} ${c.url.replace("https://api.github.com/repos/o/homebrew-tap", "")}`);
+
+test("a workflow GitHub paused for inactivity is turned back on, one the owner disabled stays off", async () => {
+  const paused = fakeGitHub(204, "disabled_inactivity");
+  await dispatch(env(), paused.fetchImpl, NOW);
+  expect(paths(paused)).toContain("PUT /actions/workflows/tapster.yml/enable");
+  expect(paths(paused)).toContain("POST /actions/workflows/tapster.yml/dispatches");
+  const off = fakeGitHub(204, "disabled_manually");
+  await expect(dispatch(env(), off.fetchImpl, NOW)).rejects.toThrow(/disabled/);
+  expect(paths(off).some((p) => p.includes("/enable") || p.includes("/dispatches"))).toBe(false);
+  expect(off.calls.at(-1)!.method).toBe("DELETE");
+});
+
+test("the cron tick starts the hub only when no run started within the interval", async () => {
+  const recent = fakeGitHub(204, "active", NOW - 5 * 60);
+  expect(await dispatch(env(), recent.fetchImpl, NOW, { tick: true })).toBe("skipped");
+  expect(paths(recent).some((p) => p.includes("/dispatches"))).toBe(false);
+  const quiet = fakeGitHub(204, "active", NOW - 11 * 60);
+  expect(await dispatch(env(), quiet.fetchImpl, NOW, { tick: true })).toBe("dispatched");
+  const never = fakeGitHub(204, "active", null);
+  expect(await dispatch(env(), never.fetchImpl, NOW, { tick: true })).toBe("dispatched");
+});
+
+test("the Worker runs the tick on its cron", async () => {
+  const worker = (await import("../src/doorbell/worker")).default as { scheduled?: unknown };
+  expect(typeof worker.scheduled).toBe("function");
 });

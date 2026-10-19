@@ -16,6 +16,7 @@ import * as workerText from "../doorbell/worker.ts" with { type: "text" };
 import { appFromManifest, openUrl } from "./appflow";
 import { setEnvVariable } from "./gh";
 import { ask } from "./prompt";
+import { workerCron } from "./schedule";
 
 const source = (m: unknown) => (m as { default: string }).default;
 
@@ -38,14 +39,15 @@ export function doorbellManifest(owner: string, hub: string, redirect: string): 
   };
 }
 
-export type DoorbellVars = { APP_ID: string; INSTALLATION_ID: string; HUB: string; HUB_ID: string; OWNER_ID: string };
+export type DoorbellVars = { APP_ID: string; INSTALLATION_ID: string; HUB: string; HUB_ID: string; OWNER_ID: string; INTERVAL: string };
 
 export function doorbellConfig(vars: DoorbellVars): string {
-  for (const k of ["APP_ID", "INSTALLATION_ID", "HUB_ID", "OWNER_ID"] as const) {
+  for (const k of ["APP_ID", "INSTALLATION_ID", "HUB_ID", "OWNER_ID", "INTERVAL"] as const) {
     if (!/^[0-9]+$/.test(vars[k])) throw new TapsterError(`${k} must be a number`, "Run tapster init --doorbell again.");
   }
   if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(vars.HUB)) throw new TapsterError("the hub name is not owner/repo", "Run it in the hub clone.");
-  return `${JSON.stringify({ name: "tapster-doorbell", main: "worker.ts", compatibility_date: "2026-10-01", workers_dev: true, vars }, null, 2)}\n`;
+  const triggers = { crons: [workerCron(Number(vars.INTERVAL))] };
+  return `${JSON.stringify({ name: "tapster-doorbell", main: "worker.ts", compatibility_date: "2026-10-01", workers_dev: true, vars, triggers }, null, 2)}\n`;
 }
 
 export function workerOrigin(output: string): string | null {
@@ -136,7 +138,7 @@ async function waitForInstall(appId: string, pem: string, hub: string): Promise<
   throw new TapsterError(`the doorbell App was never installed on ${hub}`, `Install it on ${hub}, then ${AGAIN.charAt(0).toLowerCase()}${AGAIN.slice(1)}`);
 }
 
-export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, setRepoVariable: (repo: string, name: string, value: string) => Promise<void>): Promise<void> {
+export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, setRepoVariable: (repo: string, name: string, value: string) => Promise<void>, every: number): Promise<void> {
   const vars = await gh.json<Vars>("GET", `/repos/${hub}/environments/tapster/variables`);
   const stage = doorbellStage(vars);
   if (stage === "done") {
@@ -165,7 +167,7 @@ export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, 
     const hubId = (await gh.getRepo(hub)).id;
     await writeFile(join(w.dir, "worker.ts"), source(workerText));
     await writeFile(join(w.dir, "jwt.ts"), source(jwtText));
-    await writeFile(join(w.dir, "wrangler.jsonc"), doorbellConfig({ APP_ID: appId, INSTALLATION_ID: String(installation), HUB: hub, HUB_ID: String(hubId), OWNER_ID: String(ownerId) }));
+    await writeFile(join(w.dir, "wrangler.jsonc"), doorbellConfig({ APP_ID: appId, INSTALLATION_ID: String(installation), HUB: hub, HUB_ID: String(hubId), OWNER_ID: String(ownerId), INTERVAL: String(every) }));
     const outFile = join(w.dir, "out.ndjson");
     const deployed = await w.run(["deploy"], { env: { WRANGLER_OUTPUT_FILE_PATH: outFile } });
     if (deployed.code !== 0) throw new TapsterError("Wrangler could not deploy the doorbell", `${AGAIN} Wrangler's own message is above.`);

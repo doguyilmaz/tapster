@@ -18,6 +18,7 @@ import { rotateDoorbell, setupDoorbell } from "./doorbell";
 import { currentRepo, deleteEnvSecret, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
 import { type KeyRef, type Store, localStore, newSparkleKey, requireStore } from "./keystore";
 import { cleanPath, readInput } from "./paths";
+import { cronFor, everyFromFlow } from "./schedule";
 import { ask } from "./prompt";
 
 type Pins = typeof pinsJson;
@@ -97,8 +98,9 @@ export function keyPins(config: HubConfig, label: string, publicKey: string): st
   return users;
 }
 
-export function fillWorkflow(template: string, pins: Pins, tapster: { sha: string; tag: string }, labels: string[] = []): string {
+export function fillWorkflow(template: string, pins: Pins, tapster: { sha: string; tag: string }, labels: string[] = [], every = 10): string {
   return template
+    .replaceAll("__CRON__", cronFor(every))
     .replaceAll("__SPARKLE_ENV__", sparkleEnv(labels))
     .replaceAll("__CHECKOUT_SHA__", pins["actions/checkout"].sha)
     .replaceAll("__CHECKOUT_TAG__", pins["actions/checkout"].tag)
@@ -265,13 +267,22 @@ function hubConfig(dir: string, hub: string): HubConfig {
 
 const FLOW = ".github/workflows/tapster.yml";
 
-async function writeWorkflow(gh: GitHub, dir: string, labels: string[], flag: string | null): Promise<void> {
+type Schedule = { every: number | null; isPrivate: boolean };
+
+async function writeWorkflow(gh: GitHub, dir: string, labels: string[], flag: string | null, schedule: Schedule): Promise<void> {
   const ref = await tapsterPin(gh, TAPSTER, flag);
   const before = existsSync(join(dir, FLOW)) ? readFileSync(join(dir, FLOW), "utf8") : null;
-  const after = fillWorkflow(hubWorkflow, pinsJson, ref, labels);
+  const kept = before === null ? null : everyFromFlow(before);
+  const every = schedule.every ?? kept ?? (schedule.isPrivate ? 60 : 10);
+  const after = fillWorkflow(hubWorkflow, pinsJson, ref, labels, every);
   await mkdir(join(dir, ".github/workflows"), { recursive: true });
   await writeFile(join(dir, FLOW), after);
   console.log(`wrote ${FLOW} from the template, ${pinChange(before, after)}; hand edits in it are replaced`);
+  if (every === kept) return;
+  console.log(`The hub looks for new drafts every ${every} minutes; change it with tapster init --workflow --every <minutes>.`);
+  if (schedule.isPrivate && every >= 60 && schedule.every === null) {
+    console.log("GitHub bills every run of a private hub as at least one minute: every 10 minutes would use about 4,300 of the 2,000 free minutes a month. The doorbell (tapster init --doorbell) still publishes right after each release.");
+  }
 }
 
 async function updateSparkleEnv(dir: string, labels: string[]): Promise<void> {
@@ -388,7 +399,7 @@ async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean)
   if (!config.packages.some((p) => !isApp(p) && p.linux)) console.log("No package sets linux: true yet; add it to the CLI packages that should ship to apt and dnf.");
 }
 
-async function writeFiles(gh: GitHub, dir: string, hub: string, flag: string | null): Promise<void> {
+async function writeFiles(gh: GitHub, dir: string, hub: string, flag: string | null, schedule: Schedule): Promise<void> {
   const [owner, repo] = hub.split("/") as [string, string];
   const tap = `${owner}/${repo.replace(/^homebrew-/, "")}`;
   const write = async (path: string, content: string) => {
@@ -400,7 +411,7 @@ async function writeFiles(gh: GitHub, dir: string, hub: string, flag: string | n
   await write("tapster.yml", `version: 1\ntap: ${tap}\npackages: []\n`);
   await write(".tapster/state.json", `${JSON.stringify({ version: 1, packages: {} }, null, 2)}\n`);
   await write("README.md", hubReadme.replaceAll("__TAP__", tap).replaceAll("__OWNER__", owner).replaceAll("__HUB__", hub));
-  await writeWorkflow(gh, dir, [], flag);
+  await writeWorkflow(gh, dir, [], flag, schedule);
 }
 
 async function askYes(question: string): Promise<boolean> {
@@ -421,12 +432,21 @@ async function hubState(gh: GitHub, hub: string): Promise<{ vars: string[]; secr
   return { vars: await names("variables"), secrets: await names("secrets"), private: (await gh.getRepo(hub)).private };
 }
 
+function takeOption(argv: string[], name: string): { value: string | null; rest: string[] } {
+  const at = argv.indexOf(name);
+  if (at < 0) return { value: null, rest: argv };
+  return { value: argv[at + 1] ?? "", rest: argv.filter((_, i) => i !== at && i !== at + 1) };
+}
+
 export async function init(argv: string[]): Promise<void> {
-  const at = argv.indexOf("--tapster");
-  const flag = at >= 0 ? (argv[at + 1] ?? "") : null;
-  const args = at >= 0 ? argv.filter((_, i) => i !== at && i !== at + 1) : argv;
-  if (flag !== null && args.length > 0 && !(args[0] === "--workflow" && args.length === 1)) {
-    throw new TapsterError("--tapster goes only with tapster init or init --workflow", "Those are the commands that write the workflow.");
+  const pinned = takeOption(argv, "--tapster");
+  const timed = takeOption(pinned.rest, "--every");
+  const flag = pinned.value;
+  const args = timed.rest;
+  const every = timed.value === null ? null : Number(timed.value);
+  if (every !== null) cronFor(every);
+  if ((flag !== null || every !== null) && args.length > 0 && !(args[0] === "--workflow" && args.length === 1)) {
+    throw new TapsterError("--tapster and --every go only with tapster init or init --workflow", "Those are the commands that write the workflow.");
   }
   const dir = process.cwd();
   const hub = await currentRepo(dir);
@@ -438,14 +458,17 @@ export async function init(argv: string[]): Promise<void> {
   if (rotate === "doorbell") return rotateDoorbell(gh, hub);
   if (rotate === "linux" && args[2] === "--finish" && args.length === 3) return finishLinuxRotation(gh, hub);
   if (rotate === "linux" && args.length === 2) return setupLinux(gh, dir, hub, true);
-  if (args[0] === "--doorbell" && args.length === 1) return setupDoorbell(gh, hub, hubConfig(dir, hub), setRepoVariable);
+  if (args[0] === "--doorbell" && args.length === 1) {
+    const flow = join(dir, FLOW);
+    return setupDoorbell(gh, hub, hubConfig(dir, hub), setRepoVariable, (existsSync(flow) && everyFromFlow(readFileSync(flow, "utf8"))) || 10);
+  }
   if (args[0] === "--linux" && args.length === 1) return setupLinux(gh, dir, hub, false);
   if (args[0] === "--sparkle" && args[1] && args[2] === "--new" && args.length === 3) return createSparkleKey(dir, hub, args[1]);
   if (args[0] === "--sparkle" && args[1]) {
     const account = args[2] === "--account" && args[3] ? args[3] : args.length === 2 ? "ed25519" : null;
     if (account) return storeSparkleKey(gh, dir, hub, args[1], account);
   }
-  if (args[0] === "--workflow" && args.length === 1) return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)), flag);
+  if (args[0] === "--workflow" && args.length === 1) return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)), flag, { every, isPrivate: (await gh.getRepo(hub)).private });
   if (args.length) {
     throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, init --rotate app|certificate|notary|doorbell|linux, init --sparkle <label> [--account <account>], init --doorbell, init --linux or init --workflow.");
   }
@@ -460,7 +483,7 @@ export async function init(argv: string[]): Promise<void> {
     if (step === "app") await createApp(hub.split("/")[0]!, hub);
     if (step === "certificate") await storeCertificate(hub);
     if (step === "notary") await storeNotary(hub);
-    if (step === "files") await writeFiles(gh, dir, hub, flag);
+    if (step === "files") await writeFiles(gh, dir, hub, flag, { every, isPrivate: have.private });
   }
   if (!mac) console.log("Skipped the Apple credentials. Add them later with tapster init --rotate certificate and tapster init --rotate notary.");
   console.log("\nDone. Review and commit the new files, push, then run tapster add in each project.");
