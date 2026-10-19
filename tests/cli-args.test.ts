@@ -44,3 +44,9 @@ test("errors from the user's token name the user's sign-in, not the App", async 
   const app = new GitHub("t", deny, async () => {});
   await expect(app.json("GET", "/repos/o/r")).rejects.toMatchObject({ fix: expect.stringContaining("App") });
 });
+
+test("tapster --version names the version and the commit it pins hubs to", () => {
+  const res = cli(["--version"]);
+  expect(res.exitCode).toBe(0);
+  expect(res.stdout.toString().trim()).toBe("tapster 0.0.0-dev (built from a checkout; init --workflow needs --tapster <commit>)");
+});

@@ -3,6 +3,7 @@ import { TapsterError } from "../errors";
 import { add } from "./add";
 import { doctor } from "./doctor";
 import { init } from "./init";
+import { TAPSTER } from "../version";
 
 const usage = `tapster: publish your projects' releases from one Homebrew tap
 
@@ -15,7 +16,8 @@ const usage = `tapster: publish your projects' releases from one Homebrew tap
                                rewrite the hub workflow, pinned to this tapster
   tapster init --rotate app|certificate|notary|doorbell|linux
   tapster add                  prepare this project clone for the hub
-  tapster doctor               check the hub's setup`;
+  tapster doctor               check the hub's setup
+  tapster --version            show this tapster and the commit it pins hubs to`;
 
 const help: Record<string, string> = {
   init: `tapster init: set up the hub in this clone; every step can run again and skips what is done
@@ -46,7 +48,9 @@ const help: Record<string, string> = {
 
 const [cmd, ...args] = process.argv.slice(2);
 try {
-  if (cmd && help[cmd] && (args[0] === "--help" || args[0] === "-h")) console.log(help[cmd]);
+  if (cmd === "--version" || cmd === "-v") {
+    console.log(`tapster ${TAPSTER.version} (${TAPSTER.sha ? TAPSTER.sha.slice(0, 12) : "built from a checkout; init --workflow needs --tapster <commit>"})`);
+  } else if (cmd && help[cmd] && (args[0] === "--help" || args[0] === "-h")) console.log(help[cmd]);
   else if (cmd === "init") await init(args);
   else if (cmd === "add") await add(args);
   else if (cmd === "doctor") {
