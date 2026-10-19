@@ -32,8 +32,18 @@ function asDict(v: PlistValue, where: string): Dict {
   return v;
 }
 
+const isLink = (p: string) => {
+  try {
+    return lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
+
 function readBundle(dir: string, framework: boolean): Bundle | null {
-  const infoPath = framework ? join(dir, "Resources", "Info.plist") : join(dir, "Contents", "Info.plist");
+  const folder = join(dir, framework ? "Resources" : "Contents");
+  const infoPath = join(folder, "Info.plist");
+  if (isLink(folder) || isLink(infoPath)) throw bad(`has a bundle whose ${isLink(folder) ? "folder" : "Info.plist"} is a symlink: ${infoPath}`);
   if (!isRealFile(infoPath)) return null;
   const info = asDict(parsePlist(readFileSync(infoPath)), infoPath);
   const exe = info.CFBundleExecutable;
@@ -49,7 +59,7 @@ export function findCode(appDir: string): CodeItem[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isSymbolicLink()) continue;
-      if (entry.name === "embedded.provisionprofile") throw bad("holds a provisioning profile, which tapster does not sign with");
+      if (entry.name.toLowerCase() === "embedded.provisionprofile") throw bad("holds a provisioning profile, which tapster does not sign with");
       if (entry.isDirectory()) {
         const versions = join(path, "Versions");
         if (entry.name.endsWith(".framework") && isRealDir(versions)) {

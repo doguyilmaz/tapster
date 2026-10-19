@@ -114,3 +114,26 @@ test("bundle identifiers come with the items", () => {
   expect(items.find((i) => i.path.endsWith("Installer.xpc"))!.bundleId).toBe("x");
   expect(items.find((i) => i.kind === "file")!.bundleId).toBeNull();
 });
+
+test("Info.plist files and Contents folders reached through symlinks are refused", () => {
+  const linkedPlist = tree(
+    {
+      "App.app/Contents/Info.plist": plist("App"),
+      "App.app/Contents/MacOS/App": MACHO,
+      "App.app/Contents/Resources/feed.plist": plist("H", "<key>SUFeedURL</key><string>https://x</string>"),
+      "App.app/Contents/Helpers/H.app/Contents/MacOS/H": MACHO,
+    },
+    { "App.app/Contents/Helpers/H.app/Contents/Info.plist": "../../../Resources/feed.plist" },
+  );
+  expect(() => findCode(linkedPlist)).toThrow(TapsterError);
+  const linkedContents = tree(
+    { "App.app/Contents/Info.plist": plist("App"), "App.app/Contents/MacOS/App": MACHO, "App.app/Real/Info.plist": plist("H", "<key>SUPublicEDKey</key><string>k</string>"), "App.app/Real/MacOS/H": MACHO },
+    { "App.app/Contents/Helpers/H.app/Contents": "../../../Real" },
+  );
+  expect(() => findCode(linkedContents)).toThrow(TapsterError);
+});
+
+test("a provisioning profile is found in any letter case", () => {
+  const app = tree({ "App.app/Contents/Info.plist": plist("App"), "App.app/Contents/MacOS/App": MACHO, "App.app/Contents/Embedded.ProvisionProfile": "x" });
+  expect(() => findCode(app)).toThrow(TapsterError);
+});
