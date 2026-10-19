@@ -201,10 +201,17 @@ export function withoutMac(entry: string): string | null {
   return lines.join("\n");
 }
 
-export async function installOnProject(gh: GitHub, slug: string, repo: string): Promise<string> {
+export async function appInstallUrl(gh: GitHub, slug: string, repo: string): Promise<string> {
   const project = await gh.getRepo(repo);
   const owner = await gh.json<{ id: number }>("GET", `/users/${repo.split("/")[0]}`);
-  return `- open this page and choose Install, unless the hub's App already reaches ${repo}; the project is preselected (keep "Only select repositories"):\n  ${installLink(slug, owner.id, project.id)}`;
+  return installLink(slug, owner.id, project.id);
+}
+
+export const installSentence = (repo: string, url: string) =>
+  `- open this page and choose Install, unless the hub's App already reaches ${repo}; the project is preselected (keep "Only select repositories"):\n  ${url}`;
+
+export async function installOnProject(gh: GitHub, slug: string, repo: string): Promise<string> {
+  return installSentence(repo, await appInstallUrl(gh, slug, repo));
 }
 
 export function platformsOf(entry: string): Platform[] {
