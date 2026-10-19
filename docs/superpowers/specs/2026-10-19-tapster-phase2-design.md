@@ -274,7 +274,9 @@ runtime flag and the identifier (§1.8).
 
 No step with credentials runs project code. `codesign`, `notarytool` and `stapler` read the project's Mach-O files, as
 in phase 1. `plutil` reads the app's property lists in fetch, where only the App key is in memory and its child gets
-none.
+none in its own environment. (Correction, 2026-10-19: deleting a variable from `process.env` does not remove it from
+the process's initial environment, which other processes of the runner's user can read. The isolation that holds is
+between jobs, not between steps or child processes; that is why each job runs only the tools it needs.)
 
 What the checks cannot see: a display name of another app that differs from its `app` name in `tapster.yml`; a
 Sparkle older than 2.9 linked into the app some other way than `Contents/Frameworks/Sparkle.framework`. Both need

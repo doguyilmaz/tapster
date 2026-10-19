@@ -16,6 +16,7 @@ import * as workerText from "../doorbell/worker.ts" with { type: "text" };
 import { appFromManifest, openUrl } from "./appflow";
 import { setEnvVariable } from "./gh";
 import { ask } from "./prompt";
+import { removeTemp, tempDir } from "./temp";
 import { workerCron } from "./schedule";
 
 const source = (m: unknown) => (m as { default: string }).default;
@@ -100,7 +101,7 @@ function findNode(): string {
 type Wrangler = { dir: string; run(args: string[], opts?: { stdin?: string; env?: Record<string, string>; interactive?: boolean }): Promise<{ code: number; stdout: string }> };
 
 async function installWrangler(): Promise<Wrangler> {
-  const dir = await mkdtemp("/tmp/tapster-doorbell-");
+  const dir = tempDir("tapster-doorbell-");
   await writeFile(join(dir, "package.json"), `${JSON.stringify(wranglerPackage, null, 2)}\n`);
   await writeFile(join(dir, "bun.lock"), wranglerLock);
   await runPath(process.execPath, "bun", ["install", "--frozen-lockfile", "--ignore-scripts"], { cwd: dir, env: bunEnv(process.env.PATH ?? "") });
@@ -179,7 +180,7 @@ export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, 
     await setEnvVariable(hub, "TAPSTER_DOORBELL", origin);
     console.log(`The doorbell answers at ${origin}. Projects ring it after opening a draft.`);
   } finally {
-    await rm(w.dir, { recursive: true, force: true });
+    removeTemp(w.dir);
   }
 }
 
@@ -194,7 +195,7 @@ export async function rotateDoorbell(gh: GitHub, hub: string): Promise<void> {
     const key = createPrivateKey(pem).export({ type: "pkcs8", format: "pem" }).toString();
     if ((await w.run(["secret", "put", "APP_KEY", "--name", "tapster-doorbell"], { stdin: key })).code !== 0) throw new TapsterError("Wrangler could not store the doorbell key", "Check that the Worker tapster-doorbell exists in your Cloudflare account.");
   } finally {
-    await rm(w.dir, { recursive: true, force: true });
+    removeTemp(w.dir);
   }
   console.log("Stored the new key. Now delete every other key on the App's settings page.");
 }

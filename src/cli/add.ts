@@ -14,6 +14,7 @@ import pinsJson from "../../templates/pins.json";
 import appTemplate from "../../templates/project/app-release.yml" with { type: "text" };
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
+import { removeTemp, tempDir } from "./temp";
 import { autoTagSteps, binName, bunEntry, goEntry, hubName, installOnProject, proposeEntry } from "./hubpr";
 import { ask } from "./prompt";
 
@@ -334,13 +335,13 @@ async function setupAutoTag(gh: GitHub, repo: string, branch: string): Promise<s
   if (!policies.branch_policies.some((p) => p.name === branch)) {
     await gh.json("POST", `/repos/${repo}/environments/release/deployment-branch-policies`, { name: branch, type: "branch" });
   }
-  const dir = mkdtempSync(join(tmpdir(), "tapster-tag-"));
+  const dir = tempDir("tapster-tag-");
   try {
     await runPath("/usr/bin/ssh-keygen", "ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", `tapster tags for ${repo}`, "-f", join(dir, "key")]);
     await setEnvSecret(repo, "TAPSTER_TAG_KEY", readFileSync(join(dir, "key"), "utf8"), "release");
     await gh.json("POST", `/repos/${repo}/keys`, { title: "tapster tags", key: readFileSync(join(dir, "key.pub"), "utf8").trim(), read_only: false });
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    removeTemp(dir);
   }
   const others = keys.filter((k) => !k.read_only).map((k) => k.title);
   return [

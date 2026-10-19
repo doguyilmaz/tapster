@@ -287,7 +287,7 @@ default) once a package sets `linux: true`.
 | A changed archive between publish and packaging | `checksums.txt` must match the digest recorded at publish; each archive must match `checksums.txt`. Both jobs check. |
 | nfpm or anything in `linux-build` is compromised | `linux-sign` trusts nothing from it: it rebuilds what each package must contain from the release archives and refuses any other content, metadata or script. |
 | An Ubuntu tool in `linux-sign` is compromised | Out of scope; the job runs only Ubuntu's own packages and keeps the key on disk only while `gpg` and `rpmsign` run. |
-| The key leaks | It lives in the `tapster` environment and reaches only `gpg` through stdin and a temporary folder. The leak test covers it. Rotate with `init --linux`. |
+| The key leaks | It lives in the `tapster` environment and reaches `gpg` through stdin and a temporary folder. It also stays in the action process's initial environment, which any process of the runner's user can read, so the job boundary is what isolates it (correction, 2026-10-19). The leak test covers the logs. Rotate with `init --rotate linux`. |
 | An old repository state is replayed to users | Accepted: `Release` has no `Valid-Until` and `repomd.xml` is not signed, as for most third-party repositories. Packages stay signed. |
 | A new release replaces an old package while a user's metadata is cached | Only the latest version is served. apt users run `apt update`; dnf refreshes within an hour. |
 

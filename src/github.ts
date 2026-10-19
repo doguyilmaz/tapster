@@ -17,6 +17,14 @@ export type Release = {
 export type Repo = { id: number; private: boolean; description: string | null; html_url: string; default_branch: string };
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
+const USER_HINTS: Record<number, string> = {
+  401: "Your GitHub sign-in was rejected; run gh auth login again.",
+  403: "Your account may not do this here; check that you own the repository, then run gh auth refresh to renew the sign-in.",
+  404: "Not found, or your gh sign-in cannot see it; check the name and run gh auth status.",
+  409: "GitHub reported a conflict; run the command again.",
+  422: "GitHub rejected the request.",
+};
+
 const HINTS: Record<number, string> = {
   401: "The credential was rejected; rotate it with tapster init --rotate.",
   403: "Access denied: check the App's permissions and that it is installed on this repository.",
@@ -40,6 +48,7 @@ export class GitHub {
     private readonly token: string,
     private readonly fetchImpl: FetchLike = fetch,
     private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+    private readonly who: "app" | "user" = "app",
   ) {}
 
   async request(method: string, url: string, init: RequestInitLite = {}): Promise<Response> {
@@ -70,7 +79,8 @@ export class GitHub {
       }
       if (res.status >= 400) {
         await res.body?.cancel();
-        throw new GitHubError(`GitHub ${method} ${pathOf(full)} returned ${res.status}`, HINTS[res.status] ?? "The next run retries.", res.status);
+        const hints = this.who === "user" ? USER_HINTS : HINTS;
+        throw new GitHubError(`GitHub ${method} ${pathOf(full)} returned ${res.status}`, hints[res.status] ?? (this.who === "user" ? "Try again in a moment." : "The next run retries."), res.status);
       }
       return res;
     }

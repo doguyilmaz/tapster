@@ -18,6 +18,7 @@ import { rotateDoorbell, setupDoorbell } from "./doorbell";
 import { currentRepo, deleteEnvSecret, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
 import { type KeyRef, type Store, localStore, newSparkleKey, requireStore } from "./keystore";
 import { cleanPath, readInput } from "./paths";
+import { removeTemp, tempDir } from "./temp";
 import { cronFor, everyFromFlow } from "./schedule";
 import { ask } from "./prompt";
 
@@ -376,7 +377,7 @@ async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean)
     await gh.json("PUT", `/repos/${hub}/pages`, { build_type: "workflow" });
   });
   console.log("GitHub Pages serves the hub from GitHub Actions.");
-  const home = mkdtempSync("/tmp/tl-");
+  const home = tempDir("tl-");
   const env = { GNUPGHOME: home };
   try {
     await runPath(gpg, "gpg", ["--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-gen-key", `${hub.split("/")[0]} tapster (${hub})`, "rsa4096", "sign", "never"], { env });
@@ -400,7 +401,7 @@ async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean)
     else if (rotate) console.log("The previous key is not in your keychain, so apt and dnf users must fetch the new key before they can update.");
   } finally {
     await runPath(join(gpg, "..", "gpgconf"), "gpgconf", ["--kill", "all"], { env, allowFail: true }).catch(() => undefined);
-    await rm(home, { recursive: true, force: true });
+    removeTemp(home);
   }
   if (!config.packages.some((p) => !isApp(p) && p.linux)) console.log("No package sets linux: true yet; add it to the CLI packages that should ship to apt and dnf.");
 }
@@ -444,40 +445,62 @@ function takeOption(argv: string[], name: string): { value: string | null; rest:
   return { value: argv[at + 1] ?? "", rest: argv.filter((_, i) => i !== at && i !== at + 1) };
 }
 
+export type InitAction =
+  | { kind: "setup" }
+  | { kind: "rotate"; what: "app" | "certificate" | "notary" | "doorbell" | "linux" | "linux-finish" }
+  | { kind: "doorbell" }
+  | { kind: "linux" }
+  | { kind: "sparkle"; label: string; account: string }
+  | { kind: "sparkle-new"; label: string }
+  | { kind: "workflow" };
+
+const INIT_USAGE = "Run tapster init --help for the options.";
+
+export function initAction(args: string[]): InitAction {
+  const [a, b, c, d] = args;
+  if (args.length === 0) return { kind: "setup" };
+  if (a === "--rotate" && args.length === 2 && ["app", "certificate", "notary", "doorbell", "linux"].includes(b ?? "")) return { kind: "rotate", what: b as "app" };
+  if (a === "--rotate" && b === "linux" && c === "--finish" && args.length === 3) return { kind: "rotate", what: "linux-finish" };
+  if (a === "--doorbell" && args.length === 1) return { kind: "doorbell" };
+  if (a === "--linux" && args.length === 1) return { kind: "linux" };
+  if (a === "--workflow" && args.length === 1) return { kind: "workflow" };
+  if (a === "--sparkle" && b && !b.startsWith("-")) {
+    if (args.length === 2) return { kind: "sparkle", label: b, account: "ed25519" };
+    if (c === "--new" && args.length === 3) return { kind: "sparkle-new", label: b };
+    if (c === "--account" && d && args.length === 4) return { kind: "sparkle", label: b, account: d };
+  }
+  throw new TapsterError(`unknown option ${args.join(" ")}`, INIT_USAGE);
+}
+
 export async function init(argv: string[]): Promise<void> {
   const pinned = takeOption(argv, "--tapster");
   const timed = takeOption(pinned.rest, "--every");
   const flag = pinned.value;
-  const args = timed.rest;
   const every = timed.value === null ? null : Number(timed.value);
+  const action = initAction(timed.rest);
   if (every !== null) cronFor(every);
-  if ((flag !== null || every !== null) && args.length > 0 && !(args[0] === "--workflow" && args.length === 1)) {
+  if ((flag !== null || every !== null) && action.kind !== "setup" && action.kind !== "workflow") {
     throw new TapsterError("--tapster and --every go only with tapster init or init --workflow", "Those are the commands that write the workflow.");
   }
   const dir = process.cwd();
   const hub = await currentRepo(dir);
   const gh = await userGitHub();
-  const rotate = args[0] === "--rotate" ? args[1] : null;
-  if (rotate === "app") return rotateAppKey(gh, hub);
-  if (rotate === "certificate") return storeCertificate(hub);
-  if (rotate === "notary") return storeNotary(hub);
-  if (rotate === "doorbell") return rotateDoorbell(gh, hub);
-  if (rotate === "linux" && args[2] === "--finish" && args.length === 3) return finishLinuxRotation(gh, hub);
-  if (rotate === "linux" && args.length === 2) return setupLinux(gh, dir, hub, true);
-  if (args[0] === "--doorbell" && args.length === 1) {
+  if (action.kind === "rotate") {
+    if (action.what === "app") return rotateAppKey(gh, hub);
+    if (action.what === "certificate") return storeCertificate(hub);
+    if (action.what === "notary") return storeNotary(hub);
+    if (action.what === "doorbell") return rotateDoorbell(gh, hub);
+    if (action.what === "linux-finish") return finishLinuxRotation(gh, hub);
+    return setupLinux(gh, dir, hub, true);
+  }
+  if (action.kind === "doorbell") {
     const flow = join(dir, FLOW);
     return setupDoorbell(gh, hub, hubConfig(dir, hub), setRepoVariable, (existsSync(flow) && everyFromFlow(readFileSync(flow, "utf8"))) || 10);
   }
-  if (args[0] === "--linux" && args.length === 1) return setupLinux(gh, dir, hub, false);
-  if (args[0] === "--sparkle" && args[1] && args[2] === "--new" && args.length === 3) return createSparkleKey(dir, hub, args[1]);
-  if (args[0] === "--sparkle" && args[1]) {
-    const account = args[2] === "--account" && args[3] ? args[3] : args.length === 2 ? "ed25519" : null;
-    if (account) return storeSparkleKey(gh, dir, hub, args[1], account);
-  }
-  if (args[0] === "--workflow" && args.length === 1) return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)), flag, { every, isPrivate: (await gh.getRepo(hub)).private });
-  if (args.length) {
-    throw new TapsterError(`unknown option ${args.join(" ")}`, "Use tapster init, init --rotate app|certificate|notary|doorbell|linux, init --sparkle <label> [--account <account>], init --doorbell, init --linux or init --workflow.");
-  }
+  if (action.kind === "linux") return setupLinux(gh, dir, hub, false);
+  if (action.kind === "sparkle-new") return createSparkleKey(dir, hub, action.label);
+  if (action.kind === "sparkle") return storeSparkleKey(gh, dir, hub, action.label, action.account);
+  if (action.kind === "workflow") return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)), flag, { every, isPrivate: (await gh.getRepo(hub)).private });
   const have = await hubState(gh, hub);
   const hasApple = have.vars.includes("TAPSTER_TEAM_ID") || have.secrets.includes("MACOS_NOTARY_KEY");
   const mac = hasApple || (await askYes("Will this hub sign software for macOS (Mac apps or CLI tools with macOS builds)? [Y/n] "));

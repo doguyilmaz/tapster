@@ -8,31 +8,40 @@ const userEnv = (): Record<string, string> => ({
   GH_PROMPT_DISABLED: "1",
 });
 
+export function cliGh(candidates?: string[]): string {
+  try {
+    return ghPath(candidates);
+  } catch {
+    throw new TapsterError("the GitHub CLI (gh) is not installed", "Install it (brew install gh, or see https://cli.github.com), sign in with gh auth login, then run this again.");
+  }
+}
+
 export async function userGitHub(): Promise<GitHub> {
-  const token = (await runPath(ghPath(), "gh", ["auth", "token"], { env: userEnv() })).stdout.trim();
-  if (!token) throw new TapsterError("gh is not signed in", "Run gh auth login, then try again.");
-  return new GitHub(token);
+  const res = await runPath(cliGh(), "gh", ["auth", "token"], { env: userEnv(), allowFail: true });
+  const token = res.stdout.trim();
+  if (res.code !== 0 || !token) throw new TapsterError("gh is not signed in", "Run gh auth login, then try again.");
+  return new GitHub(token, fetch, undefined, "user");
 }
 
 export async function currentRepo(dir = process.cwd()): Promise<string> {
-  const url = (await run("git", ["-C", dir, "remote", "get-url", "origin"])).stdout.trim();
+  const url = (await run("git", ["-C", dir, "remote", "get-url", "origin"], { allowFail: true })).stdout.trim();
   const m = /github\.com[:/]([A-Za-z0-9-]+\/[A-Za-z0-9._-]+?)(?:\.git)?$/.exec(url);
   if (!m) throw new TapsterError("this folder is not a clone of a GitHub repository", "Run tapster inside a clone (git remote origin on github.com).");
   return m[1]!;
 }
 
 export async function setEnvSecret(repo: string, name: string, value: string, env = "tapster"): Promise<void> {
-  await runPath(ghPath(), "gh", ["secret", "set", name, "--env", env, "--repo", repo], { env: userEnv(), stdin: value });
+  await runPath(cliGh(), "gh", ["secret", "set", name, "--env", env, "--repo", repo], { env: userEnv(), stdin: value });
 }
 
 export async function setEnvVariable(repo: string, name: string, value: string): Promise<void> {
-  await runPath(ghPath(), "gh", ["variable", "set", name, "--env", "tapster", "--repo", repo, "--body", value], { env: userEnv() });
+  await runPath(cliGh(), "gh", ["variable", "set", name, "--env", "tapster", "--repo", repo, "--body", value], { env: userEnv() });
 }
 
 export async function setRepoVariable(repo: string, name: string, value: string): Promise<void> {
-  await runPath(ghPath(), "gh", ["variable", "set", name, "--repo", repo, "--body", value], { env: userEnv() });
+  await runPath(cliGh(), "gh", ["variable", "set", name, "--repo", repo, "--body", value], { env: userEnv() });
 }
 
 export async function deleteEnvSecret(repo: string, name: string, env = "tapster"): Promise<void> {
-  await runPath(ghPath(), "gh", ["secret", "delete", name, "--env", env, "--repo", repo], { env: userEnv() });
+  await runPath(cliGh(), "gh", ["secret", "delete", name, "--env", env, "--repo", repo], { env: userEnv() });
 }
