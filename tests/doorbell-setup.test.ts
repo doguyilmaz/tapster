@@ -42,7 +42,7 @@ const RING = "Ring the tapster hub";
 const steps = (text: string, job: string) => (parse(text) as { jobs: Record<string, { steps: { name?: string }[] }> }).jobs[job]!.steps;
 
 test("every project template and tapster's own release end with the ring step", () => {
-  expect(steps(bunWorkflow("aims", "src/cli.ts", pins), "build").at(-1)!.name).toBe(RING);
+  expect(steps(bunWorkflow("aims", "src/cli.ts", pins), "release").at(-1)!.name).toBe(RING);
   expect(steps(appWorkflow({ build: "make app", appPath: "dist/A.app", runner: "macos-15", carry: [] }, pins), "release").at(-1)!.name).toBe(RING);
   const own = readFileSync(".github/workflows/release.yml", "utf8");
   expect(own).toContain(ringStep(6));

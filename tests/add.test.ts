@@ -64,10 +64,19 @@ test("bun workflow builds every target and drafts the release", () => {
   expect(flow).not.toContain("__");
   expect(flow).not.toContain("secrets.");
   expect(flow).toContain("subject-checksums: dist/checksums.txt");
-  const attest = (parse(flow) as { jobs: { build: { steps: { uses?: string; if?: string; "continue-on-error"?: string }[] } } }).jobs.build.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
+  type Job = { permissions: Record<string, string>; steps: { uses?: string; run?: string; if?: string; "continue-on-error"?: string }[] };
+  const jobs = (parse(flow) as { jobs: { build: Job; release: Job } }).jobs;
+  expect(jobs.build.permissions).toEqual({ contents: "read" });
+  expect(jobs.release.permissions).toEqual({ contents: "write", "id-token": "write", attestations: "write" });
+  expect(jobs.build.steps.some((s) => (s.run ?? "").includes("bun install"))).toBe(true);
+  for (const s of jobs.release.steps) {
+    expect(s.run ?? "").not.toContain("bun ");
+    if (s.uses) expect(s.uses).toMatch(/^actions\/(checkout|download-artifact|attest-build-provenance)@/);
+  }
+  const attest = jobs.release.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
   expect(attest.if).toBe("${{ !github.event.repository.private }}");
   expect(attest["continue-on-error"]).toBeUndefined();
-  expect(flow).toContain('tar -C "$t" -czf "konvoy_${v}_${p/-/_}.tar.gz" konvoy');
+  expect(flow).toContain('tar -C "dist/$t" -czf "out/konvoy_${v}_${p/-/_}.tar.gz" konvoy');
 });
 
 const goFlow = `on: { push: { tags: ["v*"] } }
@@ -202,7 +211,7 @@ test("a release workflow missing only the ring step gets it without --force", as
   const withoutRing = full.slice(0, full.indexOf("      - name: Ring the tapster hub"));
   const fixed = addRingStep(withoutRing)!;
   expect(fixed).not.toBeNull();
-  expect(parse(fixed).jobs.build.steps.at(-1).name).toBe("Ring the tapster hub");
+  expect(parse(fixed).jobs.release.steps.at(-1).name).toBe("Ring the tapster hub");
   expect(addRingStep(full)).toBe(full);
   expect(addRingStep("mine\n")).toBeNull();
 });

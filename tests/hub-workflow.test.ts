@@ -79,3 +79,14 @@ test("every step in the hub workflow says what it does", () => {
     for (const step of def.steps) expect((step as { name?: string }).name, `${job}: ${JSON.stringify(step).slice(0, 80)}`).toBeTruthy();
   }
 });
+
+test("tapster's own release builds without write access and attests in a job that runs no dependencies", () => {
+  type Job = { permissions: Record<string, string>; steps: { uses?: string; run?: string }[] };
+  const own = parse(readFileSync(".github/workflows/release.yml", "utf8")) as { jobs: { build: Job; release: Job } };
+  expect(own.jobs.build.permissions).toEqual({ contents: "read" });
+  expect(own.jobs.release.permissions).toEqual({ contents: "write", "id-token": "write", attestations: "write" });
+  for (const s of own.jobs.release.steps) {
+    expect(s.run ?? "").not.toMatch(/\bbun\b/);
+    if (s.uses) expect(s.uses).toMatch(/^actions\/(checkout|download-artifact|attest-build-provenance)@/);
+  }
+});

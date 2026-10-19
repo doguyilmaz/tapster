@@ -6,7 +6,7 @@ permissions: {}
 jobs:
   build:
     runs-on: ubuntu-24.04
-    permissions: { contents: write, id-token: write, attestations: write }
+    permissions: { contents: read }
     steps:
       - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false }
@@ -23,13 +23,25 @@ jobs:
             exe=__NAME__; [ "${t%%-*}" = windows ] && exe=__NAME__.exe
             bun build __ENTRY__ --compile --target="bun-$t" --outfile "dist/$t/$exe"
           done
-          cd dist
+          mkdir -p out
           for t in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
             p="${t/x64/amd64}"
-            tar -C "$t" -czf "__NAME___${v}_${p/-/_}.tar.gz" __NAME__
+            tar -C "dist/$t" -czf "out/__NAME___${v}_${p/-/_}.tar.gz" __NAME__
           done
-          (cd windows-x64 && zip -qX "../__NAME___${v}_windows_amd64.zip" __NAME__.exe)
-          sha256sum *.tar.gz *.zip > checksums.txt
+          (cd dist/windows-x64 && zip -qX "../../out/__NAME___${v}_windows_amd64.zip" __NAME__.exe)
+      - uses: actions/upload-artifact@__UPLOAD_SHA__ # __UPLOAD_TAG__
+        with: { name: builds, path: out, if-no-files-found: error, retention-days: 1 }
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions: { contents: write, id-token: write, attestations: write }
+    steps:
+      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@__DOWNLOAD_SHA__ # __DOWNLOAD_TAG__
+        with: { name: builds, path: dist }
+      - name: List the files
+        run: cd dist && sha256sum *.tar.gz *.zip > checksums.txt
       - uses: actions/attest-build-provenance@__ATTEST_SHA__ # __ATTEST_TAG__
         if: ${{ !github.event.repository.private }}
         with: { subject-checksums: dist/checksums.txt }
