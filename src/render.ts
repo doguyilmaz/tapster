@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { CliPackage, PackageConfig, Platform } from "./config";
+import type { AppPackage, CliPackage, PackageConfig, Platform } from "./config";
 import { TapsterError } from "./errors";
 
 export function rubyString(s: string): string {
@@ -100,12 +100,49 @@ export function renderCask(i: RenderInput): string {
   if (c?.bash) lines.push(`  bash_completion ${rubyString(c.bash)}`);
   if (c?.zsh) lines.push(`  zsh_completion ${rubyString(c.zsh)}`);
   if (c?.fish) lines.push(`  fish_completion ${rubyString(c.fish)}`);
-  const u = pkg.cask.uninstall;
-  const parts = [u?.launchctl?.length ? `launchctl: ${list(u.launchctl)}` : "", u?.quit?.length ? `quit: ${list(u.quit)}` : ""].filter(Boolean);
-  if (parts.length) lines.push("", `  uninstall ${parts.join(",\n            ")}`);
-  if (pkg.cask.zap?.trash.length) lines.push("", `  zap trash: ${list(pkg.cask.zap.trash)}`);
-  if (pkg.cask.caveats) lines.push("", `  caveats ${rubyString(pkg.cask.caveats)}`);
+  tail(lines, pkg.cask, pkg.cask.uninstall?.quit ?? []);
+  return lines.join("\n");
+}
+
+function tail(lines: string[], cask: CliPackage["cask"], quit: string[]): void {
+  const parts = ([["launchctl", cask.uninstall?.launchctl ?? []], ["quit", quit]] as const).filter(([, v]) => v.length > 0);
+  const width = Math.max(0, ...parts.map(([k]) => k.length)) + 2;
+  if (parts.length) lines.push("", `  uninstall ${parts.map(([k, v]) => `${`${k}:`.padEnd(width)}${list([...v])}`).join(",\n            ")}`);
+  if (cask.zap?.trash.length) lines.push("", `  zap trash: ${list(cask.zap.trash)}`);
+  if (cask.caveats) lines.push("", `  caveats ${rubyString(cask.caveats)}`);
   lines.push("end", "");
+}
+
+const MACOS_SYMBOLS = ["big_sur", "monterey", "ventura", "sonoma", "sequoia", "tahoe"];
+const ARCH: Partial<Record<Platform, string>> = { "darwin-arm64": ":arm64", "darwin-amd64": ":x86_64" };
+
+export type AppRenderInput = { pkg: AppPackage; version: string; sha256: string; macos: string; description: string; homepage: string };
+
+export function renderAppCask(i: AppRenderInput): string {
+  const { pkg } = i;
+  if (!MACOS_SYMBOLS.includes(i.macos)) throw new TapsterError(`${pkg.name}: the macOS floor ${i.macos} is not one tapster renders`, "Check LSMinimumSystemVersion.");
+  if (!SAFE.test(pkg.repo) || !SAFE.test(pkg.dmg.name.replaceAll("{version}", ""))) throw new TapsterError(`${pkg.name}: no safe DMG name`, "Check dmg.name in tapster.yml.");
+  const platform = Object.keys(pkg.assets)[0] as Platform;
+  const lines = [
+    `cask ${rubyString(pkg.name)} do`,
+    `  version ${rubyString(i.version)}`,
+    `  sha256 ${rubyString(i.sha256)}`,
+    "",
+    `  url "https://github.com/${pkg.repo}/releases/download/v#{version}/${pkg.dmg.name.replaceAll("{version}", "#{version}")}"`,
+    `  name ${rubyString(pkg.app.replace(/\.app$/, ""))}`,
+    `  desc ${rubyString(tidyDesc(i.description))}`,
+    `  homepage ${rubyString(i.homepage)}`,
+    "",
+    "  livecheck do",
+    '    skip "tapster"',
+    "  end",
+    "",
+  ];
+  if (pkg.cask.auto_updates ?? pkg.sparkle !== undefined) lines.push("  auto_updates true");
+  if (ARCH[platform]) lines.push(`  depends_on arch: ${ARCH[platform]}`);
+  lines.push(`  depends_on macos: :${i.macos}`, "", `  app ${rubyString(pkg.app)}`);
+  for (const b of pkg.cask.binaries ?? []) lines.push(`  binary "#{appdir}/${rubyString(`${pkg.app}/${b}`).slice(1)}`);
+  tail(lines, pkg.cask, pkg.cask.uninstall?.quit ?? [pkg.bundle_id]);
   return lines.join("\n");
 }
 
