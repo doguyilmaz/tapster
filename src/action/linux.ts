@@ -30,7 +30,9 @@ export async function linuxBuildMode(ctx: Context): Promise<void> {
 
 export async function linuxSignMode(ctx: Context): Promise<void> {
   const key = readSecret("TAPSTER_LINUX_KEY");
+  const previous = process.env.TAPSTER_LINUX_KEY_PREVIOUS ? readSecret("TAPSTER_LINUX_KEY_PREVIOUS") : null;
+  delete process.env.TAPSTER_LINUX_KEY_PREVIOUS;
   const state = parseState(await readFile(join(ctx.workspace, STATE_PATH), "utf8").catch(() => null));
-  const signed = await signLinux({ dir: linuxDir(), config: ctx.config, state, owner: ctx.owner.toLowerCase(), url: linuxUrl(ctx.config, ctx.hub), key, fetch });
+  const signed = await signLinux({ dir: linuxDir(), config: ctx.config, state, owner: ctx.owner.toLowerCase(), url: linuxUrl(ctx.config, ctx.hub), key, previous, fetch });
   info(`linux: signed ${signed.packages} checked package${signed.packages === 1 ? "" : "s"} with key ${signed.fingerprint}`);
 }

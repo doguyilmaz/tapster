@@ -1,8 +1,12 @@
 # __TAP__
 
 ```sh
+brew tap __TAP__
+brew trust __TAP__
 brew install __TAP__/<name>
 ```
+
+Homebrew loads casks only from taps you trust; `brew trust` says that you trust this one.
 
 On Windows this repository is also a Scoop bucket:
 

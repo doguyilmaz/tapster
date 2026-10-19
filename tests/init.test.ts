@@ -65,3 +65,22 @@ test("a stored Sparkle key must match every package that pins it", () => {
   expect(() => keyPins(apps, "shared", K2)).toThrow(/a pins/);
   expect(() => keyPins(apps, "other", K1)).toThrow(/no package/);
 });
+
+test("rewriting the workflow keeps the Sparkle labels, even with an invalid package in tapster.yml", async () => {
+  const { hubLabels } = await import("../src/cli/init");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "labels-"));
+  expect(hubLabels(dir, "o")).toEqual([]);
+  writeFileSync(
+    join(dir, "tapster.yml"),
+    `version: 1
+tap: o/tap
+packages:
+  - { name: a, repo: o/a, kind: app, app: A.app, bundle_id: com.o.A, assets: { darwin-arm64: "A-{version}.tar.gz" }, dmg: { name: "A-{version}.dmg" }, sparkle: { key: shared, public_key: "${"A".repeat(43)}=" } }
+  - { name: broken, repo: o/b, binaries: [b], assets: { darwin-arm64: "b.zip" } }
+`,
+  );
+  expect(hubLabels(dir, "o")).toEqual(["shared"]);
+});

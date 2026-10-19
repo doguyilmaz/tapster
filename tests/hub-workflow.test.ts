@@ -18,11 +18,75 @@ test("one failed item never stops the steps and jobs after it", () => {
   }
 });
 
-test("the hub attests only what publish asks for, so a private hub skips the step instead of failing it", () => {
-  const attest = flow.jobs.sign!.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
-  expect(attest.if).toContain("steps.publish.outputs.attest == 'true'");
-  expect((attest as { "continue-on-error"?: string })["continue-on-error"]).toBeUndefined();
-  const own = (parse(readFileSync(".github/workflows/release.yml", "utf8")) as { jobs: { build: { steps: { uses?: string; if?: string; "continue-on-error"?: unknown }[] } } }).jobs.build.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
-  expect(own.if).toBe("${{ !github.event.repository.private }}");
-  expect(own["continue-on-error"]).toBeUndefined();
+test("signing holds no attestation rights; a separate job attests what publish lists", () => {
+  const sign = flow.jobs.sign as unknown as { permissions: Record<string, string>; outputs: Record<string, string>; steps: Step[] };
+  expect(sign.permissions).toEqual({ contents: "write" });
+  expect(sign.steps.some((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))).toBe(false);
+  expect(sign.outputs.checksums).toBe("${{ steps.publish.outputs.attest-checksums }}");
+  const attest = flow.jobs.attest as unknown as { needs: string; if: string; "runs-on": string; permissions: Record<string, string>; steps: (Step & { run?: string; env?: Record<string, string> })[] };
+  expect(attest.needs).toBe("sign");
+  expect(attest.if).toContain("needs.sign.outputs.attest == 'true'");
+  expect(attest["runs-on"]).toBe("ubuntu-24.04");
+  expect(attest.permissions).toEqual({ contents: "read", "id-token": "write", attestations: "write" });
+  expect(attest.steps.some((s) => (s.uses ?? "").startsWith("actions/checkout@"))).toBe(false);
+  for (const s of attest.steps) expect(s.run ?? "").not.toContain("${{");
+  expect(attest.steps[0]!.env!.CHECKSUMS).toBe("${{ needs.sign.outputs.checksums }}");
+  const step = attest.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
+  expect(step.with!["subject-checksums"]).toBe("${{ runner.temp }}/checksums.txt");
+  expect((step as { "continue-on-error"?: string })["continue-on-error"]).toBeUndefined();
+});
+
+test("a check that fails before writing outputs runs no later job", () => {
+  const { sign, render } = flow.jobs;
+  const linux = flow.jobs["linux-build"]!;
+  expect(sign!.if).toContain("needs.check.outputs.work != ''");
+  expect(render!.if).toContain("needs.check.outputs.render == 'true'");
+  expect(linux.if).toContain("needs.check.outputs.linux == 'true'");
+  expect(linux.if).not.toContain("needs.check.result");
+});
+
+test("check gets a read-only token to see who changed the hub", () => {
+  const check = flow.jobs.check as unknown as { permissions: Record<string, string>; steps: { id?: string; env?: Record<string, string> }[] };
+  expect(check.permissions).toEqual({ contents: "read" });
+  expect(check.steps.find((s) => s.id === "check")!.env!.GITHUB_TOKEN).toBe("${{ github.token }}");
+});
+
+test("rendering runs tapster's code only, on ubuntu", () => {
+  const render = flow.jobs.render as unknown as { "runs-on": string; permissions: Record<string, string> };
+  expect(render["runs-on"]).toBe("ubuntu-24.04");
+  expect(render.permissions).toEqual({ contents: "write" });
+  expect(readFileSync("src/action/render.ts", "utf8")).not.toMatch(/"brew"|runPath|\/bin\/brew/);
+});
+
+test("tapster's CI audits the casks the renderers produce, on every change and weekly", () => {
+  const ci = parse(readFileSync(".github/workflows/ci.yml", "utf8")) as { on: { schedule?: { cron: string }[] }; jobs: Record<string, { steps: { run?: string }[] }> };
+  expect(ci.on.schedule?.length).toBe(1);
+  expect(ci.jobs.macos!.steps.some((s) => s.run === "bun tests/brew/audit.ts")).toBe(true);
+  expect(readFileSync("tests/brew/audit.ts", "utf8")).toContain('"brew", "trust"');
+});
+
+test("sign runs on macOS only when check says this run signs macOS code", () => {
+  const check = flow.jobs.check as unknown as { outputs: Record<string, string>; steps: { id?: string; env?: Record<string, string> }[] };
+  expect(check.outputs.macos).toBe("${{ steps.check.outputs.macos }}");
+  const env = check.steps.find((s) => s.id === "check")!.env!;
+  expect(env.TAPSTER_TEAM_ID).toBe("${{ vars.TAPSTER_TEAM_ID }}");
+  expect(env.TAPSTER_CERT_EXPIRES).toBe("${{ vars.TAPSTER_CERT_EXPIRES }}");
+  expect((flow.jobs.sign as unknown as { "runs-on": string })["runs-on"]).toBe("${{ needs.check.outputs.macos == 'false' && 'ubuntu-24.04' || 'macos-15' }}");
+});
+
+test("every step in the hub workflow says what it does", () => {
+  for (const [job, def] of Object.entries(flow.jobs)) {
+    for (const step of def.steps) expect((step as { name?: string }).name, `${job}: ${JSON.stringify(step).slice(0, 80)}`).toBeTruthy();
+  }
+});
+
+test("tapster's own release builds without write access and attests in a job that runs no dependencies", () => {
+  type Job = { permissions: Record<string, string>; steps: { uses?: string; run?: string }[] };
+  const own = parse(readFileSync(".github/workflows/release.yml", "utf8")) as { jobs: { build: Job; release: Job } };
+  expect(own.jobs.build.permissions).toEqual({ contents: "read" });
+  expect(own.jobs.release.permissions).toEqual({ contents: "write", "id-token": "write", attestations: "write" });
+  for (const s of own.jobs.release.steps) {
+    expect(s.run ?? "").not.toMatch(/\bbun\b/);
+    if (s.uses) expect(s.uses).toMatch(/^actions\/(checkout|download-artifact|attest-build-provenance)@/);
+  }
 });

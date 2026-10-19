@@ -36,12 +36,12 @@ jobs:
       - name: check (fake App key)
         continue-on-error: true
         uses: ./
-        with: { mode: check, config: tests/leak/hub/tapster.yml }
+        with: { mode: check, template: 2, config: tests/leak/hub/tapster.yml }
         env: { TAPSTER_APP_ID: "1", TAPSTER_APP_PRIVATE_KEY: "CANARY-app-key-3f9a7c1e5b2d" }
       - name: sign (fake certificate and key)
         continue-on-error: true
         uses: ./
-        with: { mode: sign, config: tests/leak/hub/tapster.yml }
+        with: { mode: sign, template: 2, config: tests/leak/hub/tapster.yml }
         env:
           TAPSTER_TEAM_ID: CANARY0001
           MACOS_SIGN_P12: Q0FOQVJZLXAxMi1ib2R5LTJlOGM=
@@ -52,7 +52,7 @@ jobs:
       - name: render (fake token)
         continue-on-error: true
         uses: ./
-        with: { mode: render, config: tests/leak/hub/tapster.yml }
+        with: { mode: render, template: 2, config: tests/leak/hub/tapster.yml }
         env: { GITHUB_TOKEN: CANARY-github-token-91df3e }
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with: { bun-version: 1.4.3 }
@@ -61,18 +61,18 @@ jobs:
       - name: sparkle (two canary keys, one app pinned to the other key)
         continue-on-error: true
         uses: ./
-        with: { mode: sparkle, config: tests/leak/hub/sparkle.yml }
+        with: { mode: sparkle, template: 2, config: tests/leak/hub/sparkle.yml }
         env: { SPARKLE_KEY_LEAKSEED: "CANARYsparkleSeedq7Zx81mPkW3vT9yLr2dNf5bHjA=", SPARKLE_KEY_LEAKOLD: "gNrmRAB3S3v/YKC3kQBV3LKDd6/di8CmV9d1bP7Ctn6a0usQ+7Jj8Dv35MEq4oCp+5gJrjW4DZGGWS4hlNnxd9pltEpJmwgJPZw7Fs9qHw31fWymDU6QwHoUyhwCmqaa" }
       - name: the same items again
         run: bun tests/leak/sparkle.ts "$RUNNER_TEMP"
       - name: sparkle (malformed key)
         continue-on-error: true
         uses: ./
-        with: { mode: sparkle, config: tests/leak/hub/sparkle.yml }
+        with: { mode: sparkle, template: 2, config: tests/leak/hub/sparkle.yml }
         env: { SPARKLE_KEY_LEAKSEED: CANARY-sparkle-malformed-6d2f9a, SPARKLE_KEY_LEAKOLD: "gNrmRAB3S3v/YKC3kQBV3LKDd6/di8CmV9d1bP7Ctn6a0usQ+7Jj8Dv35MEq4oCp+5gJrjW4DZGGWS4hlNnxd9pltEpJmwgJPZw7Fs9qHw31fWymDU6QwHoUyhwCmqaa" }
       - if: always()
         uses: ./
-        with: { mode: cleanup }
+        with: { mode: cleanup, template: 2 }
   plain-api:
     runs-on: macos-15
     permissions: { contents: read }
@@ -104,23 +104,23 @@ jobs:
         name: check through the stub
         continue-on-error: true
         uses: ./
-        with: { mode: check, config: tests/leak/hub/stub.yml }
+        with: { mode: check, template: 2, config: tests/leak/hub/stub.yml }
       - name: fetch through the stub
         continue-on-error: true
         uses: ./
-        with: { mode: fetch, config: tests/leak/hub/stub.yml, work: "${{ steps.check.outputs.work }}" }
+        with: { mode: fetch, template: 2, config: tests/leak/hub/stub.yml, work: "${{ steps.check.outputs.work }}" }
       - name: sign (nothing to sign)
         continue-on-error: true
         uses: ./
-        with: { mode: sign, config: tests/leak/hub/stub.yml }
+        with: { mode: sign, template: 2, config: tests/leak/hub/stub.yml }
       - name: publish through the stub
         continue-on-error: true
         uses: ./
-        with: { mode: publish, config: tests/leak/hub/stub.yml }
+        with: { mode: publish, template: 2, config: tests/leak/hub/stub.yml }
       - name: publish again (already published)
         continue-on-error: true
         uses: ./
-        with: { mode: publish, config: tests/leak/hub/stub.yml }
+        with: { mode: publish, template: 2, config: tests/leak/hub/stub.yml }
       - name: bring the state publish wrote into the hub checkout
         run: |
           mkdir -p .tapster
@@ -129,30 +129,30 @@ jobs:
       - name: render through the stub
         continue-on-error: true
         uses: ./
-        with: { mode: render, config: tests/leak/hub/stub.yml }
+        with: { mode: render, template: 2, config: tests/leak/hub/stub.yml }
       - run: curl -sf --cacert "$STUB_CA" https://api.github.com/__mode/500 >/dev/null
       - name: check during an outage
         continue-on-error: true
         uses: ./
-        with: { mode: check, config: tests/leak/hub/stub.yml }
+        with: { mode: check, template: 2, config: tests/leak/hub/stub.yml }
       - run: curl -sf --cacert "$STUB_CA" https://api.github.com/__mode/404 >/dev/null
       - name: check without an installation
         continue-on-error: true
         uses: ./
-        with: { mode: check, config: tests/leak/hub/stub.yml }
+        with: { mode: check, template: 2, config: tests/leak/hub/stub.yml }
       - run: curl -sf --cacert "$STUB_CA" https://api.github.com/__mode/422 >/dev/null
       - name: check with a rejected token request
         continue-on-error: true
         uses: ./
-        with: { mode: check, config: tests/leak/hub/stub.yml }
+        with: { mode: check, template: 2, config: tests/leak/hub/stub.yml }
       - run: curl -sf --cacert "$STUB_CA" https://api.github.com/__mode/drop >/dev/null || true
       - name: check with dropped connections
         continue-on-error: true
         uses: ./
-        with: { mode: check, config: tests/leak/hub/stub.yml }
+        with: { mode: check, template: 2, config: tests/leak/hub/stub.yml }
       - if: always()
         uses: ./
-        with: { mode: cleanup }
+        with: { mode: cleanup, template: 2 }
   masked:
     runs-on: macos-15
     permissions: { contents: read }
@@ -169,17 +169,17 @@ jobs:
       - id: check
         continue-on-error: true
         uses: ./
-        with: { mode: check, config: tests/leak/hub/tapster.yml }
-        env: { TAPSTER_APP_ID: "${{ vars.CI_APP_ID }}", TAPSTER_APP_PRIVATE_KEY: "${{ secrets.CI_APP_PRIVATE_KEY }}" }
+        with: { mode: check, template: 2, config: tests/leak/hub/tapster.yml }
+        env: { TAPSTER_APP_ID: "${{ vars.CI_APP_ID }}", TAPSTER_APP_PRIVATE_KEY: "${{ secrets.CI_APP_PRIVATE_KEY }}", GITHUB_TOKEN: "${{ github.token }}", TAPSTER_TEAM_ID: CANARY0001 }
       - name: fetch the fixture drafts (one good, one malformed, one malicious)
         continue-on-error: true
         uses: ./
-        with: { mode: fetch, config: tests/leak/hub/tapster.yml, work: "${{ steps.check.outputs.work }}" }
+        with: { mode: fetch, template: 2, config: tests/leak/hub/tapster.yml, work: "${{ steps.check.outputs.work }}" }
         env: { TAPSTER_APP_ID: "${{ vars.CI_APP_ID }}", TAPSTER_APP_PRIVATE_KEY: "${{ secrets.CI_APP_PRIVATE_KEY }}" }
       - name: sign (canary certificate, fails on purpose at the team check)
         continue-on-error: true
         uses: ./
-        with: { mode: sign, config: tests/leak/hub/tapster.yml }
+        with: { mode: sign, template: 2, config: tests/leak/hub/tapster.yml }
         env:
           TAPSTER_TEAM_ID: CANARY0001
           MACOS_SIGN_P12: ${{ secrets.CI_CANARY_P12 }}
@@ -194,18 +194,18 @@ jobs:
       - name: sparkle (two canary keys, one app pinned to the other key)
         continue-on-error: true
         uses: ./
-        with: { mode: sparkle, config: tests/leak/hub/sparkle.yml }
+        with: { mode: sparkle, template: 2, config: tests/leak/hub/sparkle.yml }
         env: { SPARKLE_KEY_LEAKSEED: "${{ secrets.CI_CANARY_SPARKLE_SEED }}", SPARKLE_KEY_LEAKOLD: "${{ secrets.CI_CANARY_SPARKLE_EXPANDED }}" }
       - name: the same items again
         run: bun tests/leak/sparkle.ts "$RUNNER_TEMP"
       - name: sparkle (malformed key)
         continue-on-error: true
         uses: ./
-        with: { mode: sparkle, config: tests/leak/hub/sparkle.yml }
+        with: { mode: sparkle, template: 2, config: tests/leak/hub/sparkle.yml }
         env: { SPARKLE_KEY_LEAKSEED: "${{ secrets.CI_CANARY_SPARKLE_MALFORMED }}", SPARKLE_KEY_LEAKOLD: "${{ secrets.CI_CANARY_SPARKLE_EXPANDED }}" }
       - if: always()
         uses: ./
-        with: { mode: cleanup }
+        with: { mode: cleanup, template: 2 }
   plain-linux:
     runs-on: ubuntu-24.04
     permissions: { contents: read }
@@ -242,12 +242,12 @@ jobs:
       - name: linux-sign (canary key)
         continue-on-error: true
         uses: ./
-        with: { mode: linux-sign, config: tests/leak/hub/linux.yml }
+        with: { mode: linux-sign, template: 2, config: tests/leak/hub/linux.yml }
       - run: rm -rf "$RUNNER_TEMP/tapster-linux" && cp -r "$RUNNER_TEMP/linux-unsigned" "$RUNNER_TEMP/tapster-linux"
       - name: linux-sign (malformed key)
         continue-on-error: true
         uses: ./
-        with: { mode: linux-sign, config: tests/leak/hub/linux.yml }
+        with: { mode: linux-sign, template: 2, config: tests/leak/hub/linux.yml }
         env: { TAPSTER_LINUX_KEY: "CANARY-linux-malformed-4b7e1d" }
   masked-linux:
     runs-on: ubuntu-24.04
@@ -274,13 +274,13 @@ jobs:
       - name: linux-sign (canary key)
         continue-on-error: true
         uses: ./
-        with: { mode: linux-sign, config: tests/leak/hub/linux.yml }
+        with: { mode: linux-sign, template: 2, config: tests/leak/hub/linux.yml }
         env: { TAPSTER_LINUX_KEY: "${{ secrets.CI_CANARY_LINUX_KEY }}" }
       - run: rm -rf "$RUNNER_TEMP/tapster-linux" && cp -r "$RUNNER_TEMP/linux-unsigned" "$RUNNER_TEMP/tapster-linux"
       - name: linux-sign (malformed key)
         continue-on-error: true
         uses: ./
-        with: { mode: linux-sign, config: tests/leak/hub/linux.yml }
+        with: { mode: linux-sign, template: 2, config: tests/leak/hub/linux.yml }
         env: { TAPSTER_LINUX_KEY: "${{ secrets.CI_CANARY_LINUX_MALFORMED }}" }
   scan:
     needs: [plain, plain-api, masked, plain-linux, masked-linux]

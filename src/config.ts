@@ -35,6 +35,7 @@ const common = {
   homepage: z.url().optional(),
   license: z.string().regex(/^[A-Za-z0-9.+-]+$/).optional(),
   attestation: z.enum(["auto", "off"]).default("auto"),
+  protection: z.enum(["on", "off", "dependabot"]).default("on"),
 };
 
 const cliPkg = z
@@ -110,72 +111,120 @@ export type CliPackage = z.infer<typeof cliPkg>;
 export type AppPackage = z.infer<typeof appPkg> & { dmg: { volume: string } };
 export type PackageConfig = CliPackage | AppPackage;
 export const isApp = (p: PackageConfig): p is AppPackage => p.kind === "app";
+export const macosCode = (p: PackageConfig) => isApp(p) || Object.keys(p.assets).some((k) => k.startsWith("darwin"));
 export type HubConfig = Omit<z.infer<typeof hub>, "packages"> & { packages: PackageConfig[] };
 export type Semver = { major: number; minor: number; patch: number; pre: string | null };
 
-export function parseConfig(text: string, hubOwner: string): HubConfig {
+export type InvalidPackage = { name: string; repo: string | null; reason: string; fix: string };
+
+const issueText = (issues: z.core.$ZodIssue[]) => issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+
+function checkPackage(p: PackageConfig, top: Omit<HubConfig, "packages">, hubOwner: string): void {
+  if (isApp(p)) checkApp(p);
+  if (p.repo.split("/")[0]!.toLowerCase() !== hubOwner.toLowerCase()) {
+    throw new TapsterError(`${p.name}: ${p.repo} is not owned by ${hubOwner}`, "tapster publishes only repositories of the hub's owner.");
+  }
+  const problems = p.description === undefined ? [] : descProblems(p.description, p.name);
+  if (problems.length) throw new TapsterError(`${p.name}: Homebrew rejects the description because ${problems.join(" and ")}`, "Rewrite description in tapster.yml.");
+  const entries = Object.entries(p.assets);
+  if (entries.length === 0) throw new TapsterError(`${p.name}: assets is empty`, "Map at least one platform to an asset name.");
+  for (const [platform, name] of entries) {
+    if (name.replaceAll("{version}", "").includes("{") || name.replaceAll("{version}", "").includes("}")) {
+      throw new TapsterError(`${p.name}: ${name} uses a placeholder other than {version}`, "Only {version} is replaced in asset names.");
+    }
+    if (platform.startsWith("darwin") && !name.endsWith(".tar.gz")) {
+      throw new TapsterError(`${p.name}: the ${platform} asset must be a .tar.gz`, "Pack macOS builds as tar.gz; tapster reads them itself.");
+    }
+  }
+  if (isApp(p) || !p.linux) return;
+  if (!Object.keys(p.assets).some((k) => k.startsWith("linux-"))) throw new TapsterError(`${p.name}: linux needs a Linux asset`, "Map linux-amd64 or linux-arm64, or remove linux: true.");
+  if (!top.linux) throw new TapsterError(`${p.name} ships Linux packages, but tapster.yml names no linux.maintainer`, 'Add linux: { maintainer: "Name <address>" } at the top of tapster.yml.');
+}
+
+function conflicts(pkgs: [number, PackageConfig][]): Map<number, TapsterError> {
+  const found = new Map<number, TapsterError>();
+  const mark = (i: number, e: TapsterError) => found.has(i) || found.set(i, e);
+  for (const [i, p] of pkgs) {
+    const twins = pkgs.filter(([j, q]) => j !== i && q.name === p.name);
+    if (twins.length) mark(i, new TapsterError(`package ${p.name} is listed twice`, "Keep one entry per package."));
+  }
+  const binaries = pkgs.flatMap(([i, p]) => (isApp(p) ? (p.cask.binaries ?? []) : p.binaries).map((b) => ({ i, p, id: b.split("/").pop()! })));
+  for (const a of binaries) {
+    for (const b of binaries) {
+      if (a.i === b.i || a.id !== b.id || a.p.name === b.p.name) continue;
+      mark(a.i, new TapsterError(`${a.p.name} and ${b.p.name} both ship a binary named ${a.id}`, "Signed tools are identified by name, so each name may belong to one package."));
+    }
+  }
+  const overlaps = (x: string, y: string) => {
+    const a = x.toLowerCase();
+    const b = y.toLowerCase();
+    return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+  };
+  const apps = pkgs.filter((e): e is [number, AppPackage] => isApp(e[1]));
+  for (const [i, a] of apps) {
+    for (const [j, b] of apps) {
+      if (i !== j && overlaps(a.bundle_id, b.bundle_id)) mark(i, new TapsterError(`${a.name} and ${b.name} have overlapping bundle ids`, "Each app needs its own bundle id, not one inside another."));
+    }
+    for (const bin of binaries) {
+      const id = bin.id.toLowerCase();
+      if (id !== a.bundle_id.toLowerCase() && !id.startsWith(`${a.bundle_id.toLowerCase()}.`)) continue;
+      const e = new TapsterError(`the binary ${bin.id} would carry ${a.name}'s identity`, "Rename the binary.");
+      mark(i, e);
+      mark(bin.i, e);
+    }
+  }
+  return found;
+}
+
+export function parseHub(text: string, hubOwner: string): { config: HubConfig; invalid: InvalidPackage[] } {
   let raw: unknown;
   try {
     raw = parse(text);
   } catch {
     throw new TapsterError("tapster.yml is not valid YAML", "Fix the YAML syntax; tapster doctor shows the line.");
   }
-  const parsed = hub.safeParse(raw);
-  if (!parsed.success) {
-    const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
-    throw new TapsterError(`tapster.yml is invalid: ${issues}`, "Fix the listed fields.");
-  }
-  const result = { data: parsed.data as HubConfig };
-  const names = new Set<string>();
-  const binaryOwners = new Map<string, string>();
-  for (const p of result.data.packages) {
-    if (names.has(p.name)) throw new TapsterError(`package ${p.name} is listed twice`, "Keep one entry per package.");
-    names.add(p.name);
-    if (isApp(p)) checkApp(p);
-    for (const b of isApp(p) ? (p.cask.binaries ?? []) : p.binaries) {
-      const id = b.split("/").pop()!;
-      const owner = binaryOwners.get(id);
-      if (owner && owner !== p.name) throw new TapsterError(`${p.name} and ${owner} both ship a binary named ${id}`, "Signed tools are identified by name, so each name may belong to one package.");
-      binaryOwners.set(id, p.name);
-    }
-    if (p.repo.split("/")[0]!.toLowerCase() !== hubOwner.toLowerCase()) {
-      throw new TapsterError(`${p.name}: ${p.repo} is not owned by ${hubOwner}`, "tapster publishes only repositories of the hub's owner.");
-    }
-    const problems = p.description === undefined ? [] : descProblems(p.description, p.name);
-    if (problems.length) throw new TapsterError(`${p.name}: Homebrew rejects the description because ${problems.join(" and ")}`, "Rewrite description in tapster.yml.");
-    const entries = Object.entries(p.assets);
-    if (entries.length === 0) throw new TapsterError(`${p.name}: assets is empty`, "Map at least one platform to an asset name.");
-    for (const [platform, name] of entries) {
-      if (name.replaceAll("{version}", "").includes("{") || name.replaceAll("{version}", "").includes("}")) {
-        throw new TapsterError(`${p.name}: ${name} uses a placeholder other than {version}`, "Only {version} is replaced in asset names.");
-      }
-      if (platform.startsWith("darwin") && !name.endsWith(".tar.gz")) {
-        throw new TapsterError(`${p.name}: the ${platform} asset must be a .tar.gz`, "Pack macOS builds as tar.gz; tapster reads them itself.");
-      }
-    }
-  }
-  for (const p of result.data.packages) {
-    if (isApp(p) || !p.linux) continue;
-    if (!Object.keys(p.assets).some((k) => k.startsWith("linux-"))) throw new TapsterError(`${p.name}: linux needs a Linux asset`, "Map linux-amd64 or linux-arm64, or remove linux: true.");
-    if (!result.data.linux) throw new TapsterError(`${p.name} ships Linux packages, but tapster.yml names no linux.maintainer`, 'Add linux: { maintainer: "Name <address>" } at the top of tapster.yml.');
-  }
-  const apps = result.data.packages.filter(isApp);
-  const overlaps = (x: string, y: string) => {
-    const a = x.toLowerCase();
-    const b = y.toLowerCase();
-    return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+  const top = hub.extend({ packages: z.array(z.unknown()) }).safeParse(raw);
+  if (!top.success) throw new TapsterError(`tapster.yml is invalid: ${issueText(top.error.issues)}`, "Fix the listed fields.");
+  const { packages, ...rest } = top.data;
+  const failed = new Map<number, InvalidPackage>();
+  const repoAt = (v: unknown) => {
+    const r = v && typeof v === "object" && "repo" in v ? (v as { repo: unknown }).repo : undefined;
+    return typeof r === "string" ? r : null;
   };
-  for (const [i, a] of apps.entries()) {
-    for (const b of apps.slice(i + 1)) {
-      if (overlaps(a.bundle_id, b.bundle_id)) throw new TapsterError(`${a.name} and ${b.name} have overlapping bundle ids`, "Each app needs its own bundle id, not one inside another.");
+  const nameAt = (v: unknown, i: number) => {
+    const n = v && typeof v === "object" && "name" in v ? (v as { name: unknown }).name : undefined;
+    return typeof n === "string" && NAME.test(n) ? n : `packages[${i}]`;
+  };
+  const ok: [number, PackageConfig][] = [];
+  for (const [i, v] of packages.entries()) {
+    const r = pkg.safeParse(v);
+    if (!r.success) {
+      failed.set(i, { name: nameAt(v, i), repo: repoAt(v), reason: `${nameAt(v, i)} is invalid: ${issueText(r.error.issues)}`, fix: "Fix the listed fields in tapster.yml." });
+      continue;
     }
-    for (const id of binaryOwners.keys()) {
-      if (id.toLowerCase() === a.bundle_id.toLowerCase() || id.toLowerCase().startsWith(`${a.bundle_id.toLowerCase()}.`)) {
-        throw new TapsterError(`the binary ${id} would carry ${a.name}'s identity`, "Rename the binary.");
-      }
+    const p = r.data as PackageConfig;
+    try {
+      checkPackage(p, rest, hubOwner);
+      ok.push([i, p]);
+    } catch (e) {
+      if (!(e instanceof TapsterError)) throw e;
+      failed.set(i, { name: p.name, repo: p.repo, reason: e.reason, fix: e.fix });
     }
   }
-  return result.data;
+  for (const [i, e] of conflicts(ok)) {
+    const p = ok.find(([j]) => j === i)![1];
+    failed.set(i, { name: p.name, repo: p.repo, reason: e.reason, fix: e.fix });
+  }
+  return {
+    config: { ...rest, packages: ok.filter(([i]) => !failed.has(i)).map(([, p]) => p) },
+    invalid: [...failed.entries()].sort(([a], [b]) => a - b).map(([, v]) => v),
+  };
+}
+
+export function parseConfig(text: string, hubOwner: string): HubConfig {
+  const { config, invalid } = parseHub(text, hubOwner);
+  if (invalid.length) throw new TapsterError(invalid.map((i) => i.reason).join("; "), invalid[0]!.fix);
+  return config;
 }
 
 function checkApp(p: AppPackage): void {

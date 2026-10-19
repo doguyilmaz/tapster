@@ -104,18 +104,30 @@ export function rpmsignArgs(fingerprint: string, created: string, home: string, 
   ];
 }
 
-type Key = { home: string; env: Record<string, string>; fingerprint: string; created: string };
+type Key = { home: string; env: Record<string, string>; fingerprint: string; created: string; previous: string | null };
 
-async function withKey<T>(keyText: string, work: (k: Key) => Promise<T>): Promise<T> {
+async function importOne(env: Record<string, string>, keyText: string, name: string): Promise<{ fingerprint: string; created: string }> {
+  const before = new Set((await run("gpg", ["--batch", "--with-colons", "--list-secret-keys"], { env, allowFail: true })).stdout.split("\n").filter((l) => l.startsWith("fpr:")));
+  await run("gpg", ["--batch", "--quiet", "--import"], { env, stdin: keyText });
+  const colons = (await run("gpg", ["--batch", "--with-colons", "--list-secret-keys"], { env })).stdout.split("\n");
+  const added: { fingerprint: string; created: string }[] = [];
+  for (const [i, l] of colons.entries()) {
+    if (!l.startsWith("sec:")) continue;
+    const fpr = colons.slice(i + 1).find((x) => x.startsWith("fpr:"));
+    if (fpr && !before.has(fpr)) added.push({ fingerprint: fpr.split(":")[9]!, created: l.split(":")[5]! });
+  }
+  if (added.length !== 1) throw new TapsterError(`${name} does not hold exactly one secret key`, "Store it again with tapster init --linux.");
+  return added[0]!;
+}
+
+async function withKey<T>(keyText: string, previousText: string | null, work: (k: Key) => Promise<T>): Promise<T> {
   const home = mkdtempSync("/tmp/tg-");
   const env = { GNUPGHOME: home };
   try {
-    await run("gpg", ["--batch", "--quiet", "--import"], { env, stdin: keyText });
-    const colons = (await run("gpg", ["--batch", "--with-colons", "--list-secret-keys"], { env })).stdout.split("\n");
-    const sec = colons.find((l) => l.startsWith("sec:"))?.split(":");
-    const fingerprint = colons.find((l) => l.startsWith("fpr:"))?.split(":")[9];
-    if (!sec || !fingerprint || colons.filter((l) => l.startsWith("sec:")).length !== 1) throw new TapsterError("TAPSTER_LINUX_KEY does not hold exactly one secret key", "Store it again with tapster init --linux.");
-    return await work({ home, env, fingerprint, created: sec[5]! });
+    const current = await importOne(env, keyText, "TAPSTER_LINUX_KEY");
+    const previous = previousText === null ? null : (await importOne(env, previousText, "TAPSTER_LINUX_KEY_PREVIOUS")).fingerprint;
+    if (previous === current.fingerprint) throw new TapsterError("TAPSTER_LINUX_KEY_PREVIOUS is the current key", "Run tapster init --rotate linux --finish.");
+    return await work({ home, env, ...current, previous });
   } finally {
     await run("gpgconf", ["--kill", "all"], { env, allowFail: true }).catch(() => undefined);
     await rm(home, { recursive: true, force: true });
@@ -124,7 +136,7 @@ async function withKey<T>(keyText: string, work: (k: Key) => Promise<T>): Promis
 
 export const byHashPaths = (data: Buffer) => ["sha256", "sha512"].map((h) => `by-hash/${h.toUpperCase()}/${createHash(h).update(data).digest("hex")}`);
 
-export async function signLinux(o: { dir: string; config: HubConfig; state: State; owner: string; url: string; key: string; fetch: typeof fetch }): Promise<{ fingerprint: string; packages: number }> {
+export async function signLinux(o: { dir: string; config: HubConfig; state: State; owner: string; url: string; key: string; previous?: string | null; fetch: typeof fetch }): Promise<{ fingerprint: string; packages: number }> {
   const { dir, owner } = o;
   const exps = await expectedPackages(o.config, o.state, await readFile(join(dir, "tapster-linux.json"), "utf8"), o.fetch);
   checkTree(dir, expectedFiles(exps));
@@ -133,7 +145,7 @@ export async function signLinux(o: { dir: string; config: HubConfig; state: Stat
     checkRpm(await readRpm(join(dir, "rpm", e.rpmArch, rpmName(e))), e);
   }
   const rpms = exps.map((e) => join(dir, "rpm", e.rpmArch, rpmName(e)));
-  if (rpms.length) await withKey(o.key, (k) => run("rpmsign", rpmsignArgs(k.fingerprint, k.created, k.home, rpms), { env: k.env }));
+  if (rpms.length) await withKey(o.key, null, (k) => run("rpmsign", rpmsignArgs(k.fingerprint, k.created, k.home, rpms), { env: k.env }));
   for (const a of RPM_ARCHES) {
     await mkdir(join(dir, "rpm", a), { recursive: true });
     await run("createrepo_c", ["--quiet", join(dir, "rpm", a)]);
@@ -158,12 +170,14 @@ export async function signLinux(o: { dir: string; config: HubConfig; state: Stat
       await writeFile(join(i.path, p), i.data);
     }
   }
-  const fingerprint = await withKey(o.key, async (k) => {
+  const fingerprint = await withKey(o.key, o.previous ?? null, async (k) => {
     const stable = join(apt, "dists", "stable");
-    await run("gpg", ["--batch", "--yes", "--digest-algo", "SHA512", "--local-user", k.fingerprint, "--clearsign", "-o", join(stable, "InRelease"), releasePath], { env: k.env });
-    await run("gpg", ["--batch", "--yes", "--digest-algo", "SHA512", "--local-user", k.fingerprint, "--armor", "--detach-sign", "-o", join(stable, "Release.gpg"), releasePath], { env: k.env });
-    await writeFile(join(dir, `${owner}-tapster.asc`), (await run("gpg", ["--batch", "--armor", "--export", k.fingerprint], { env: k.env })).bytes);
-    await writeFile(join(dir, `${owner}-tapster.pgp`), (await run("gpg", ["--batch", "--export", k.fingerprint], { env: k.env })).bytes);
+    const keys = [k.fingerprint, ...(k.previous ? [k.previous] : [])];
+    const users = keys.flatMap((f) => ["--local-user", f]);
+    await run("gpg", ["--batch", "--yes", "--digest-algo", "SHA512", ...users, "--clearsign", "-o", join(stable, "InRelease"), releasePath], { env: k.env });
+    await run("gpg", ["--batch", "--yes", "--digest-algo", "SHA512", ...users, "--armor", "--detach-sign", "-o", join(stable, "Release.gpg"), releasePath], { env: k.env });
+    await writeFile(join(dir, `${owner}-tapster.asc`), (await run("gpg", ["--batch", "--armor", "--export", ...keys], { env: k.env })).bytes);
+    await writeFile(join(dir, `${owner}-tapster.pgp`), (await run("gpg", ["--batch", "--export", ...keys], { env: k.env })).bytes);
     return k.fingerprint;
   });
   await writeFile(join(dir, "rpm", `${owner}-tapster.repo`), repoFile(owner, o.url));

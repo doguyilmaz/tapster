@@ -1,6 +1,5 @@
-import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { type ChecksumLine, parseChecksums, sha256 } from "../checksums";
 import { dmgName } from "../appcheck";
 import { type AppPackage, type CliPackage, type Platform, isApp, parseTag, versionOf } from "../config";
@@ -10,7 +9,7 @@ import { commitToHub } from "../hubcommit";
 import { readSecret } from "../mask";
 import { type AppRenderInput, type Download, caskPath, descProblems, downloadUrl, renderAppCask, renderCask, renderScoop, scoopPath } from "../render";
 import { failure, record } from "../report";
-import { childEnv, excerpt, run, runPath } from "../run";
+import { run } from "../run";
 import { STATE_PATH, type StateEntry, latestPublished, parseState, serializeState, upsert } from "../state";
 import type { Context } from "./context";
 
@@ -63,60 +62,6 @@ export async function renderNeeded(ctx: Context, skip: Set<string> = new Set()):
   return false;
 }
 
-export async function auditEach(names: string[], check: (name: string) => Promise<void>): Promise<Map<string, unknown>> {
-  const failed = new Map<string, unknown>();
-  for (const name of names) {
-    try {
-      await check(name);
-    } catch (e) {
-      failed.set(name, e);
-    }
-  }
-  return failed;
-}
-
-async function brewCheck(brew: string, env: Record<string, string>, args: string[]): Promise<void> {
-  const res = await runPath(brew, "brew", args, { env, allowFail: true });
-  if (res.code !== 0) throw new TapsterError(`brew ${args[0]} found problems`, excerpt(`${res.stdout}\n${res.stderr}`, 8) || "No output.");
-}
-
-const AUDIT_TARGETS: Record<string, string[]> = {
-  "darwin-arm64": ["--arch", "arm"],
-  "darwin-amd64": ["--arch", "intel"],
-  "darwin-universal": [],
-  "linux-arm64": ["--os", "linux", "--arch", "arm"],
-  "linux-amd64": ["--os", "linux", "--arch", "intel"],
-};
-
-export function auditArgs(local: string, name: string, online: boolean, platforms: string[]): string[][] {
-  const base = ["audit", "--cask", ...(online ? ["--online"] : [])];
-  return platforms.filter((p) => p in AUDIT_TARGETS).map((p) => [...base, ...AUDIT_TARGETS[p]!, `${local}/${name}`]);
-}
-
-async function audit(ws: string, tap: string, casks: { name: string; online: boolean; platforms: string[] }[]): Promise<Map<string, unknown>> {
-  if (casks.length === 0) return new Map();
-  const brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].find((p) => existsSync(p));
-  if (!brew) throw new TapsterError("Homebrew is not installed on this runner", "Run the render job on macos-15.");
-  const env = childEnv({ PATH: `${dirname(brew)}:/usr/bin:/bin`, HOMEBREW_NO_AUTO_UPDATE: "1", HOMEBREW_NO_ANALYTICS: "1", HOMEBREW_NO_ENV_HINTS: "1" });
-  const local = `${tap.split("/")[0]}/tapster-audit`;
-  await run("git", ["-C", ws, "add", "-A"]);
-  await run("git", ["-C", ws, "-c", "user.name=tapster", "-c", "user.email=tapster@localhost", "commit", "-q", "--allow-empty", "-m", "tapster audit"]);
-  await runPath(brew, "brew", ["tap", local, ws], { env });
-  try {
-    const byName = new Map(casks.map((c) => [c.name, c]));
-    return await auditEach(
-      casks.map((c) => c.name),
-      async (name) => {
-        const c = byName.get(name)!;
-        await brewCheck(brew, env, ["style", "--cask", `${local}/${name}`]);
-        for (const args of auditArgs(local, name, c.online, c.platforms)) await brewCheck(brew, env, args);
-      },
-    );
-  } finally {
-    await runPath(brew, "brew", ["untap", local], { env, allowFail: true });
-  }
-}
-
 export async function renderMode(ctx: Context): Promise<void> {
   const gh = new GitHub(readSecret("GITHUB_TOKEN"));
   const ws = ctx.workspace;
@@ -139,7 +84,6 @@ export async function renderMode(ctx: Context): Promise<void> {
   }
   const changes: { path: string; content: string }[] = [];
   const rendered: string[] = [];
-  const online = new Map<string, boolean>();
   for (const pkg of ctx.config.packages) {
     const latest = latestPublished(state, pkg.name);
     if (!latest || parseTag(latest.tag) === null) continue;
@@ -154,7 +98,6 @@ export async function renderMode(ctx: Context): Promise<void> {
       const data = await gh.downloadAsset(pkg.repo, sums.id);
       if (sha256(data) !== latest.checksums) throw new TapsterError(`${latest.tag}: checksums.txt changed after tapster published it`, "tapster renders only what it published; check the release.");
       const repo = await gh.getRepo(pkg.repo);
-      online.set(pkg.name, !repo.private);
       const text = { description: pkg.description ?? repo.description ?? pkg.name, homepage: pkg.homepage ?? repo.html_url };
       const problems = descProblems(text.description, pkg.name);
       if (problems.length) throw new TapsterError(`Homebrew rejects the description of ${pkg.repo} because ${problems.join(" and ")}`, "Set description in tapster.yml.");
@@ -178,21 +121,6 @@ export async function renderMode(ctx: Context): Promise<void> {
   const stateText = serializeState(state);
   const stateChanged = stateText !== (stateBefore ?? serializeState(parseState(null)));
   const heartbeat = changes.length === 0 && !stateChanged && (await headIsStale(ws));
-  if (changes.length === 0 && !stateChanged && !heartbeat) return;
-  for (const c of changes) {
-    await mkdir(dirname(join(ws, c.path)), { recursive: true });
-    await writeFile(join(ws, c.path), c.content);
-  }
-  const casks = changes.filter((c) => c.path.startsWith("Casks/")).map((c) => basename(c.path, ".rb"));
-  const failed = await audit(
-    ws,
-    ctx.config.tap,
-    casks.map((name) => ({ name, online: online.get(name) ?? true, platforms: Object.keys(ctx.config.packages.find((p) => p.name === name)?.assets ?? {}) })),
-  );
-  for (const [name, err] of failed) failure(name, err);
-  const kept = changes.filter((c) => !failed.has(basename(c.path).replace(/\.(rb|json)$/, "")));
-  changes.length = 0;
-  changes.push(...kept);
   if (changes.length === 0 && !stateChanged && !heartbeat) return;
   const all = [
     ...changes,

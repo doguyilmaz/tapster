@@ -67,6 +67,28 @@ const [a, b] = [packages(sites[0]!), packages(sites[1]!)];
 if (JSON.stringify(a) !== JSON.stringify(b) || a.length !== 4) throw new Error(`packages differ between builds: ${JSON.stringify({ a, b })}`);
 console.log(`the same ${a.length} package files both times`);
 
+const previousPath = process.argv[4];
+if (previousPath) {
+  const previous = readFileSync(previousPath, "utf8");
+  const out = join(root, "site-rotation");
+  rmSync(out, { recursive: true, force: true });
+  mkdirSync(out, { recursive: true });
+  await buildLinux(config, state, "o/homebrew-tap", { fetch: local, out, packager: nfpmPackager(nfpm) });
+  await signLinux({ dir: out, config, state, owner: "o", url: "http://repo:8000", key, previous, fetch: local });
+  for (const [name, secret] of [["the new key", key], ["the previous key", previous]] as const) {
+    const home = mkdtempSync(join(root, "gv-"));
+    const gpg = (args: string[], stdin?: string) => Bun.spawnSync(["gpg", "--homedir", home, "--batch", ...args], { stdin: stdin === undefined ? undefined : Buffer.from(stdin) });
+    gpg(["--import"], secret);
+    Bun.write(join(home, "pub.gpg"), gpg(["--export"]).stdout);
+    const v = Bun.spawnSync(["gpgv", "--status-fd", "1", "--keyring", join(home, "pub.gpg"), join(out, "apt/dists/stable/InRelease")]);
+    if (!/^\[GNUPG:\] GOODSIG /m.test(v.stdout.toString()) || /^\[GNUPG:\] BADSIG /m.test(v.stdout.toString())) throw new Error(`InRelease has no good signature from ${name}: ${v.stdout}`);
+    Bun.spawnSync(["gpgconf", "--homedir", home, "--kill", "all"]);
+  }
+  const shown = Bun.spawnSync(["gpg", "--batch", "--show-keys", "--with-colons", join(out, "o-tapster.asc")]).stdout.toString();
+  if (shown.split("\n").filter((l) => l.startsWith("pub:")).length !== 2) throw new Error("the published key file does not hold both keys");
+  console.log("during a rotation InRelease verifies with either key and the key file holds both");
+}
+
 const evil = join(root, "evil");
 mkdirSync(evil, { recursive: true });
 const { writeFileSync } = await import("node:fs");

@@ -56,7 +56,7 @@ packages:
   "o",
 );
 const app = cfg.packages[1] as AppPackage;
-const ctx = { hub: "o/homebrew-tap", owner: "o", config: cfg, workspace: "/tmp" };
+const ctx = { hub: "o/homebrew-tap", owner: "o", config: cfg, invalid: [], workspace: "/tmp" };
 const facts = { version: "1.3.1", build: "1.3.1", minimumSystemVersion: "15.0", macos: "sequoia", publicKey: current.pub };
 const ARCHIVE = "HafifPix-1.3.1.app.tar.gz";
 const sums = [

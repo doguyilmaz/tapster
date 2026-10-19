@@ -47,8 +47,8 @@ export function excerpt(text: string, max = 5): string {
     .join(" | ");
 }
 
-export function ghPath(): string {
-  const found = GH.find((p) => existsSync(p));
+export function ghPath(candidates: string[] = GH): string {
+  const found = candidates.find((p) => existsSync(p));
   if (!found) throw new TapsterError("gh is not installed on this runner", "Use a GitHub-hosted runner image, which ships gh.");
   return found;
 }

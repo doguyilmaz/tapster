@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { attestDecision } from "../src/action/publish";
+import { attestDecision, attestLines } from "../src/action/publish";
 import { assertRecorded, makeLatest, resumeSwap, sameAssets, stageAndSwap, waitDownloadable } from "../src/publish";
 import type { Asset, GitHub, Release } from "../src/github";
 import { TapsterError } from "../src/errors";
@@ -182,4 +182,21 @@ test("a private hub publishes without asking for attestations and says why", () 
   expect(attestDecision(false, false)).toEqual({ attest: false, note: null });
   expect(attestDecision(true, true).attest).toBe(false);
   expect(attestDecision(true, true).note).toContain("private");
+});
+
+test("the attest job gets the checksum lines of every signed file", () => {
+  const a = Buffer.from("a");
+  expect(attestLines([{ name: "x.tar.gz", data: a }, { name: "y.dmg", data: Buffer.from("b") }])).toBe(
+    "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb  x.tar.gz\n3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d  y.dmg\n",
+  );
+});
+
+test("right before publishing, the draft holds exactly the recorded files", async () => {
+  const { assertFinal } = await import("../src/publish");
+  const sums = `${"1".repeat(64)}  x.tar.gz\n`;
+  const ok = rel([a(1, "x.tar.gz", `sha256:${"1".repeat(64)}`), a(2, "checksums.txt", `sha256:${sha256(Buffer.from(sums))}`)]);
+  await assertFinal(fakeGh(ok, sums).gh, "o/r", 1, sha256(Buffer.from(sums)));
+  const extra = rel([...ok.assets, a(3, "evil.pkg")]);
+  await expect(assertFinal(fakeGh(extra, sums).gh, "o/r", 1, sha256(Buffer.from(sums)))).rejects.toThrow(TapsterError);
+  await expect(assertFinal(fakeGh(rel(ok.assets, { draft: false }), sums).gh, "o/r", 1, sha256(Buffer.from(sums)))).rejects.toThrow(/published/);
 });

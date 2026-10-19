@@ -83,6 +83,12 @@ async function confirmSwapped(gh: GitHub, repo: string, release: Release, record
   if (lines.length !== others.length || !lines.every((l) => others.some((x) => x.name === l.name && x.digest === `sha256:${l.sha256}`))) throw changed;
 }
 
+export async function assertFinal(gh: GitHub, repo: string, releaseId: number, recorded: string): Promise<void> {
+  const release = await gh.getRelease(repo, releaseId);
+  if (!release.draft) throw new TapsterError("the release was published while tapster worked on it", "Check who published it; tapster did not update the cask.");
+  await confirmSwapped(gh, repo, release, recorded);
+}
+
 export function assertRecorded(published: Buffer, recorded: string): void {
   if (sha256(published) !== recorded) {
     throw new TapsterError("the published checksums.txt is not the one tapster recorded", "Check who edited the release; tapster did not update the cask.");

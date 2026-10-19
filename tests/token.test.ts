@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { createVerify, generateKeyPairSync } from "node:crypto";
-import { appJwt, installationExists, installationToken } from "../src/token";
+import { appJwt, attestationToken, installationRepos, installationToken } from "../src/token";
 import { resetMaskForTests, scrub } from "../src/mask";
 
 afterEach(resetMaskForTests);
@@ -36,13 +36,42 @@ test("installation tokens are scoped, masked and revocable", async () => {
   expect(calls.at(-1)!.init!.method).toBe("DELETE");
 });
 
-test("installationExists asks GitHub with the App JWT", async () => {
-  const seen: string[] = [];
-  const reply = (status: number) => async (url: string, init?: RequestInit) => {
-    seen.push(`${url} ${(init?.headers as Record<string, string>).Authorization?.split(".").length}`);
-    return new Response(status === 200 ? "{}" : null, { status });
+test("installationRepos lists what the owner's installation can reach, with a metadata-only token", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const fetchImpl = async (url: string, init?: RequestInit) => {
+    calls.push({ url, init });
+    if (url.endsWith("/users/o/installation")) return Response.json({ id: 7 });
+    if (url.endsWith("/app/installations/7/access_tokens")) return Response.json({ token: "ghs_listtoken" });
+    if (url.includes("/installation/repositories")) return Response.json({ repositories: [{ full_name: "o/a" }, { full_name: "o/hub" }] });
+    return new Response(null, { status: 204 });
   };
-  expect(await installationExists("1", pem, "o/hub", reply(200))).toBe(true);
-  expect(await installationExists("1", pem, "o/hub", reply(404))).toBe(false);
-  expect(seen[0]).toBe("https://api.github.com/repos/o/hub/installation 3");
+  expect(await installationRepos("1", pem, "o", fetchImpl)).toEqual(["o/a", "o/hub"]);
+  expect(JSON.parse(calls[1]!.init!.body as string)).toEqual({ permissions: { metadata: "read" } });
+  expect(calls.at(-1)!.init!.method).toBe("DELETE");
+  const none = async () => new Response(null, { status: 404 });
+  expect(await installationRepos("1", pem, "o", none)).toBeNull();
+});
+
+test("gh attestation verify gets a token that can only read attestations", async () => {
+  const bodies: unknown[] = [];
+  const fetchImpl = async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/repos/o/aims/installation")) return Response.json({ id: 3 });
+    if (url.endsWith("/access_tokens")) {
+      bodies.push(JSON.parse(init!.body as string));
+      return Response.json({ token: "ghs_readattest" });
+    }
+    return new Response(null, { status: 204 });
+  };
+  await attestationToken("1", pem, "o/aims", fetchImpl);
+  expect(bodies).toEqual([{ repositories: ["aims"], permissions: { attestations: "read" } }]);
+});
+
+test("installationRepos refuses to guess when the list is longer than it reads", async () => {
+  const fetchImpl = async (url: string) => {
+    if (url.endsWith("/users/o/installation")) return Response.json({ id: 7 });
+    if (url.endsWith("/access_tokens")) return Response.json({ token: "ghs_many" });
+    if (url.includes("/installation/repositories")) return Response.json({ repositories: Array.from({ length: 100 }, (_, i) => ({ full_name: `o/r${i}` })) });
+    return new Response(null, { status: 204 });
+  };
+  await expect(installationRepos("1", pem, "o", fetchImpl)).rejects.toThrow(/more than 1000/);
 });

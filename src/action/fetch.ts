@@ -8,11 +8,12 @@ import { macCodeIn } from "../maccode";
 import { parseChecksums, sha256 } from "../checksums";
 import { type AppPackage, type Platform, assetName, isApp, versionOf } from "../config";
 import { TapsterError } from "../errors";
-import { GitHub } from "../github";
+import { GitHub, type Release } from "../github";
+import { type WorkItem, draftOrigin } from "../plan";
 import { writeTree } from "../extract";
 import { readSecret, requireVar } from "../mask";
 import { failure, warn } from "../report";
-import { type InstallationToken, installationToken } from "../token";
+import { type InstallationToken, attestationToken, installationToken } from "../token";
 import { type Fetched, type Manifest, saveManifest, workdir } from "../workdir";
 import { type Context, parseWork } from "./context";
 
@@ -23,6 +24,14 @@ async function unpackApp(ctx: Context, pkg: AppPackage, tag: string, archive: Bu
   const appDir = join(dir, "app", pkg.app);
   const facts = await appFacts(appDir, pkg, ctx.config.packages, tag, systemPlist);
   return { dir: appDir, facts, created, identifiers: [], dmg: null, feed: null };
+}
+
+export function assertFetchable(release: Release, item: WorkItem, owner: string): void {
+  if (!release.draft || release.tag_name !== item.tag) {
+    throw new TapsterError("the release is no longer the draft that was checked", "The next run checks again.");
+  }
+  const foreign = item.resume ? null : draftOrigin(release, owner);
+  if (foreign) throw new TapsterError(foreign, "Delete the draft and release again from the project's workflow.");
 }
 
 export async function fetchMode(ctx: Context): Promise<void> {
@@ -36,13 +45,12 @@ export async function fetchMode(ctx: Context): Promise<void> {
       continue;
     }
     let tok: InstallationToken | undefined;
+    let attTok: InstallationToken | undefined;
     try {
-      tok = await installationToken(appId, pem, pkg.repo, { contents: "write", attestations: "read" });
+      tok = await installationToken(appId, pem, pkg.repo, { contents: "write" });
       const gh = new GitHub(tok.token);
       const release = await gh.getRelease(pkg.repo, item.releaseId);
-      if (!release.draft || release.tag_name !== item.tag) {
-        throw new TapsterError("the release is no longer the draft that was checked", "The next run checks again.");
-      }
+      assertFetchable(release, item, ctx.owner);
       const fetched: Fetched = { ...item, before: release.assets, checksums: [], archives: [], status: "fetched" };
       if (!item.resume) {
         const repo = await gh.getRepo(pkg.repo);
@@ -66,7 +74,8 @@ export async function fetchMode(ctx: Context): Promise<void> {
           if (unsigned) throw new TapsterError(unsigned, "Map every macOS archive in tapster.yml so tapster signs it or stop attaching the file.");
           const file = join(dir, "assets", a.name);
           await writeFile(file, data, { mode: 0o600 });
-          if (!carried(a.name) && (await verifyAttestation(file, pkg, item.tag, repo.private, tok.token)) === "skipped") {
+          attTok ??= await attestationToken(appId, pem, pkg.repo);
+          if (!carried(a.name) && (await verifyAttestation(file, pkg, item.tag, repo.private, attTok.token)) === "skipped") {
             warn(`${pkg.name} ${item.tag}: ${a.name} has no attestation; ${pkg.repo} is private, so this is allowed`);
           }
         }
@@ -99,6 +108,7 @@ export async function fetchMode(ctx: Context): Promise<void> {
       failure(`${item.package} ${item.tag}`, e);
     } finally {
       await tok?.revoke();
+      await attTok?.revoke();
     }
   }
   await saveManifest(manifest);

@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { type HubConfig, NAME, TAG, parseConfig } from "../config";
+import { type HubConfig, type InvalidPackage, NAME, TAG, parseHub } from "../config";
 import { TapsterError } from "../errors";
 import type { WorkItem } from "../plan";
 
-export type Context = { hub: string; owner: string; config: HubConfig; workspace: string };
+export type Context = { hub: string; owner: string; config: HubConfig; invalid: InvalidPackage[]; workspace: string };
 
 export async function loadContext(configPath: string): Promise<Context> {
   const hub = process.env.GITHUB_REPOSITORY;
@@ -15,7 +15,7 @@ export async function loadContext(configPath: string): Promise<Context> {
   const text = await readFile(join(workspace, configPath), "utf8").catch(() => {
     throw new TapsterError(`${configPath} is missing in the hub`, "Run tapster init in a clone of the hub.");
   });
-  return { hub, owner, config: parseConfig(text, owner), workspace };
+  return { hub, owner, ...parseHub(text, owner), workspace };
 }
 
 const work = z

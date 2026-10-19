@@ -1,7 +1,7 @@
 name: tapster
 on:
   schedule:
-    - cron: "7-59/10 * * * *"
+    - cron: "__CRON__"
   workflow_dispatch:
     inputs:
       package:
@@ -23,98 +23,129 @@ jobs:
     permissions: { contents: read }
     outputs:
       work: ${{ steps.check.outputs.work }}
+      macos: ${{ steps.check.outputs.macos }}
       render: ${{ steps.check.outputs.render }}
       linux: ${{ steps.check.outputs.linux }}
     steps:
-      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+      - name: Check out the hub
+        uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
-      - id: check
+      - name: Check the projects for drafts
+        id: check
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: check, package: "${{ inputs.package }}", linux: "${{ inputs.linux }}" }
-        env:
-          TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
-          TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
-  sign:
-    needs: check
-    if: ${{ !cancelled() && needs.check.outputs.work != '[]' && needs.check.outputs.work != '' }}
-    runs-on: macos-15
-    environment: { name: tapster, deployment: false }
-    permissions: { contents: write, id-token: write, attestations: write }
-    steps:
-      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
-        with: { persist-credentials: false, ref: main }
-      - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: fetch, work: "${{ needs.check.outputs.work }}" }
-        env:
-          TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
-          TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
-      - if: ${{ !cancelled() }}
-        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: sign }
-        env:
-          TAPSTER_TEAM_ID: ${{ vars.TAPSTER_TEAM_ID }}
-          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-      - if: ${{ !cancelled() }}
-        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: package }
-      - if: ${{ !cancelled() }}
-        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: seal }
-        env:
-          TAPSTER_TEAM_ID: ${{ vars.TAPSTER_TEAM_ID }}
-          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-      - if: ${{ !cancelled() }}
-        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: sparkle }
-        env: __SPARKLE_ENV__
-      - id: publish
-        if: ${{ !cancelled() }}
-        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: publish }
+        with: { mode: check, template: 2, package: "${{ inputs.package }}", linux: "${{ inputs.linux }}" }
         env:
           TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
           TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
-      - if: ${{ !cancelled() && steps.publish.outputs.attest == 'true' }}
-        uses: actions/attest-build-provenance@__ATTEST_SHA__ # __ATTEST_TAG__
-        with: { subject-path: "${{ steps.publish.outputs.attest-path }}" }
-      - if: always()
+          TAPSTER_TEAM_ID: ${{ vars.TAPSTER_TEAM_ID }}
+          TAPSTER_CERT_EXPIRES: ${{ vars.TAPSTER_CERT_EXPIRES }}
+  sign:
+    needs: check
+    if: ${{ !cancelled() && needs.check.outputs.work != '[]' && needs.check.outputs.work != '' }}
+    runs-on: ${{ needs.check.outputs.macos == 'false' && 'ubuntu-24.04' || 'macos-15' }}
+    environment: { name: tapster, deployment: false }
+    permissions: { contents: write }
+    outputs:
+      attest: ${{ steps.publish.outputs.attest }}
+      checksums: ${{ steps.publish.outputs.attest-checksums }}
+    steps:
+      - name: Check out the hub
+        uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+        with: { persist-credentials: false, ref: main }
+      - name: Download the drafts and verify them
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: cleanup }
+        with: { mode: fetch, template: 2, work: "${{ needs.check.outputs.work }}" }
+        env:
+          TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
+          TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
+      - name: Sign and notarize macOS code
+        if: ${{ !cancelled() }}
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: sign, template: 2 }
+        env:
+          TAPSTER_TEAM_ID: ${{ vars.TAPSTER_TEAM_ID }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+      - name: Build the DMGs
+        if: ${{ !cancelled() }}
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: package, template: 2 }
+      - name: Sign, notarize and staple the DMGs
+        if: ${{ !cancelled() }}
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: seal, template: 2 }
+        env:
+          TAPSTER_TEAM_ID: ${{ vars.TAPSTER_TEAM_ID }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+      - name: Sign the Sparkle feeds
+        if: ${{ !cancelled() }}
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: sparkle, template: 2 }
+        env: __SPARKLE_ENV__
+      - name: Publish the signed releases
+        id: publish
+        if: ${{ !cancelled() }}
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: publish, template: 2 }
+        env:
+          TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
+          TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Remove keychains and temporary files
+        if: always()
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: cleanup, template: 2 }
+  attest:
+    needs: sign
+    if: ${{ !cancelled() && needs.sign.outputs.attest == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions: { contents: read, id-token: write, attestations: write }
+    steps:
+      - name: Write the checksums of the signed files
+        env: { CHECKSUMS: "${{ needs.sign.outputs.checksums }}" }
+        run: printf '%s\n' "$CHECKSUMS" > "$RUNNER_TEMP/checksums.txt"
+      - name: Attest the signed files
+        uses: actions/attest-build-provenance@__ATTEST_SHA__ # __ATTEST_TAG__
+        with: { subject-checksums: "${{ runner.temp }}/checksums.txt" }
   render:
     needs: [check, sign]
     if: ${{ !cancelled() && needs.check.outputs.render == 'true' }}
-    runs-on: macos-15
+    runs-on: ubuntu-24.04
     permissions: { contents: write }
     steps:
-      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+      - name: Check out the hub
+        uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
-      - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: render }
+      - name: Write casks and the state
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: render, template: 2 }
         env:
           GITHUB_TOKEN: ${{ github.token }}
   linux-build:
     needs: [check, sign]
-    if: ${{ !cancelled() && needs.check.result == 'success' && needs.check.outputs.linux == 'true' }}
+    if: ${{ !cancelled() && needs.check.outputs.linux == 'true' }}
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     outputs:
       changed: ${{ steps.build.outputs.changed }}
     steps:
-      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+      - name: Check out the hub
+        uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
-      - id: build
+      - name: Build the Linux packages
+        id: build
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: linux-build }
-      - if: ${{ steps.build.outputs.changed == 'true' }}
+        with: { mode: linux-build, template: 2 }
+      - name: Keep the Linux files for the next job
+        if: ${{ steps.build.outputs.changed == 'true' }}
         uses: actions/upload-artifact@__UPLOAD_SHA__ # __UPLOAD_TAG__
         with: { name: linux-unsigned, path: "${{ runner.temp }}/tapster-linux", if-no-files-found: error, retention-days: 1 }
   linux-sign:
@@ -126,15 +157,20 @@ jobs:
     steps:
       - name: Install the signing tools from Ubuntu
         run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends apt-utils rpm createrepo-c dpkg gnupg
-      - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
+      - name: Check out the hub
+        uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
         with: { persist-credentials: false, ref: main }
-      - uses: actions/download-artifact@__DOWNLOAD_SHA__ # __DOWNLOAD_TAG__
+      - name: Download the Linux files
+        uses: actions/download-artifact@__DOWNLOAD_SHA__ # __DOWNLOAD_TAG__
         with: { name: linux-unsigned, path: "${{ runner.temp }}/tapster-linux" }
-      - uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
-        with: { mode: linux-sign }
+      - name: Sign the Linux repositories
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: linux-sign, template: 2 }
         env:
           TAPSTER_LINUX_KEY: ${{ secrets.TAPSTER_LINUX_KEY }}
-      - uses: actions/upload-artifact@__UPLOAD_SHA__ # __UPLOAD_TAG__
+          TAPSTER_LINUX_KEY_PREVIOUS: ${{ secrets.TAPSTER_LINUX_KEY_PREVIOUS }}
+      - name: Keep the signed site for Pages
+        uses: actions/upload-artifact@__UPLOAD_SHA__ # __UPLOAD_TAG__
         with: { name: linux-site, path: "${{ runner.temp }}/tapster-linux", if-no-files-found: error, retention-days: 1 }
   linux-pages:
     needs: linux-sign
@@ -143,9 +179,12 @@ jobs:
     environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
     permissions: { pages: write, id-token: write }
     steps:
-      - uses: actions/download-artifact@__DOWNLOAD_SHA__ # __DOWNLOAD_TAG__
+      - name: Download the signed site
+        uses: actions/download-artifact@__DOWNLOAD_SHA__ # __DOWNLOAD_TAG__
         with: { name: linux-site, path: site }
-      - uses: actions/upload-pages-artifact@__PAGES_UPLOAD_SHA__ # __PAGES_UPLOAD_TAG__
+      - name: Hand the site to GitHub Pages
+        uses: actions/upload-pages-artifact@__PAGES_UPLOAD_SHA__ # __PAGES_UPLOAD_TAG__
         with: { path: site }
-      - id: deploy
+      - name: Deploy the Linux repositories
+        id: deploy
         uses: actions/deploy-pages@__PAGES_DEPLOY_SHA__ # __PAGES_DEPLOY_TAG__

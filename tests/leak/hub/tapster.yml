@@ -4,5 +4,6 @@ packages:
   - name: fixture
     repo: doguyilmaz/tapster-fixture
     binaries: [fixture]
+    attestation: "off"
     assets:
       darwin-arm64: "fixture_{version}_darwin_arm64.tar.gz"
