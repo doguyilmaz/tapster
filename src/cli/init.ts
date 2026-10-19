@@ -198,8 +198,9 @@ function hubConfig(dir: string, hub: string): HubConfig {
 
 async function writeWorkflow(gh: GitHub, dir: string, labels: string[]): Promise<void> {
   await mkdir(join(dir, ".github/workflows"), { recursive: true });
-  await writeFile(join(dir, ".github/workflows/tapster.yml"), fillWorkflow(hubWorkflow, pinsJson, await tapsterRef(gh), labels));
-  console.log("wrote .github/workflows/tapster.yml");
+  const ref = await tapsterRef(gh);
+  await writeFile(join(dir, ".github/workflows/tapster.yml"), fillWorkflow(hubWorkflow, pinsJson, ref, labels));
+  console.log(`wrote .github/workflows/tapster.yml from the template, pinned to tapster ${ref.tag}; hand edits in it are replaced`);
 }
 
 async function storeSparkleKey(gh: GitHub, dir: string, hub: string, label: string, account: string): Promise<void> {

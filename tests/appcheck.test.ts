@@ -173,6 +173,15 @@ test.if(darwin)("the system reader refuses a file over 1 MiB without running plu
   await expect(appFacts(app(good, { "Contents/Resources/en.lproj/InfoPlist.strings": `"a" = "${"x".repeat(1 << 20)}";` }), pkg, cfg.packages, "v1.3.1", systemPlist)).rejects.toThrow(/InfoPlist.strings/);
 });
 
+test("linked commands and the volume icon must exist in the app", async () => {
+  const withCask = { ...pkg, cask: { ...pkg.cask, binaries: ["Contents/Resources/bin/hafif"] }, dmg: { ...pkg.dmg, volume_icon: "Contents/Resources/AppIcon.icns" } } as AppPackage;
+  const ok = app(good, { "Contents/Resources/bin/hafif": MACHO, "Contents/Resources/AppIcon.icns": "icns" });
+  expect((await appFacts(ok, withCask, cfg.packages, "v1.3.1", agree)).version).toBe("1.3.1");
+  await expect(appFacts(app(good, { "Contents/Resources/AppIcon.icns": "icns" }), withCask, cfg.packages, "v1.3.1", agree)).rejects.toThrow(/Contents\/Resources\/bin\/hafif/);
+  await expect(appFacts(app(good, { "Contents/Resources/bin/hafif": "#!/bin/sh\n", "Contents/Resources/AppIcon.icns": "icns" }), withCask, cfg.packages, "v1.3.1", agree)).rejects.toThrow(/Mach-O/);
+  await expect(appFacts(app(good, { "Contents/Resources/bin/hafif": MACHO }), withCask, cfg.packages, "v1.3.1", agree)).rejects.toThrow(/AppIcon.icns/);
+});
+
 test("Sparkle older than 2.9 is refused", async () => {
   await expect(appFacts(app(good, {}, "2.8.1"), pkg, cfg.packages, "v1.3.1", agree)).rejects.toThrow(/Sparkle/);
 });

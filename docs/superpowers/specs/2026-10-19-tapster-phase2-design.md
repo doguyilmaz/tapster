@@ -363,14 +363,15 @@ length: <number of those bytes>
 ```
 
 - One item, the release being published, as `generate_appcast` produces today.
-- `hardwareRequirements` only for an arm64-only app. `pubDate` is the tag date in RFC 822 form.
+- `hardwareRequirements` only for an arm64-only app. `pubDate` is the time the project opened the draft, in RFC 822
+  form.
 - The signature block is the one Sparkle's `sign_update` appends (`common_cli/Signing.swift`). Every value is
   XML-escaped and validated.
 
 ## 9. CLI and templates
 
 - **App template** (`templates/project/app-release.yml`): job `build` (`contents: read`) runs the project's build
-  command with an ad-hoc identity and `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO`, packs the app and uploads it as a
+  command, which signs the app ad hoc, packs the app and uploads it as a
   workflow artifact. Job `release` (`contents: write`, `id-token: write`, `attestations: write`) downloads it, writes
   `checksums.txt`, attests every listed file with `subject-checksums` and opens the draft. Triggers: tag push and
   `workflow_dispatch`, which refuses any ref that is not a tag.

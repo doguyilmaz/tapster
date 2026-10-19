@@ -167,6 +167,17 @@ targets:
   expect(entry).toContain("      feed: appcast-2.xml\n");
   expect(entry).toContain(`      public_key: "${"A".repeat(43)}="`);
   expect(findApp(mkdtempSync(join(tmpdir(), "none-")))).toBeNull();
+  writeFileSync(join(dir, "Makefile"), "APP = dist/Battistics Pro.app\n\napp: gen\n\txcodebuild\n");
+  const renamed = appEntry("battistics", "o/battistics", findApp(dir)!);
+  expect(renamed).toContain("    app: Battistics Pro.app\n");
+  expect(renamed).toContain('"Battistics Pro-{version}.app.tar.gz"');
+});
+
+test("an Info.plist with a feed is not an app project without a project file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "loose-"));
+  mkdirSync(join(dir, "fixtures"));
+  writeFileSync(join(dir, "fixtures", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>SUFeedURL</key><string>https://github.com/o/x/releases/latest/download/appcast.xml</string></dict></plist>`);
+  expect(findApp(dir)).toBeNull();
 });
 
 test("add finds a plain Info.plist with a feed when there is no project.yml", () => {

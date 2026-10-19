@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -15,11 +15,15 @@ import { extractFeed } from "../src/appcast";
 import { fillWorkflow } from "../src/cli/init";
 import { type AppPackage, parseConfig } from "../src/config";
 import { resetMaskForTests } from "../src/mask";
+import { resetReportForTests } from "../src/report";
 import { draftStatus } from "../src/plan";
 import { emptyState, upsert } from "../src/state";
 import { type Fetched, loadManifest, saveManifest } from "../src/workdir";
 
-afterEach(resetMaskForTests);
+afterEach(() => {
+  resetMaskForTests();
+  resetReportForTests();
+});
 
 function keyPair(): { seed: string; pub: string } {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
@@ -130,6 +134,31 @@ test("a Sparkle key that does not belong to the app stops the item", () => {
     "the Sparkle key shared does not belong to this app; installed copies would reject the update",
   );
   expect(() => sparkleFeed({ pkg: app, tag: "v1.3.1", facts, dmg: Buffer.from("x"), created: new Date(), keys: new Map() })).toThrow(/SPARKLE_KEY_SHARED/);
+});
+
+test("an unstored Sparkle secret stops only the apps that use it", async () => {
+  fresh();
+  process.env.SPARKLE_KEY_SHARED = current.seed;
+  process.env.SPARKLE_KEY_NEWER = "";
+  expect([...readSparkleKeys().keys()]).toEqual(["shared"]);
+  const dir = mkdtempSync(join(tmpdir(), "dmg-"));
+  writeFileSync(join(dir, "HafifPix-1.3.1.dmg"), "dmg");
+  const work = { dir: "/x/HafifPix.app", facts, created: "2026-10-19T10:00:00Z", identifiers: [], dmg: join(dir, "HafifPix-1.3.1.dmg"), feed: null };
+  process.env.SPARKLE_KEY_SHARED = current.seed;
+  await saveManifest({ items: [item({ status: "sealed", app: work })] });
+  await sparkleMode(ctx);
+  expect((await loadManifest()).items[0]!.status).toBe("sparkled");
+});
+
+test("a malformed Sparkle key fails the apps that need a key and keeps the manifest", async () => {
+  fresh();
+  process.env.SPARKLE_KEY_SHARED = "not a key!";
+  const dir = mkdtempSync(join(tmpdir(), "dmg-"));
+  writeFileSync(join(dir, "HafifPix-1.3.1.dmg"), "dmg");
+  const work = { dir: "/x/HafifPix.app", facts, created: "2026-10-19T10:00:00Z", identifiers: [], dmg: join(dir, "HafifPix-1.3.1.dmg"), feed: null };
+  await saveManifest({ items: [item({ status: "sealed", app: work }), item({ package: "aims", status: "signed" })] });
+  await sparkleMode(ctx);
+  expect((await loadManifest()).items.map((i) => i.status)).toEqual(["failed", "signed"]);
 });
 
 test("a malformed Sparkle key stops the step without its value", () => {

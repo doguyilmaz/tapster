@@ -26,7 +26,7 @@ export function buildFakeApp(): string {
   };
   put("Contents/Info.plist", plist("com.t.T", "T"));
   cc("Contents/MacOS/T", [src]);
-  writeFileSync(join(root, "helper.plist"), plist("com.t.T.Helper", "Helper"));
+  writeFileSync(join(root, "helper.plist"), plist("com.other.Battistics", "Helper"));
   cc("Contents/MacOS/Helper", [src, "-sectcreate", "__TEXT", "__info_plist", join(root, "helper.plist")]);
   cc("Contents/Frameworks/libz.dylib", ["-dynamiclib", join(root, "lib.c")]);
   cc("Contents/Resources/bin/tool", [src]);

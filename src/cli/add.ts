@@ -129,10 +129,12 @@ function infoPlists(dir: string, depth = 0): string[] {
 
 function makeTarget(dir: string): { build: string | null; appPath: string | null } {
   const make = existsSync(join(dir, "Makefile")) ? readFileSync(join(dir, "Makefile"), "utf8") : "";
-  return { build: /^app:/m.test(make) ? "make app" : null, appPath: /^APP\s*:?=\s*(\S+\.app)\s*$/m.exec(make)?.[1] ?? null };
+  return { build: /^app:/m.test(make) ? "make app" : null, appPath: /^APP\s*:?=\s*([^\s].*?\.app)\s*$/m.exec(make)?.[1] ?? null };
 }
 
 export function findApp(dir: string): FoundApp | null {
+  const top = readdirSync(dir);
+  if (!top.some((f) => f === "project.yml" || f === "Package.swift" || f.endsWith(".xcodeproj"))) return null;
   const make = makeTarget(dir);
   if (existsSync(join(dir, "project.yml"))) {
     const project = parse(readFileSync(join(dir, "project.yml"), "utf8")) as { settings?: { base?: Record<string, unknown> }; targets?: Record<string, Record<string, unknown>> };
@@ -152,7 +154,7 @@ export function findApp(dir: string): FoundApp | null {
       };
     }
   }
-  const xcodeproj = readdirSync(dir).find((f) => f.endsWith(".xcodeproj"));
+  const xcodeproj = top.find((f) => f.endsWith(".xcodeproj"));
   for (const path of infoPlists(dir)) {
     let info: Record<string, unknown>;
     try {
@@ -176,7 +178,8 @@ export function findApp(dir: string): FoundApp | null {
   return null;
 }
 
-export function appEntry(name: string, repo: string, app: FoundApp): string {
+export function appEntry(name: string, repo: string, found: FoundApp): string {
+  const app = { ...found, name: found.appPath ? basename(found.appPath, ".app") : found.name };
   const lines = [
     `  - name: ${name}`,
     `    repo: ${repo}`,
