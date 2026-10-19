@@ -71,7 +71,15 @@ async function brewCheck(brew: string, env: Record<string, string>, args: string
   if (res.code !== 0) throw new TapsterError(`brew ${args[0]} found problems`, excerpt(`${res.stdout}\n${res.stderr}`, 8) || "No output.");
 }
 
-async function audit(ws: string, tap: string, casks: { name: string; online: boolean }[]): Promise<Map<string, unknown>> {
+export function auditArgs(local: string, name: string, online: boolean, platforms: string[]): string[][] {
+  const base = ["audit", "--cask", ...(online ? ["--online"] : [])];
+  const runs: string[][] = [];
+  if (platforms.some((p) => p.startsWith("darwin"))) runs.push([...base, `${local}/${name}`]);
+  if (platforms.some((p) => p.startsWith("linux"))) runs.push([...base, "--os", "linux", `${local}/${name}`]);
+  return runs;
+}
+
+async function audit(ws: string, tap: string, casks: { name: string; online: boolean; platforms: string[] }[]): Promise<Map<string, unknown>> {
   if (casks.length === 0) return new Map();
   const brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].find((p) => existsSync(p));
   if (!brew) throw new TapsterError("Homebrew is not installed on this runner", "Run the render job on macos-15.");
@@ -81,12 +89,13 @@ async function audit(ws: string, tap: string, casks: { name: string; online: boo
   await run("git", ["-C", ws, "-c", "user.name=tapster", "-c", "user.email=tapster@localhost", "commit", "-q", "--allow-empty", "-m", "tapster audit"]);
   await runPath(brew, "brew", ["tap", local, ws], { env });
   try {
-    const online = new Map(casks.map((c) => [c.name, c.online]));
+    const byName = new Map(casks.map((c) => [c.name, c]));
     return await auditEach(
       casks.map((c) => c.name),
       async (name) => {
+        const c = byName.get(name)!;
         await brewCheck(brew, env, ["style", "--cask", `${local}/${name}`]);
-        await brewCheck(brew, env, ["audit", "--cask", ...(online.get(name) ? ["--online"] : []), `${local}/${name}`]);
+        for (const args of auditArgs(local, name, c.online, c.platforms)) await brewCheck(brew, env, args);
       },
     );
   } finally {
@@ -160,7 +169,11 @@ export async function renderMode(ctx: Context): Promise<void> {
     await writeFile(join(ws, c.path), c.content);
   }
   const casks = changes.filter((c) => c.path.startsWith("Casks/")).map((c) => basename(c.path, ".rb"));
-  const failed = await audit(ws, ctx.config.tap, casks.map((name) => ({ name, online: online.get(name) ?? true })));
+  const failed = await audit(
+    ws,
+    ctx.config.tap,
+    casks.map((name) => ({ name, online: online.get(name) ?? true, platforms: Object.keys(ctx.config.packages.find((p) => p.name === name)?.assets ?? {}) })),
+  );
   for (const [name, err] of failed) failure(name, err);
   const kept = changes.filter((c) => !failed.has(basename(c.path).replace(/\.(rb|json)$/, "")));
   changes.length = 0;

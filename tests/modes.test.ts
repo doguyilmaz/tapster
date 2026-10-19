@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { auditEach, buildDownloads, renderNeeded } from "../src/action/render";
+import { auditArgs, auditEach, buildDownloads, renderNeeded } from "../src/action/render";
 import { signMode } from "../src/action/sign";
 import { parseConfig } from "../src/config";
 import { serializeState, upsert, emptyState } from "../src/state";
@@ -68,4 +68,13 @@ test("one cask failing its audit leaves the others", async () => {
   });
   expect(seen).toEqual(["a", "b", "c"]);
   expect([...failed.keys()]).toEqual(["b"]);
+});
+
+test("each cask is audited for the systems it ships for", () => {
+  expect(auditArgs("o/tapster-audit", "a", true, ["darwin-arm64", "linux-amd64"])).toEqual([
+    ["audit", "--cask", "--online", "o/tapster-audit/a"],
+    ["audit", "--cask", "--online", "--os", "linux", "o/tapster-audit/a"],
+  ]);
+  expect(auditArgs("o/tapster-audit", "b", false, ["linux-amd64"])).toEqual([["audit", "--cask", "--os", "linux", "o/tapster-audit/b"]]);
+  expect(auditArgs("o/tapster-audit", "c", false, ["darwin-universal", "windows-amd64"])).toEqual([["audit", "--cask", "o/tapster-audit/c"]]);
 });
