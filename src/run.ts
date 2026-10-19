@@ -19,7 +19,7 @@ export type Tool = keyof typeof TOOLS;
 
 const GH = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"];
 
-export type RunOptions = { env?: Record<string, string>; stdin?: string | Uint8Array; allowFail?: boolean; cwd?: string };
+export type RunOptions = { env?: Record<string, string>; stdin?: string | Uint8Array; allowFail?: boolean; cwd?: string; maxOutput?: number; timeoutMs?: number };
 export type RunResult = { code: number; stdout: string; stderr: string };
 
 export function childEnv(extra: Record<string, string> = {}): Record<string, string> {
@@ -54,10 +54,27 @@ export function runPath(path: string, label: string, args: string[], opts: RunOp
     const child = spawn(path, args, { env: childEnv(opts.env), cwd: opts.cwd, shell: false, stdio: ["pipe", "pipe", "pipe"] });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
-    child.stdout.on("data", (d: Buffer) => out.push(d));
-    child.stderr.on("data", (d: Buffer) => err.push(d));
+    let size = 0;
+    let stopped: TapsterError | null = null;
+    const stop = (e: TapsterError) => {
+      stopped ??= e;
+      child.kill("SIGKILL");
+    };
+    const timer = opts.timeoutMs ? setTimeout(() => stop(new TapsterError(`${label} did not finish in time`, "Re-run the workflow; if it happens again, check the input it read.")), opts.timeoutMs) : null;
+    const collect = (into: Buffer[]) => (d: Buffer) => {
+      size += d.length;
+      if (opts.maxOutput && size > opts.maxOutput) stop(new TapsterError(`${label} wrote more output than tapster reads`, "Check the input it read."));
+      else into.push(d);
+    };
+    child.stdout.on("data", collect(out));
+    child.stderr.on("data", collect(err));
     child.on("error", () => reject(new TapsterError(`${label} could not start`, `Check that ${path} exists on this runner.`)));
     child.on("close", (code) => {
+      if (timer) clearTimeout(timer);
+      if (stopped) {
+        reject(stopped);
+        return;
+      }
       const res = { code: code ?? -1, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") };
       if (res.code !== 0 && !opts.allowFail) {
         reject(new TapsterError(`${label} exited with ${res.code}`, excerpt(res.stderr) || "No error output."));

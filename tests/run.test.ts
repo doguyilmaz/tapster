@@ -45,3 +45,10 @@ test("excerpt drops keychain lines and scrubs", () => {
 test("childEnv uses a fixed PATH", () => {
   expect(childEnv().PATH).toBe("/usr/bin:/bin");
 });
+
+test("a tool that writes without end or hangs is stopped", async () => {
+  await expect(runPath("/usr/bin/yes", "yes", [], { maxOutput: 1 << 16 })).rejects.toThrow(/more output/);
+  const started = Date.now();
+  await expect(runPath("/bin/sleep", "sleep", ["5"], { timeoutMs: 200 })).rejects.toThrow(/did not finish/);
+  expect(Date.now() - started).toBeLessThan(2000);
+});

@@ -4,6 +4,7 @@ export type PlistValue = string | number | boolean | Date | Buffer | PlistValue[
 
 const MAX_BYTES = 1 << 20;
 const MAX_DEPTH = 32;
+const MAX_OBJECTS = 100_000;
 
 const bad = (what: string) => new TapsterError(`an Info.plist ${what}`, "Rebuild the app; tapster reads XML and binary property lists.");
 
@@ -171,8 +172,10 @@ function parseBinary(data: Buffer): PlistValue {
     return at;
   };
   const visiting = new Set<number>();
+  let visits = 0;
   const object = (ref: number, depth: number): PlistValue => {
     if (depth > MAX_DEPTH) throw bad("is nested too deeply");
+    if (++visits > MAX_OBJECTS) throw bad("has too many objects");
     if (visiting.has(ref)) throw bad("refers to itself");
     visiting.add(ref);
     try {

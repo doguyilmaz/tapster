@@ -80,3 +80,24 @@ test("an XML plist that declares another encoding is refused", () => {
   expect(parsePlist(Buffer.from(`<?xml version="1.0" encoding="utf-8"?>${body}`))).toEqual({ a: "b" });
   expect(parsePlist(Buffer.from(`\ufeff<?xml version='1.0'?>${body}`))).toEqual({ a: "b" });
 });
+
+test("a binary plist whose objects share children cannot make the parser expand them without end", () => {
+  const levels = 30;
+  const objects = Array.from({ length: levels }, (_, i) => (i === levels - 1 ? Buffer.from([0xa0]) : Buffer.from([0xa2, i + 1, i + 1])));
+  const offsets: number[] = [];
+  let at = 8;
+  for (const o of objects) {
+    offsets.push(at);
+    at += o.length;
+  }
+  const trailer = Buffer.alloc(32);
+  trailer[6] = 1;
+  trailer[7] = 1;
+  trailer.writeBigUInt64BE(BigInt(levels), 8);
+  trailer.writeBigUInt64BE(0n, 16);
+  trailer.writeBigUInt64BE(BigInt(at), 24);
+  const data = Buffer.concat([Buffer.from("bplist00"), ...objects, Buffer.from(offsets), trailer]);
+  const started = Date.now();
+  expect(() => parsePlist(data)).toThrow(/too many objects/);
+  expect(Date.now() - started).toBeLessThan(1000);
+});

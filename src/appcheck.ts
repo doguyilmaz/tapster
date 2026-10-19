@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import type { TarEntry } from "./archive";
 import type { ChecksumLine } from "./checksums";
@@ -90,8 +90,12 @@ const isDict = (v: PlistValue | undefined): v is Dict =>
 
 export type ReadPlist = (path: string) => Promise<Dict>;
 
+const MAX_PLIST = 1 << 20;
+const MAX_PLISTS = 400;
+
 export const systemPlist: ReadPlist = async (path) => {
-  const r = await run("plutil", ["-convert", "xml1", "-o", "-", path], { allowFail: true });
+  if (statSync(path).size > MAX_PLIST) throw refuse(`${basename(path)} is larger than 1 MiB`);
+  const r = await run("plutil", ["-convert", "xml1", "-o", "-", path], { allowFail: true, maxOutput: MAX_PLIST, timeoutMs: 10_000 });
   if (r.code !== 0) throw refuse(`macOS cannot read ${basename(path)} as a property list`);
   const v = parsePlist(Buffer.from(r.stdout, "utf8"));
   if (!isDict(v)) throw refuse(`${basename(path)} is not a dictionary`);
@@ -110,7 +114,9 @@ function localizedKey(d: Dict): string | undefined {
 
 export async function appFacts(appDir: string, pkg: AppPackage, all: PackageConfig[], tag: string, readPlist: ReadPlist): Promise<AppFacts> {
   const rel = (p: string) => relative(appDir, p).split(sep).join("/");
+  let reads = 0;
   const read = async (path: string): Promise<Dict> => {
+    if (++reads > MAX_PLISTS) throw refuse(`the app holds more than ${MAX_PLISTS} property lists`, "Rebuild the app; tapster reads at most that many.");
     try {
       const v = await readPlist(path);
       if (!isDict(v)) throw refuse(`${rel(path)} is not a dictionary`);

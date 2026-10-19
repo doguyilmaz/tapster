@@ -157,6 +157,22 @@ test.if(darwin)("macOS's own reading decides: old-style, UTF-7 and escaped local
   expect((await appFacts(app(good, { "Contents/Resources/en.lproj/InfoPlist.strings": '"CFBundleDisplayName" = "HafifPix";\n' }), pkg, cfg.packages, "v1.3.1", systemPlist)).version).toBe("1.3.1");
 });
 
+test("an app with too many property lists is refused before they are all read", async () => {
+  const extra: Record<string, string> = {};
+  for (let i = 0; i < 401; i++) extra[`Contents/Resources/b${i}.bundle/Info.plist`] = plist({ CFBundleDevelopmentRegion: "en" });
+  let reads = 0;
+  const counting = async (p: string) => {
+    reads++;
+    return agree(p);
+  };
+  await expect(appFacts(app(good, extra), pkg, cfg.packages, "v1.3.1", counting)).rejects.toThrow(/property lists/);
+  expect(reads).toBeLessThanOrEqual(401);
+});
+
+test.if(darwin)("the system reader refuses a file over 1 MiB without running plutil on it", async () => {
+  await expect(appFacts(app(good, { "Contents/Resources/en.lproj/InfoPlist.strings": `"a" = "${"x".repeat(1 << 20)}";` }), pkg, cfg.packages, "v1.3.1", systemPlist)).rejects.toThrow(/InfoPlist.strings/);
+});
+
 test("Sparkle older than 2.9 is refused", async () => {
   await expect(appFacts(app(good, {}, "2.8.1"), pkg, cfg.packages, "v1.3.1", agree)).rejects.toThrow(/Sparkle/);
 });
