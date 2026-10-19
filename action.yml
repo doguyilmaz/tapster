@@ -6,8 +6,9 @@ branding:
   color: orange
 inputs:
   mode:
-    description: check | fetch | sign | package | seal | sparkle | publish | render | linux-build | linux-sign | cleanup
-    required: true
+    description: Leave it empty on first use; the run summary then shows how to set up the hub. The setup writes the full hub workflow, which uses the other modes.
+    required: false
+    default: guide
   template:
     description: Version of the hub workflow template; tapster init writes it
     required: false

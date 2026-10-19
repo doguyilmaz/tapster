@@ -6,6 +6,7 @@ import { cleanupMode } from "./cleanup";
 import { loadContext } from "./context";
 import { fetchMode } from "./fetch";
 import { guardRun } from "./guard";
+import { guide } from "./guide";
 import { linuxBuildMode, linuxSignMode } from "./linux";
 import { packageMode } from "./package";
 import { publishMode } from "./publish";
@@ -14,9 +15,11 @@ import { sealMode } from "./seal";
 import { signMode } from "./sign";
 import { sparkleMode } from "./sparkle";
 
+const mode = core.getInput("mode") || "guide";
+
 async function main(): Promise<void> {
+  if (mode === "guide") return guide();
   guardRun(process.env, core.getInput("template"));
-  const mode = core.getInput("mode", { required: true });
   if (mode === "cleanup") return cleanupMode();
   const ctx = await loadContext(core.getInput("config") || "tapster.yml");
   if (mode === "check") return check(ctx);
@@ -29,7 +32,7 @@ async function main(): Promise<void> {
   if (mode === "linux-sign") return linuxSignMode(ctx);
   if (mode === "publish") return publishMode(ctx);
   if (mode === "render") return renderMode(ctx);
-  throw new TapsterError(`unknown mode ${mode}`, "Use check, fetch, sign, package, seal, sparkle, publish, render, linux-build, linux-sign or cleanup.");
+  throw new TapsterError(`unknown mode ${mode}`, "Use guide, check, fetch, sign, package, seal, sparkle, publish, render, linux-build, linux-sign or cleanup.");
 }
 
 try {
