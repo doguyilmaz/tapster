@@ -33,11 +33,20 @@ const release: Release = {
 const hubFiles = new Map<string, string>();
 let hubHead = "c0ffee0000000000000000000000000000000001";
 
+const CI = { login: "github-actions[bot]", type: "Bot" };
 const view = (r: Release) => ({
   ...r,
+  author: CI,
   upload_url: `https://uploads.github.com/repos/${REPO}/releases/${r.id}/assets{?name,label}`,
-  assets: r.assets.map(({ data: _, ...a }) => a),
+  assets: r.assets.map(({ data: _, ...a }) => ({ ...a, uploader: CI })),
 });
+const ADMIN = [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }];
+const rulesets = [
+  { id: 1, name: "tapster tags", target: "tag", enforcement: "active", bypass_actors: ADMIN, current_user_can_bypass: "never",
+    conditions: { ref_name: { include: ["~ALL"], exclude: [] } }, rules: [{ type: "creation" }, { type: "update" }, { type: "deletion" }] },
+  { id: 2, name: "tapster branches", target: "branch", enforcement: "active", bypass_actors: ADMIN, current_user_can_bypass: "never",
+    conditions: { ref_name: { include: ["~ALL"], exclude: [] } }, rules: [{ type: "creation" }, { type: "update" }, { type: "deletion" }, { type: "non_fast_forward" }] },
+];
 
 function send(res: ServerResponse, status: number, body?: unknown, type = "application/json") {
   res.writeHead(status, { "content-type": type });
@@ -62,6 +71,14 @@ const server = createServer({ cert: readFileSync(certPath!), key: readFileSync(k
   const data = await body(req);
   const repo = `/repos/${REPO}`;
   if (path === `${repo}/installation`) return send(res, 200, { id: 1 });
+  if (path === "/users/doguyilmaz/installation") return send(res, 200, { id: 1 });
+  if (path === "/installation/repositories") return send(res, 200, { repositories: [{ full_name: REPO }] });
+  if (path === `${repo}/rulesets`) return send(res, 200, rulesets.filter((r) => r.target === url.searchParams.get("targets")));
+  const ruleset = new RegExp(`^${repo}/rulesets/(\\d+)$`).exec(path);
+  if (ruleset) return send(res, 200, rulesets.find((r) => r.id === Number(ruleset[1])));
+  if (path === `${repo}/rules/branches/main`) return send(res, 200, rulesets[1]!.rules);
+  if (path === `${repo}/git/ref/tags/${release.tag_name}`) return send(res, 200, { object: { sha: "f1x7" } });
+  if (path === "/repos/doguyilmaz/tapster/activity") return send(res, 200, []);
   if (path.endsWith("/installation") && path.startsWith("/repos/")) return send(res, 404, { message: "Not Found" });
   if (path === "/app/installations/1/access_tokens" && method === "POST") return send(res, 201, { token: TOKEN });
   if (path === "/installation/token" && method === "DELETE") return send(res, 204);

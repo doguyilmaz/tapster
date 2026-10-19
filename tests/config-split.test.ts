@@ -73,8 +73,8 @@ test("check records each invalid package as failed, or only the one asked for", 
   const { reportInvalid } = await import("../src/action/check");
   const { resetReportForTests, rowsForTests } = await import("../src/report");
   const invalid = [
-    { name: "a", reason: "a is invalid: x", fix: "Fix it." },
-    { name: "b", reason: "b is invalid: y", fix: "Fix it." },
+    { name: "a", repo: "o/a", reason: "a is invalid: x", fix: "Fix it." },
+    { name: "b", repo: null, reason: "b is invalid: y", fix: "Fix it." },
   ];
   resetReportForTests();
   reportInvalid(invalid, "");

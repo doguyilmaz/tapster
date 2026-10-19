@@ -114,7 +114,7 @@ export const isApp = (p: PackageConfig): p is AppPackage => p.kind === "app";
 export type HubConfig = Omit<z.infer<typeof hub>, "packages"> & { packages: PackageConfig[] };
 export type Semver = { major: number; minor: number; patch: number; pre: string | null };
 
-export type InvalidPackage = { name: string; reason: string; fix: string };
+export type InvalidPackage = { name: string; repo: string | null; reason: string; fix: string };
 
 const issueText = (issues: z.core.$ZodIssue[]) => issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
 
@@ -186,6 +186,10 @@ export function parseHub(text: string, hubOwner: string): { config: HubConfig; i
   if (!top.success) throw new TapsterError(`tapster.yml is invalid: ${issueText(top.error.issues)}`, "Fix the listed fields.");
   const { packages, ...rest } = top.data;
   const failed = new Map<number, InvalidPackage>();
+  const repoAt = (v: unknown) => {
+    const r = v && typeof v === "object" && "repo" in v ? (v as { repo: unknown }).repo : undefined;
+    return typeof r === "string" ? r : null;
+  };
   const nameAt = (v: unknown, i: number) => {
     const n = v && typeof v === "object" && "name" in v ? (v as { name: unknown }).name : undefined;
     return typeof n === "string" && NAME.test(n) ? n : `packages[${i}]`;
@@ -194,7 +198,7 @@ export function parseHub(text: string, hubOwner: string): { config: HubConfig; i
   for (const [i, v] of packages.entries()) {
     const r = pkg.safeParse(v);
     if (!r.success) {
-      failed.set(i, { name: nameAt(v, i), reason: `${nameAt(v, i)} is invalid: ${issueText(r.error.issues)}`, fix: "Fix the listed fields in tapster.yml." });
+      failed.set(i, { name: nameAt(v, i), repo: repoAt(v), reason: `${nameAt(v, i)} is invalid: ${issueText(r.error.issues)}`, fix: "Fix the listed fields in tapster.yml." });
       continue;
     }
     const p = r.data as PackageConfig;
@@ -203,10 +207,13 @@ export function parseHub(text: string, hubOwner: string): { config: HubConfig; i
       ok.push([i, p]);
     } catch (e) {
       if (!(e instanceof TapsterError)) throw e;
-      failed.set(i, { name: p.name, reason: e.reason, fix: e.fix });
+      failed.set(i, { name: p.name, repo: p.repo, reason: e.reason, fix: e.fix });
     }
   }
-  for (const [i, e] of conflicts(ok)) failed.set(i, { name: ok.find(([j]) => j === i)![1].name, reason: e.reason, fix: e.fix });
+  for (const [i, e] of conflicts(ok)) {
+    const p = ok.find(([j]) => j === i)![1];
+    failed.set(i, { name: p.name, repo: p.repo, reason: e.reason, fix: e.fix });
+  }
   return {
     config: { ...rest, packages: ok.filter(([i]) => !failed.has(i)).map(([, p]) => p) },
     invalid: [...failed.entries()].sort(([a], [b]) => a - b).map(([, v]) => v),

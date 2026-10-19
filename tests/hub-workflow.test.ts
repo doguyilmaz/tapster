@@ -26,3 +26,18 @@ test("the hub attests only what publish asks for, so a private hub skips the ste
   expect(own.if).toBe("${{ !github.event.repository.private }}");
   expect(own["continue-on-error"]).toBeUndefined();
 });
+
+test("a check that fails before writing outputs runs no later job", () => {
+  const { sign, render } = flow.jobs;
+  const linux = flow.jobs["linux-build"]!;
+  expect(sign!.if).toContain("needs.check.outputs.work != ''");
+  expect(render!.if).toContain("needs.check.outputs.render == 'true'");
+  expect(linux.if).toContain("needs.check.result == 'success'");
+  expect(linux.if).toContain("needs.check.outputs.linux == 'true'");
+});
+
+test("check gets a read-only token to see who changed the hub", () => {
+  const check = flow.jobs.check as unknown as { permissions: Record<string, string>; steps: { id?: string; env?: Record<string, string> }[] };
+  expect(check.permissions).toEqual({ contents: "read" });
+  expect(check.steps.find((s) => s.id === "check")!.env!.GITHUB_TOKEN).toBe("${{ github.token }}");
+});

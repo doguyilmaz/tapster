@@ -34,6 +34,7 @@ jobs:
         env:
           TAPSTER_APP_ID: ${{ vars.TAPSTER_APP_ID }}
           TAPSTER_APP_PRIVATE_KEY: ${{ secrets.TAPSTER_APP_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
   sign:
     needs: check
     if: ${{ !cancelled() && needs.check.outputs.work != '[]' && needs.check.outputs.work != '' }}

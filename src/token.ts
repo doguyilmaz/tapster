@@ -40,12 +40,27 @@ export async function installationToken(
   };
 }
 
-export async function installationExists(appId: string, pem: string, repo: string, fetchImpl?: FetchLike): Promise<boolean> {
+export async function installationRepos(appId: string, pem: string, owner: string, fetchImpl?: FetchLike): Promise<string[] | null> {
+  const app = new GitHub(appJwt(appId, pem), fetchImpl);
+  let installation: { id: number };
   try {
-    await new GitHub(appJwt(appId, pem), fetchImpl).json("GET", `/repos/${repo}/installation`);
-    return true;
+    installation = await app.json<{ id: number }>("GET", `/users/${owner}/installation`);
   } catch (e) {
-    if (e instanceof GitHubError && e.status === 404) return false;
+    if (e instanceof GitHubError && e.status === 404) return null;
     throw e;
+  }
+  const { token } = await app.json<{ token: string }>("POST", `/app/installations/${installation.id}/access_tokens`, { permissions: { metadata: "read" } });
+  register(token);
+  const gh = new GitHub(token, fetchImpl);
+  try {
+    const repos: string[] = [];
+    for (let page = 1; page <= 10; page++) {
+      const batch = await gh.json<{ repositories: { full_name: string }[] }>("GET", `/installation/repositories?per_page=100&page=${page}`);
+      repos.push(...batch.repositories.map((r) => r.full_name));
+      if (batch.repositories.length < 100) break;
+    }
+    return repos;
+  } finally {
+    await gh.request("DELETE", "/installation/token").catch(() => undefined);
   }
 }

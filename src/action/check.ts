@@ -11,7 +11,7 @@ import { failure, record, warn } from "../report";
 import { protectionProblems } from "../rulesets";
 import { GitHubError, TapsterError } from "../errors";
 import { STATE_PATH, type State, parseState, recordedChecksums } from "../state";
-import { type InstallationToken, installationExists, installationToken } from "../token";
+import { type InstallationToken, installationRepos, installationToken } from "../token";
 import type { Context } from "./context";
 import { renderNeeded } from "./render";
 
@@ -43,6 +43,44 @@ export async function protectionGate(gh: GitHub, pkg: Pick<PackageConfig, "name"
   );
 }
 
+const BOT_PATHS = /^(\.tapster|Casks|bucket)\//;
+
+export async function botWrites(gh: GitHub, hub: string): Promise<string[]> {
+  type Push = { actor: { login: string; type: string } | null; before: string; after: string };
+  const pushes = await gh.json<Push[]>("GET", `/repos/${hub}/activity?ref=refs/heads/main&per_page=30`);
+  const found: string[] = [];
+  for (const p of pushes) {
+    if (p.actor && p.actor.type !== "Bot") break;
+    if (/^0+$/.test(p.before)) continue;
+    const cmp = await gh.json<{ files?: { filename: string }[] }>("GET", `/repos/${hub}/compare/${p.before}...${p.after}`);
+    for (const f of cmp.files ?? []) {
+      if (!BOT_PATHS.test(f.filename)) found.push(`${p.actor?.login ?? "an unknown account"} changed ${f.filename} in ${p.after.slice(0, 7)}`);
+    }
+  }
+  return found;
+}
+
+export function installationProblems(repos: string[] | null, hub: string, listed: string[]): { fatal: string | null; extra: string[] } {
+  if (repos === null) return { fatal: null, extra: [] };
+  const known = new Set(listed.map((r) => r.toLowerCase()));
+  if (repos.some((r) => r.toLowerCase() === hub.toLowerCase())) return { fatal: "the App is installed on the hub", extra: [] };
+  return { fatal: null, extra: repos.filter((r) => !known.has(r.toLowerCase())) };
+}
+
+async function hubGate(ctx: Context, appId: string, pem: string): Promise<void> {
+  const writes = await botWrites(new GitHub(readSecret("GITHUB_TOKEN")), ctx.hub);
+  if (writes.length) {
+    throw new TapsterError(
+      `a bot changed the hub since your last push: ${writes.join("; ")}`,
+      "Only you may change what the hub signs. Review those commits and revert what you did not make, then push; if you did not expect them, rotate the App key with tapster init --rotate app.",
+    );
+  }
+  const listed = [...ctx.config.packages.map((p) => p.repo), ...ctx.invalid.flatMap((i) => (i.repo ? [i.repo] : []))];
+  const inst = installationProblems(await installationRepos(appId, pem, ctx.owner), ctx.hub, listed);
+  if (inst.fatal) throw new TapsterError(inst.fatal, "Remove the hub from the App's repositories at https://github.com/settings/installations; the App only needs the projects.");
+  if (inst.extra.length) warn(`the App can also write to ${inst.extra.join(", ")}, which tapster.yml does not list; remove them at https://github.com/settings/installations`);
+}
+
 async function tagExists(gh: GitHub, repo: string, tag: string): Promise<boolean> {
   try {
     await gh.json("GET", `/repos/${repo}/git/ref/tags/${encodeURIComponent(tag)}`);
@@ -69,9 +107,7 @@ export async function check(ctx: Context): Promise<void> {
   const items: WorkItem[] = [];
   const privateRepos = new Set<string>();
   const state = parseState(await readFile(join(ctx.workspace, STATE_PATH), "utf8").catch(() => null));
-  if (await installationExists(appId, pem, ctx.hub)) {
-    failure(ctx.hub, new TapsterError("the App is installed on the hub", "Remove the hub from the App's repositories; the App only needs the projects."));
-  }
+  await hubGate(ctx, appId, pem);
   reportInvalid(ctx.invalid, only);
   for (const pkg of ctx.config.packages) {
     if (only && pkg.name !== only) continue;
