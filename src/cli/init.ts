@@ -18,6 +18,7 @@ import { rotateDoorbell, setupDoorbell } from "./doorbell";
 import { currentRepo, deleteEnvSecret, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
 import { type KeyRef, type Store, localStore, newSparkleKey, previousKey, requireStore } from "./keystore";
 import { cleanPath, readInput } from "./paths";
+import { waitFor } from "./poll";
 import { removeTemp, tempDir } from "./temp";
 import { cronFor, everyFromFlow } from "./schedule";
 import { ask } from "./prompt";
@@ -120,19 +121,16 @@ export function fillWorkflow(template: string, pins: Pins, tapster: { sha: strin
     .replaceAll("__TAPSTER_TAG__", tapster.tag);
 }
 
-async function rememberInstallation(appId: string, pem: string, owner: string, hub: string, slug: string): Promise<void> {
+async function checkInstallation(appId: string, pem: string, owner: string, hub: string, slug: string): Promise<void> {
   const app = new GitHub(appJwt(appId, pem));
-  for (let i = 0; i < 5; i++) {
-    const found = await app.json<{ id: number }>("GET", `/users/${owner}/installation`).catch(() => null);
-    if (found) {
-      await setEnvVariable(hub, "TAPSTER_APP_INSTALLATION_ID", String(found.id));
-      const onHub = await app.json("GET", `/repos/${hub}/installation`).then(() => true, () => false);
-      if (onHub) console.log(`The App is installed on ${hub}; remove it there at https://github.com/settings/installations/${found.id}, or the hub refuses to run.`);
-      return;
-    }
-    await ask(`Install the App (choose "Only select repositories" and pick your projects, never ${hub}), then press Enter. `);
+  console.log("Waiting until the App is installed; tapster continues by itself once you choose Install.");
+  const found = await waitFor(() => app.json<{ id: number }>("GET", `/users/${owner}/installation`).then((r) => r.id, () => null));
+  if (found === null) {
+    console.log(`The App is not installed yet. Install it at https://github.com/apps/${slug}/installations/new; tapster add links there for each project too.`);
+    return;
   }
-  console.log(`The App is not installed yet. Install it at https://github.com/apps/${slug}/installations/new, then run tapster init --rotate app to finish.`);
+  const onHub = await app.json("GET", `/repos/${hub}/installation`).then(() => true, () => false);
+  if (onHub) console.log(`The App is installed on ${hub}; remove ${hub} from it at https://github.com/settings/installations/${found}, or the hub refuses to run.`);
 }
 
 async function createApp(owner: string, hub: string): Promise<void> {
@@ -144,7 +142,7 @@ async function createApp(owner: string, hub: string): Promise<void> {
   console.log("Stored the App and its key in the hub. Now install it: choose \"Only select repositories\" and pick the projects tapster should publish.");
   console.log(`Never pick ${hub}: the App can write to every repository it is installed on, and the hub holds your signing keys. tapster add can also install it on a project later.`);
   openUrl(`https://github.com/apps/${created.slug}/installations/new`);
-  await rememberInstallation(String(created.id), created.pem, owner, hub, created.slug);
+  await checkInstallation(String(created.id), created.pem, owner, hub, created.slug);
 }
 
 export function appKeyFingerprint(pem: string): string {
@@ -174,7 +172,7 @@ async function rotateAppKey(gh: GitHub, hub: string): Promise<void> {
   });
   await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", pem);
   console.log(`Stored the new key (${fingerprint}).`);
-  await rememberInstallation(appId, pem, hub.split("/")[0]!, hub, slug);
+  await checkInstallation(appId, pem, hub.split("/")[0]!, hub, slug);
   console.log(`Now delete every other key on that page so the old one stops working. Then delete ${path}.`);
 }
 

@@ -15,6 +15,7 @@ import * as jwtText from "../doorbell/jwt.ts" with { type: "text" };
 import * as workerText from "../doorbell/worker.ts" with { type: "text" };
 import { appFromManifest, openUrl } from "./appflow";
 import { setEnvVariable } from "./gh";
+import { waitFor } from "./poll";
 import { ask } from "./prompt";
 import { removeTemp, tempDir } from "./temp";
 import { workerCron } from "./schedule";
@@ -131,12 +132,10 @@ async function signIn(w: Wrangler): Promise<void> {
 
 async function waitForInstall(appId: string, pem: string, hub: string): Promise<number> {
   const gh = new GitHub(appJwt(appId, pem));
-  for (let i = 0; i < 5; i++) {
-    const res = await gh.json<{ id: number }>("GET", `/repos/${hub}/installation`).catch(() => null);
-    if (res) return res.id;
-    await ask(`Install the App on ${hub} only, then press Enter. `);
-  }
-  throw new TapsterError(`the doorbell App was never installed on ${hub}`, `Install it on ${hub}, then ${AGAIN.charAt(0).toLowerCase()}${AGAIN.slice(1)}`);
+  console.log(`Waiting until the App is installed on ${hub} (only that repository); tapster continues by itself.`);
+  const found = await waitFor(() => gh.json<{ id: number }>("GET", `/repos/${hub}/installation`).then((r) => r.id, () => null));
+  if (found !== null) return found;
+  throw new TapsterError(`the doorbell App was not installed on ${hub} within 10 minutes`, `Install it on ${hub}, then ${AGAIN.charAt(0).toLowerCase()}${AGAIN.slice(1)}`);
 }
 
 async function deployWorker(w: Wrangler, gh: GitHub, hub: string, appId: string, pem: string, every: number, installation: number): Promise<string> {
