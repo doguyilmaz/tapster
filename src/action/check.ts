@@ -8,7 +8,7 @@ import { GitHub, type Release } from "../github";
 import { readSecret, requireVar } from "../mask";
 import { type Note, type WorkItem, planPackage } from "../plan";
 import { noteOutcome, waitingSince, withNote } from "../draftnote";
-import { failure, record, warn } from "../report";
+import { concern, failure, record, warn } from "../report";
 import { protectionProblems } from "../rulesets";
 import { GitHubError, TapsterError } from "../errors";
 import { STATE_PATH, type State, parseState, recordedChecksums } from "../state";
@@ -22,10 +22,13 @@ export function linuxNeeded(config: HubConfig, items: WorkItem[], asked: boolean
   return linux.size > 0 && (asked || items.some((i) => linux.has(i.package)));
 }
 
-export function feedWarning(latest: Release | null, state: State, pkg: AppPackage): string | null {
+export function feedWarning(latest: Release | null, state: State, pkg: AppPackage): { reason: string; fix: string } | null {
   if (!latest || !pkg.sparkle) return null;
   if (state.packages[pkg.name]?.some((e) => e.releaseId === latest.id && e.status === "published")) return null;
-  return `${pkg.name}: the latest release ${latest.tag_name} did not come from the hub; installed copies read its ${pkg.sparkle.feed}, so check who published it`;
+  return {
+    reason: `the latest release ${latest.tag_name} did not come from the hub; installed copies read its ${pkg.sparkle.feed}`,
+    fix: `Check who published ${latest.tag_name} in ${pkg.repo}.`,
+  };
 }
 
 
@@ -37,7 +40,7 @@ export function appleGate(
   packages: PackageConfig[],
   apple: { team: string; expires: string },
   now: number,
-): { items: WorkItem[]; failed: { name: string; error: TapsterError }[]; warning: string | null; macos: boolean } {
+): { items: WorkItem[]; failed: { name: string; error: TapsterError }[]; warning: { reason: string; fix: string } | null; macos: boolean } {
   const end = apple.expires ? Date.parse(`${apple.expires}T00:00:00Z`) : Number.NaN;
   const out: WorkItem[] = [];
   const failed: { name: string; error: TapsterError }[] = [];
@@ -56,8 +59,16 @@ export function appleGate(
     }
   }
   const soon = apple.team && end >= now && end - now < 30 * 86_400_000;
-  const warning = soon ? `the Developer ID certificate expires on ${apple.expires}; renew it and run tapster init --rotate certificate` : null;
+  const warning = soon ? { reason: `the Developer ID certificate expires on ${apple.expires}`, fix: "Create a new Developer ID Application certificate, then run tapster init --rotate certificate." } : null;
   return { items: out, failed, warning, macos: needsMacos(out, packages) };
+}
+
+const DRAFT_FIX = "The hub wrote this on the draft too; fix the draft or delete it.";
+
+export function reportNote(name: string, tag: string, out: { result: "waiting" | "failed" | "known"; reason: string }): void {
+  if (out.result === "failed") return failure(name, new TapsterError(`${tag}: ${out.reason}`, DRAFT_FIX));
+  if (out.result === "known") concern(name, `${tag}: ${out.reason}`, DRAFT_FIX);
+  record({ item: name, result: out.result === "known" ? "skipped" : "waiting", detail: `${tag}: ${out.reason}${out.result === "known" ? " (reported on the draft)" : ""}` });
 }
 
 export function reportInvalid(invalid: InvalidPackage[], only: string): void {
@@ -167,11 +178,10 @@ export async function check(ctx: Context): Promise<void> {
         const release = releases.find((r) => r.id === n.releaseId);
         const out = noteOutcome(n, release?.body, Date.now());
         if (release && out.body !== null) await writeNote(gh, pkg.repo, release, out.body);
-        if (out.result === "failed") failure(pkg.name, new TapsterError(`${n.tag}: ${out.reason}`, "The hub wrote this on the draft too; fix the draft or delete it."));
-        else record({ item: pkg.name, result: out.result === "known" ? "skipped" : "waiting", detail: `${n.tag}: ${out.reason}${out.result === "known" ? " (reported on the draft)" : ""}` });
+        reportNote(pkg.name, n.tag, out);
       }
       const feed = isApp(pkg) ? feedWarning(await latestRelease(gh, pkg.repo), state, pkg) : null;
-      if (feed) warn(feed);
+      if (feed) concern(pkg.name, feed.reason, feed.fix);
     } catch (e) {
       failure(pkg.name, e);
     } finally {
@@ -180,7 +190,7 @@ export async function check(ctx: Context): Promise<void> {
   }
   const gate = appleGate(items, ctx.config.packages, { team: process.env.TAPSTER_TEAM_ID ?? "", expires: process.env.TAPSTER_CERT_EXPIRES ?? "" }, Date.now());
   for (const f of gate.failed) failure(f.name, f.error);
-  if (gate.warning) warn(gate.warning);
+  if (gate.warning) concern("hub", gate.warning.reason, gate.warning.fix);
   const work = gate.items.slice(0, 50);
   if (gate.items.length > 50) record({ item: "hub", result: "waiting", detail: `${gate.items.length - 50} more drafts wait for the next run` });
   core.setOutput("work", JSON.stringify(work));

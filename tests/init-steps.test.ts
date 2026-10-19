@@ -79,7 +79,7 @@ test("macOS work waits for Apple credentials and a certificate that has not expi
   expect(ok.macos).toBe(true);
   expect(ok.warning).toBeNull();
   const soon = appleGate(all, cfg.packages, { team: "ABCDE12345", expires: "2026-11-01" }, now);
-  expect(soon.warning).toContain("2026-11-01");
+  expect(soon.warning).toEqual({ reason: "the Developer ID certificate expires on 2026-11-01", fix: "Create a new Developer ID Application certificate, then run tapster init --rotate certificate." });
   const expired = appleGate(all, cfg.packages, { team: "ABCDE12345", expires: "2026-10-01" }, now);
   expect(expired.failed.map((f) => f.name)).toEqual(["mac", "app"]);
   expect(expired.failed[0]!.error.reason).toContain("expired");

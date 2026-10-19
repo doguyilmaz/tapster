@@ -203,7 +203,8 @@ test("check warns when an app's latest release did not come from the hub", () =>
   const state = upsert(emptyState(), "hafifpix", { tag: "v1.3.1", releaseId: 7, checksums: "b".repeat(64), status: "published", app: { macos: "sequoia", identifiers: [] } });
   expect(feedWarning(rel(7, "v1.3.1"), state, app)).toBeNull();
   expect(feedWarning(null, state, app)).toBeNull();
-  expect(feedWarning(rel(9, "v1.3.2"), state, app)).toBe(
-    "hafifpix: the latest release v1.3.2 did not come from the hub; installed copies read its appcast-2.xml, so check who published it",
-  );
+  expect(feedWarning(rel(9, "v1.3.2"), state, app)).toEqual({
+    reason: "the latest release v1.3.2 did not come from the hub; installed copies read its appcast-2.xml",
+    fix: "Check who published v1.3.2 in o/hafifpix.",
+  });
 });
