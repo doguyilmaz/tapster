@@ -60,7 +60,7 @@ export function checkCertificate(subject: string, notAfter: string, now = Date.n
 export function initSteps(have: { vars: string[]; secrets: string[] }, mac: boolean): string[] {
   const v = new Set(have.vars);
   const s = new Set(have.secrets);
-  const steps = ["protect"];
+  const steps: string[] = [];
   if (!(v.has("TAPSTER_APP_ID") && v.has("TAPSTER_APP_SLUG"))) steps.push("app");
   else if (!s.has("TAPSTER_APP_PRIVATE_KEY")) steps.push("app-key");
   if (mac && !(v.has("TAPSTER_TEAM_ID") && s.has("MACOS_SIGN_P12") && s.has("MACOS_SIGN_PASSWORD"))) steps.push("certificate");
@@ -77,13 +77,18 @@ export function doneSteps(steps: string[], mac: boolean): string[] {
 
 export function notaryCheckError(stderr: string): TapsterError {
   if (/HTTP status code: 401\b/.test(stderr)) return new TapsterError("Apple rejected the notary key (HTTP 401)", "Check the .p8 file, the Key ID and the Issuer ID in App Store Connect, then run this again.");
+  if (/HTTP status code: 403\b/.test(stderr)) return new TapsterError("Apple refused the notary key (HTTP 403)", "Accept the latest agreements in App Store Connect and check that the key has Developer access, then run this again.");
   const line = stderr.split("\n").find((l) => l.trim() !== "")?.trim() ?? "no message";
-  return new TapsterError(`notarytool could not check the key: ${scrub(line).slice(0, 300)}`, "Install Xcode or its command line tools (xcode-select --install), then run this again.");
+  const missing = /unable to find utility|notarytool.*not found/i.test(stderr);
+  return new TapsterError(`notarytool could not check the key: ${scrub(line).slice(0, 300)}`, missing ? "Install Xcode or its command line tools (xcode-select --install), then run this again." : "Check your connection and the key in App Store Connect, then run this again.");
 }
 
-export function checkP12(certs: { code: number; stdout: string }, info: { code: number; stdout: string }): void {
-  if (certs.code !== 0 || !certs.stdout.includes("BEGIN CERTIFICATE")) throw new TapsterError("the .p12 could not be opened with that password", "Check the password you set when exporting it or export it again.");
-  if (info.code !== 0 || !/key ?bag/i.test(info.stdout)) throw new TapsterError("the .p12 holds the certificate but not its private key", "Export it from My Certificates in Keychain Access on the Mac that holds the key.");
+export function checkP12(info: { code: number; stdout: string }, certs: { code: number; stdout: string }): void {
+  if (/mac verify error|invalid password/i.test(info.stdout)) throw new TapsterError("the .p12 could not be opened with that password", "Check the password you set when exporting it or export it again.");
+  if (/unsupported/i.test(info.stdout)) throw new TapsterError("this system's openssl cannot read the .p12", "Run this on macOS or export the certificate again from Keychain Access.");
+  if (!/certificate bag/i.test(info.stdout)) throw new TapsterError("the .p12 holds no certificate", "Export the Developer ID Application certificate from My Certificates in Keychain Access.");
+  if (!/key ?bag/i.test(info.stdout)) throw new TapsterError("the .p12 holds the certificate but not its private key", "Export it from My Certificates in Keychain Access on the Mac that holds the key.");
+  if (certs.code !== 0 || !certs.stdout.includes("BEGIN CERTIFICATE")) throw new TapsterError("the .p12 could not be read", "Export it again from My Certificates in Keychain Access.");
 }
 
 export const notaryArgs = (keyPath: string, keyId: string, issuer: string) => ["notarytool", "history", "--key", keyPath, "--key-id", keyId, "--issuer", issuer, "--output-format", "json"];
@@ -164,7 +169,7 @@ async function createApp(owner: string, hub: string): Promise<void> {
       'Click "Install". tapster notices within seconds and continues.',
     ],
     again: "tapster init",
-  });
+  }, owner);
   await setEnvVariable(hub, "TAPSTER_APP_ID", String(created.id));
   await setEnvVariable(hub, "TAPSTER_APP_SLUG", created.slug);
   await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", created.pem);
@@ -212,9 +217,15 @@ async function storeCertificate(hub: string): Promise<void> {
   const path = cleanPath(await ask(".p12 file (drag it here): "));
   const data = await readInput(path, "the .p12 file");
   const password = await ask(".p12 password: ", true);
-  const certs = await run("openssl", ["pkcs12", "-in", path, "-passin", "env:TAPSTER_P12", "-nokeys", "-clcerts"], { env: { TAPSTER_P12: password }, allowFail: true });
-  const bags = await run("openssl", ["pkcs12", "-in", path, "-passin", "env:TAPSTER_P12", "-info", "-noout"], { env: { TAPSTER_P12: password }, allowFail: true });
-  checkP12(certs, { code: bags.code, stdout: `${bags.stdout}\n${bags.stderr}` });
+  const p12 = (args: string[]) => run("openssl", ["pkcs12", ...args, "-in", path, "-passin", "env:TAPSTER_P12"], { env: { TAPSTER_P12: password }, allowFail: true });
+  let legacy: string[] = [];
+  let bags = await p12(["-info", "-noout"]);
+  if (/unsupported/i.test(bags.stderr)) {
+    legacy = ["-legacy"];
+    bags = await p12([...legacy, "-info", "-noout"]);
+  }
+  const certs = await p12([...legacy, "-nokeys", "-clcerts"]);
+  checkP12({ code: bags.code, stdout: `${bags.stdout}\n${bags.stderr}` }, certs);
   const info = await run("openssl", ["x509", "-noout", "-subject", "-enddate", "-nameopt", "RFC2253"], { stdin: certs.stdout });
   const subject = /^subject=\s*(.*)$/m.exec(info.stdout)?.[1]?.trim() ?? "";
   const notAfter = /^notAfter=(.*)$/m.exec(info.stdout)?.[1]?.trim() ?? "";
@@ -414,12 +425,12 @@ const linuxRef = (hub: string, previous = false) => ({ service: "tapster-linux-k
 
 async function finishLinuxRotation(gh: GitHub, hub: string): Promise<void> {
   const secrets = (await hubEnv(gh, hub, "secrets")).map((x) => x.name);
+  await localStore()?.remove(linuxRef(hub, true));
   if (!secrets.includes("TAPSTER_LINUX_KEY_PREVIOUS")) {
     console.log("No Linux key rotation is running, so there is nothing to finish.");
     return;
   }
   await deleteEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS");
-  await localStore()?.remove(linuxRef(hub, true));
   console.log("The previous Linux key no longer signs; apt and dnf trust only the new one from the next run.");
 }
 

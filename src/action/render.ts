@@ -7,7 +7,7 @@ import { GitHubError, TapsterError } from "../errors";
 import { GitHub, type Release } from "../github";
 import { commitToHub } from "../hubcommit";
 import { readSecret } from "../mask";
-import { type AppRenderInput, type Download, caskPath, descProblems, downloadUrl, renderAppCask, renderCask, renderScoop, scoopPath } from "../render";
+import { type AppRenderInput, type Download, caskPath, descProblems, downloadUrl, hasCask, renderAppCask, renderCask, renderScoop, scoopPath } from "../render";
 import { failure, record } from "../report";
 import { run } from "../run";
 import { STATE_PATH, type StateEntry, latestPublished, parseState, serializeState, upsert } from "../state";
@@ -56,6 +56,12 @@ export async function renderNeeded(ctx: Context, skip: Set<string> = new Set()):
     if (skip.has(pkg.name)) continue;
     const latest = latestPublished(state, pkg.name);
     if (!latest) continue;
+    if (!hasCask(pkg)) {
+      if (isApp(pkg) || !pkg.scoop) continue;
+      const scoop = await readIfExists(join(ctx.workspace, scoopPath(pkg.name)));
+      if (!scoop?.includes(`"version": ${JSON.stringify(versionOf(latest.tag))}`)) return true;
+      continue;
+    }
     const cask = await readIfExists(join(ctx.workspace, caskPath(pkg.name)));
     if (!cask?.includes(`  version "${versionOf(latest.tag)}"\n`)) return true;
   }

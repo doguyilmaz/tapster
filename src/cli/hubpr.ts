@@ -2,6 +2,7 @@ import { isSeq, parse, parseDocument } from "yaml";
 import { NAME, PLATFORMS, type Platform, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
+import { hubEnv } from "./gh";
 import { descProblems } from "../render";
 
 export function hubName(text: string): string {
@@ -187,11 +188,8 @@ export async function proposeEntry(gh: GitHub, hub: string, name: string, repo: 
 }
 
 export async function hubAppSlug(gh: GitHub, hub: string): Promise<string> {
-  const vars = await gh.json<{ variables: { name: string; value: string }[] }>("GET", `/repos/${hub}/environments/tapster/variables`).catch((e) => {
-    if (e instanceof GitHubError && e.status === 404) return { variables: [] };
-    throw e;
-  });
-  const slug = vars.variables.find((v) => v.name === "TAPSTER_APP_SLUG")?.value;
+  const vars = await hubEnv(gh, hub, "variables");
+  const slug = vars.find((v) => v.name === "TAPSTER_APP_SLUG")?.value;
   if (!slug) throw new TapsterError(`${hub} has no App yet`, "Run tapster init in a clone of the hub first.");
   return slug;
 }

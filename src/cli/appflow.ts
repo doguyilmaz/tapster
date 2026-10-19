@@ -8,7 +8,7 @@ export function openUrl(url: string): void {
   void runPath(process.platform === "darwin" ? "/usr/bin/open" : "/usr/bin/xdg-open", "open", [url], { allowFail: true }).catch(() => undefined);
 }
 
-export type CreatedApp = { id: number; slug: string; pem: string };
+export type CreatedApp = { id: number; slug: string; pem: string; owner?: { login: string } | null };
 
 export type AppCopy = { what: string; title: string; lead: string; key: string; done: string; next: string[]; again: string };
 
@@ -51,19 +51,22 @@ export function appRoutes(o: { manifest: (redirect: string) => object; copy: App
     }
     if (url.pathname !== "/callback") return new Response("Not found", { status: 404 });
     if (settled) return html(failPage({ reason: "This App was already handled.", again: o.copy.again }), 409);
-    settled = true;
     const code = url.searchParams.get("code");
     if (url.searchParams.get("state") !== o.state || !code || !/^[A-Za-z0-9_-]{1,128}$/.test(code)) {
-      const error = new TapsterError("the App creation answer did not match", `Run ${o.copy.again} again.`);
-      o.settle({ error });
-      return html(failPage({ reason: "GitHub's answer did not belong to the App this terminal started, so tapster ignored it.", again: o.copy.again }), 400);
+      return html(failPage({ reason: "This answer did not belong to the App this terminal started, so tapster ignored it.", again: o.copy.again }), 400);
     }
+    settled = true;
     o.settle({ code });
     return html(donePage({ title: o.copy.done, next: o.copy.next }));
   };
 }
 
-export async function appFromManifest(manifest: (redirect: string) => object, copy: AppCopy): Promise<CreatedApp> {
+export function checkConverted(app: CreatedApp, owner: string): void {
+  const login = app.owner?.login ?? "nobody";
+  if (login.toLowerCase() !== owner.toLowerCase()) throw new TapsterError(`the new App belongs to ${login}, not ${owner}`, "tapster stored nothing. Create the App from your own account, then run this again.");
+}
+
+export async function appFromManifest(manifest: (redirect: string) => object, copy: AppCopy, owner: string): Promise<CreatedApp> {
   const state = randomBytes(16).toString("hex");
   let settle: Settle = () => {};
   const answer = new Promise<{ code: string } | { error: TapsterError }>((resolve) => (settle = resolve));
@@ -73,12 +76,15 @@ export async function appFromManifest(manifest: (redirect: string) => object, co
   console.log(`Opening GitHub to create ${copy.what}. Read the page, then click "Continue to GitHub" and "Create GitHub App".`);
   openUrl(`http://127.0.0.1:${server.port}/start`);
   console.log("tapster waits up to 30 minutes until GitHub sends you back. If no page opened, open the address above. Ctrl+C stops it.");
-  const timer = setTimeout(() => settle({ error: new TapsterError("no App was created within 30 minutes", `Run ${copy.again} again.`) }), 30 * 60_000);
+  const orphan = "If GitHub created the App anyway, delete it at https://github.com/settings/apps first, because its name would block a new one.";
+  const timer = setTimeout(() => settle({ error: new TapsterError("no App was created within 30 minutes", `${orphan} Then run ${copy.again} again.`) }), 30 * 60_000);
   const result = await answer;
   clearTimeout(timer);
   setTimeout(() => server.stop(), 1000);
   if ("error" in result) throw result.error;
   const app = await fetch(`https://api.github.com/app-manifests/${result.code}/conversions`, { method: "POST", headers: { Accept: "application/vnd.github+json" } });
-  if (!app.ok) throw new TapsterError(`GitHub did not hand over the new App (status ${app.status})`, `Delete it at https://github.com/settings/apps if GitHub created it, then run ${copy.again} again.`);
-  return (await app.json()) as CreatedApp;
+  if (!app.ok) throw new TapsterError(`GitHub did not hand over the new App (status ${app.status})`, `${orphan} Then run ${copy.again} again.`);
+  const created = (await app.json()) as CreatedApp;
+  checkConverted(created, owner);
+  return created;
 }

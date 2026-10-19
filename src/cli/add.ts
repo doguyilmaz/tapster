@@ -16,7 +16,6 @@ import bunTemplate from "../../templates/project/bun-release.yml" with { type: "
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
 import { autoTagSteps, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubAppSlug, hubName, installOnProject, proposeEntry, releaseEntry, releaseSecrets } from "./hubpr";
-import { descProblems } from "../render";
 import { ask } from "./prompt";
 
 type Pins = typeof pinsJson;
@@ -313,11 +312,10 @@ export async function prepare(dir: string, repo: string, name: string, opts: Add
   throw new TapsterError("this project is not a GoReleaser-based Go CLI, a Bun CLI or an app with a Sparkle feed", "tapster add supports those three.");
 }
 
-async function resolveHub(dir: string, flag: string | null): Promise<string> {
+async function resolveHub(dir: string, flag: string | null): Promise<{ hub: string; remember: () => Promise<void> }> {
   const saved = (await run("git", ["-C", dir, "config", "--get", "tapster.hub"], { allowFail: true })).stdout.trim();
   const hub = flag ?? (saved ? hubName(saved) : hubName(await ask("Which hub publishes this project (owner/repo)? ")));
-  if (hub !== saved) await run("git", ["-C", dir, "config", "tapster.hub", hub]);
-  return hub;
+  return { hub, remember: async () => void (hub !== saved && (await run("git", ["-C", dir, "config", "tapster.hub", hub]))) };
 }
 
 async function setupAutoTag(gh: GitHub, repo: string, branch: string): Promise<string> {
@@ -373,8 +371,9 @@ export async function add(args: string[]): Promise<void> {
   const repo = await currentRepo(dir);
   const name = repo.split("/")[1]!.toLowerCase().replace(/[^a-z0-9-]/g, "-");
   const gh = await userGitHub();
-  const hub = await resolveHub(dir, opts.hub);
+  const { hub, remember } = await resolveHub(dir, opts.hub);
   const slug = await hubAppSlug(gh, hub);
+  await remember();
   const prepared = await prepare(dir, repo, name, opts);
   for (const n of prepared.notes) console.log(n);
   const project = await gh.getRepo(repo);

@@ -170,5 +170,5 @@ test("add stops before touching the project when the hub has no App", async () =
   expect(await hubAppSlug(withVars([{ name: "TAPSTER_APP_SLUG", value: "tapster-o-tap" }]), "o/hub")).toBe("tapster-o-tap");
   await expect(hubAppSlug(withVars([]), "o/hub")).rejects.toThrow("o/hub has no App yet");
   const missing = { json: async () => { throw new GitHubError("not found", "check it", 404); } } as never;
-  await expect(hubAppSlug(missing, "o/hub")).rejects.toThrow("o/hub has no App yet");
+  await expect(hubAppSlug(missing, "o/hub")).rejects.toThrow("o/hub has no tapster environment yet");
 });

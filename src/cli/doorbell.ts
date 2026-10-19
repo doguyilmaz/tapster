@@ -71,7 +71,8 @@ export function workerOrigin(output: string): string | null {
 
 export function wranglerSaid(r: { stdout: string; stderr?: string }): string {
   const lines = `${r.stdout}\n${r.stderr ?? ""}`.split("\n").map((l) => l.trim()).filter(Boolean);
-  return lines.length ? lines.slice(-2).join(" / ") : "no output";
+  const errors = lines.filter((l) => /\[ERROR\]/.test(l));
+  return (errors.length ? errors : lines).slice(-2).join(" / ") || "no output";
 }
 
 export const bunEnv = (path: string) => ({ PATH: path, BUN_BE_BUN: "1" });
@@ -190,7 +191,7 @@ export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, 
           'Click "Install". tapster notices within seconds and deploys the Worker.',
         ],
         again: "tapster init --doorbell",
-      });
+      }, owner);
       appId = String(app.id);
       pem = app.pem;
       await setEnvVariable(hub, "TAPSTER_DOORBELL_APP_ID", appId);

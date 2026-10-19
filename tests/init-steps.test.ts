@@ -26,13 +26,13 @@ test("only a valid Developer ID Application certificate is stored, with its expi
 
 test("init does only the steps that are not done yet", () => {
   const none = { vars: [], secrets: [] };
-  expect(initSteps(none, true)).toEqual(["protect", "app", "certificate", "notary", "files"]);
-  expect(initSteps(none, false)).toEqual(["protect", "app", "files"]);
+  expect(initSteps(none, true)).toEqual(["app", "certificate", "notary", "files"]);
+  expect(initSteps(none, false)).toEqual(["app", "files"]);
   const app = { vars: ["TAPSTER_APP_ID", "TAPSTER_APP_SLUG"], secrets: ["TAPSTER_APP_PRIVATE_KEY"] };
-  expect(initSteps(app, true)).toEqual(["protect", "certificate", "notary", "files"]);
-  expect(initSteps({ vars: ["TAPSTER_APP_ID", "TAPSTER_APP_SLUG"], secrets: [] }, false)).toEqual(["protect", "app-key", "files"]);
+  expect(initSteps(app, true)).toEqual(["certificate", "notary", "files"]);
+  expect(initSteps({ vars: ["TAPSTER_APP_ID", "TAPSTER_APP_SLUG"], secrets: [] }, false)).toEqual(["app-key", "files"]);
   const all = { vars: [...app.vars, "TAPSTER_TEAM_ID"], secrets: [...app.secrets, "MACOS_SIGN_P12", "MACOS_SIGN_PASSWORD", "MACOS_NOTARY_KEY", "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER_ID"] };
-  expect(initSteps(all, true)).toEqual(["protect", "files"]);
+  expect(initSteps(all, true)).toEqual(["files"]);
   expect(initSteps({ vars: ["TAPSTER_APP_ID"], secrets: ["TAPSTER_APP_PRIVATE_KEY"] }, true)).toContain("app");
 });
 
@@ -108,10 +108,10 @@ test("init repairs a weakened hub ruleset and extra branch rules instead of leav
 });
 
 test("init names as done only the parts that are complete", () => {
-  expect(doneSteps(["protect", "app-key", "files"], false)).toEqual([]);
-  expect(doneSteps(["protect", "certificate", "notary", "files"], true)).toEqual(["app"]);
-  expect(doneSteps(["protect", "files"], true)).toEqual(["app", "certificate", "notary"]);
-  expect(doneSteps(["protect", "files"], false)).toEqual(["app"]);
+  expect(doneSteps(["app-key", "files"], false)).toEqual([]);
+  expect(doneSteps(["certificate", "notary", "files"], true)).toEqual(["app"]);
+  expect(doneSteps(["files"], true)).toEqual(["app", "certificate", "notary"]);
+  expect(doneSteps(["files"], false)).toEqual(["app"]);
 });
 
 test("a failed notary check at setup speaks about the key, not about a draft", () => {
@@ -121,14 +121,20 @@ test("a failed notary check at setup speaks about the key, not about a draft", (
   const other = notaryCheckError("\nxcrun: error: unable to find utility \"notarytool\"\n");
   expect(other.reason).toContain('notarytool could not check the key: xcrun: error: unable to find utility "notarytool"');
   expect(`${denied.fix} ${other.fix}`).not.toContain("draft");
+  expect(notaryCheckError("Error: HTTP status code: 403. A required agreement is missing.").reason).toBe("Apple refused the notary key (HTTP 403)");
+  expect(notaryCheckError("Error: The Internet connection appears to be offline.").fix).toContain("connection");
 });
 
 test("a .p12 must open with the password and hold the private key", () => {
-  const cert = { code: 0, stdout: "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n" };
-  const key = { code: 0, stdout: "MAC: sha1, Iteration 1\nShrouded Keybag: pbeWithSHA1And3-KeyTripleDES-CBC, Iteration 2048\n" };
-  expect(() => checkP12(cert, key)).not.toThrow();
-  expect(() => checkP12({ code: 1, stdout: "" }, { code: 1, stdout: "" })).toThrow("the .p12 could not be opened with that password");
-  expect(() => checkP12(cert, { code: 0, stdout: "MAC: sha1, Iteration 1\nPKCS7 Data\n" })).toThrow("the .p12 holds the certificate but not its private key");
+  const info = (text: string, code = 0) => ({ code, stdout: text });
+  const certs = { code: 0, stdout: "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n" };
+  const good = info("MAC verified OK\nCertificate bag\nShrouded Keybag: pbeWithSHA1And3-KeyTripleDES-CBC, Iteration 2048\n");
+  expect(() => checkP12(good, certs)).not.toThrow();
+  expect(() => checkP12(info("MAC Iteration 2048\nMac verify error: invalid password?\n", 1), { code: 1, stdout: "" })).toThrow("the .p12 could not be opened with that password");
+  expect(() => checkP12(info("MAC verified OK\nCertificate bag\n"), { code: 0, stdout: "" })).toThrow("the .p12 holds the certificate but not its private key");
+  expect(() => checkP12(info("MAC verified OK\nShrouded Keybag: x\n"), { code: 0, stdout: "" })).toThrow("the .p12 holds no certificate");
+  expect(() => checkP12(info("Error outputting keys and certificates\nunsupported: Algorithm (RC2-40-CBC : 0)\n", 1), { code: 1, stdout: "" })).toThrow("this system's openssl cannot read the .p12");
+  expect(() => checkP12(good, { code: 1, stdout: "" })).toThrow("the .p12 could not be read");
 });
 
 test("a backup is confirmed by yes in any case", async () => {

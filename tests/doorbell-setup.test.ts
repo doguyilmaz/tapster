@@ -98,6 +98,7 @@ test("a doorbell or Linux key before init says to run init first", async () => {
 
 test("a failed Wrangler run shows the end of what Wrangler said", async () => {
   const { wranglerSaid } = await import("../src/cli/doorbell");
-  expect(wranglerSaid({ stdout: "Uploading\n", stderr: "\n✘ [ERROR] You need a workers.dev subdomain\n\nSee the dashboard\n" })).toBe("✘ [ERROR] You need a workers.dev subdomain / See the dashboard");
+  expect(wranglerSaid({ stdout: "Uploading\n", stderr: "\n✘ [ERROR] You need a workers.dev subdomain\n\nSee the dashboard\n" })).toBe("✘ [ERROR] You need a workers.dev subdomain");
   expect(wranglerSaid({ stdout: "", stderr: "" })).toBe("no output");
+  expect(wranglerSaid({ stdout: "", stderr: "✘ [ERROR] A request to the Cloudflare API failed.\n\nLogs were written to /x.log\n" })).toBe("✘ [ERROR] A request to the Cloudflare API failed.");
 });

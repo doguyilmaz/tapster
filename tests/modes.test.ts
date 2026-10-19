@@ -88,3 +88,27 @@ packages:
   expect(() => appCaskInput(app, { ...entry, app: undefined }, lines, { description: "x", homepage: "https://x.y" })).toThrow(/app facts/);
   expect(() => appCaskInput(app, entry, [], { description: "x", homepage: "https://x.y" })).toThrow(/HafifPix-1.3.1.dmg/);
 });
+
+test("a tool with only Windows builds makes render run only until its Scoop manifest is current", async () => {
+  const win = parseConfig(
+    `version: 1
+tap: o/tap
+packages:
+  - name: winonly
+    repo: o/winonly
+    binaries: [winonly]
+    assets:
+      windows-amd64: "winonly_{version}_windows_amd64.zip"
+    scoop: true
+`,
+    "o",
+  );
+  const ws = mkdtempSync(join(tmpdir(), "ws-"));
+  mkdirSync(join(ws, ".tapster"), { recursive: true });
+  mkdirSync(join(ws, "bucket"), { recursive: true });
+  writeFileSync(join(ws, ".tapster/state.json"), serializeState(upsert(emptyState(), "winonly", { tag: "v1.0.0", releaseId: 1, checksums: "b".repeat(64), status: "published" })));
+  const ctx = { hub: "o/homebrew-tap", owner: "o", config: win, invalid: [], workspace: ws };
+  expect(await renderNeeded(ctx)).toBe(true);
+  writeFileSync(join(ws, "bucket/winonly.json"), JSON.stringify({ version: "1.0.0" }, null, 2));
+  expect(await renderNeeded(ctx)).toBe(false);
+});

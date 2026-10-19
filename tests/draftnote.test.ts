@@ -63,6 +63,6 @@ test("a draft waits an hour from its last upload, not from the date of its commi
   const asset = (created_at: string) => ({ id: 1, name: "a", size: 1, state: "uploaded", digest: null, browser_download_url: "", created_at });
   const release = { created_at: "2026-10-01T00:00:00Z", assets: [asset("2026-10-19T11:40:00Z"), asset("2026-10-19T11:50:00Z")] };
   expect(waitingSince(release)).toBe("2026-10-19T11:50:00Z");
-  expect(waitingSince({ created_at: "2026-10-01T00:00:00Z", assets: [] })).toBeNull();
+  expect(waitingSince({ created_at: "2026-10-01T00:00:00Z", assets: [] })).toBe("2026-10-01T00:00:00Z");
   expect(judge({ kind: "waiting", since: waitingSince(release) }, Date.parse("2026-10-19T12:00:00Z"))).toBe("waiting");
 });

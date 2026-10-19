@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { AppPackage, CliPackage, PackageConfig, Platform } from "./config";
+import { type AppPackage, type CliPackage, type PackageConfig, type Platform, isApp } from "./config";
 import { TapsterError } from "./errors";
 
 export function rubyString(s: string): string {
@@ -79,9 +79,11 @@ function os(lines: string[], name: "macos" | "linux", pkg: PackageConfig, downlo
   lines.push("  end");
 }
 
+export const hasCask = (pkg: PackageConfig) => isApp(pkg) || Object.keys(pkg.assets).some((k) => k.startsWith("darwin-") || k.startsWith("linux-"));
+
 export function renderCask(i: RenderInput): string | null {
   const { pkg } = i;
-  if (!i.downloads.some((d) => d.platform.startsWith("darwin-") || d.platform.startsWith("linux-"))) return null;
+  if (!hasCask(pkg)) return null;
   const lines = [`cask ${rubyString(pkg.name)} do`, `  version ${rubyString(i.version)}`, ""];
   os(lines, "macos", pkg, i.downloads);
   os(lines, "linux", pkg, i.downloads);

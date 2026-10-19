@@ -66,18 +66,26 @@ test("the callback hands over the code and says what comes next", async () => {
   expect(html).toContain("You can close this tab");
 });
 
-test("a callback with the wrong state or no code shows a failure and settles once", async () => {
-  const wrong = routes();
-  const html = await wrong.get("/callback?state=other&code=abc").text();
-  expect("error" in wrong.results[0]!).toBe(true);
+test("a stray callback is refused without ending the wait", async () => {
+  const { get, results } = routes();
+  const html = await get("/callback?state=other&code=abc").text();
   expect(html).toContain("tapster init");
   expect(html).not.toContain("Your tapster App is created");
-  wrong.get("/callback?state=s3cret&code=abc");
-  expect(wrong.results).toHaveLength(1);
+  expect(results).toHaveLength(0);
+  expect(get("/callback?state=s3cret").status).toBe(400);
+  expect(get("/callback?state=s3cret&code=../x").status).toBe(400);
+  expect(results).toHaveLength(0);
+  expect(get("/callback?state=s3cret&code=abc").status).toBe(200);
+  expect(get("/callback?state=s3cret&code=def").status).toBe(409);
+  expect(results).toEqual([{ code: "abc" }]);
+});
 
-  const empty = routes();
-  await empty.get("/callback?state=s3cret").text();
-  expect("error" in empty.results[0]!).toBe(true);
+test("only an App of the hub's owner is kept", async () => {
+  const { checkConverted } = await import("../src/cli/appflow");
+  const app = { id: 1, slug: "tapster-o-tap", pem: "k", owner: { login: "O" } };
+  expect(() => checkConverted(app, "o")).not.toThrow();
+  expect(() => checkConverted({ ...app, owner: { login: "mallory" } }, "o")).toThrow("the new App belongs to mallory, not o");
+  expect(() => checkConverted({ ...app, owner: null }, "o")).toThrow("the new App belongs to nobody, not o");
 });
 
 test("other paths are not found", () => {

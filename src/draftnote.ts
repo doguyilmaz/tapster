@@ -14,7 +14,7 @@ export function withNote(body: string | null | undefined, reason: string | null)
 // A release's created_at is the date of its tag or commit, which can be days old; the last upload says when the draft was worked on.
 export function waitingSince(release: { created_at: string; assets: { created_at?: string }[] }): string | null {
   const times = release.assets.map((a) => a.created_at).filter((t): t is string => !!t && !Number.isNaN(Date.parse(t)));
-  return times.length ? times.reduce((a, b) => (Date.parse(a) > Date.parse(b) ? a : b)) : null;
+  return times.length ? times.reduce((a, b) => (Date.parse(a) > Date.parse(b) ? a : b)) : release.created_at || null;
 }
 
 export function judge(note: { kind: "waiting" | "invalid"; since: string | null }, now: number): "waiting" | "failed" {
