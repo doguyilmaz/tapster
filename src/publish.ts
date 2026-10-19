@@ -16,15 +16,21 @@ export function sameAssets(before: Asset[], now: Asset[]): boolean {
 
 const checksumsLast = (names: string[]) => [...names.filter((n) => n !== "checksums.txt"), ...names.filter((n) => n === "checksums.txt")];
 
-async function swap(gh: GitHub, repo: string, originals: Asset[], staged: Map<string, Asset>): Promise<void> {
-  for (const name of checksumsLast([...staged.keys()])) {
+async function swap(gh: GitHub, repo: string, originals: Asset[], staged: Map<string, Asset>, remove: string[]): Promise<void> {
+  const replace = async (name: string) => {
     const old = originals.find((x) => x.name === name);
     if (old) await gh.deleteAsset(repo, old.id);
     await gh.renameAsset(repo, staged.get(name)!.id, name);
+  };
+  for (const name of [...staged.keys()].filter((n) => n !== "checksums.txt")) await replace(name);
+  for (const name of remove) {
+    const old = originals.find((x) => x.name === name);
+    if (old) await gh.deleteAsset(repo, old.id);
   }
+  if (staged.has("checksums.txt")) await replace("checksums.txt");
 }
 
-export async function stageAndSwap(gh: GitHub, repo: string, releaseId: number, files: Outgoing[], before: Asset[]): Promise<void> {
+export async function stageAndSwap(gh: GitHub, repo: string, releaseId: number, files: Outgoing[], before: Asset[], remove: string[] = []): Promise<void> {
   const current = await gh.getRelease(repo, releaseId);
   if (!current.draft) throw new TapsterError("the release was published while tapster worked on it", "Nothing was changed; check who published it.");
   if (!sameAssets(before, current.assets)) {
@@ -34,7 +40,7 @@ export async function stageAndSwap(gh: GitHub, repo: string, releaseId: number, 
   for (const name of checksumsLast(files.map((f) => f.name))) {
     staged.set(name, await gh.uploadAsset(current, STAGING + name, files.find((f) => f.name === name)!.data));
   }
-  await swap(gh, repo, current.assets, staged);
+  await swap(gh, repo, current.assets, staged, remove);
 }
 
 export async function resumeSwap(gh: GitHub, repo: string, release: Release, recorded: string | undefined): Promise<void> {
@@ -50,13 +56,15 @@ export async function resumeSwap(gh: GitHub, repo: string, release: Release, rec
   const sums = await gh.downloadAsset(repo, stagedSums.id);
   if (sha256(sums) !== recorded) return discard("the staged checksums.txt is not the one tapster recorded");
   const staged = new Map(stagedAssets.map((x) => [x.name.slice(STAGING.length), x] as const));
-  const final = new Map(release.assets.filter((x) => !x.name.startsWith(STAGING) && !staged.has(x.name)).map((x) => [x.name, x] as const));
-  for (const [name, x] of staged) if (name !== "checksums.txt") final.set(name, x);
+  const originals = release.assets.filter((x) => !x.name.startsWith(STAGING));
   const lines = parseChecksums(sums.toString("utf8"));
-  if (lines.length !== final.size || !lines.every((l) => final.get(l.name)?.digest === `sha256:${l.sha256}`)) {
+  const listed = new Set(lines.map((l) => l.name));
+  const finalAsset = (name: string) => (staged.has(name) ? staged.get(name) : originals.find((x) => x.name === name));
+  if (!lines.every((l) => finalAsset(l.name)?.digest === `sha256:${l.sha256}`)) {
     return discard("the staged files do not match the checksums tapster recorded");
   }
-  await swap(gh, repo, release.assets.filter((x) => !x.name.startsWith(STAGING)), staged);
+  const remove = originals.map((x) => x.name).filter((n) => n !== "checksums.txt" && !listed.has(n) && !staged.has(n));
+  await swap(gh, repo, originals, staged, remove);
 }
 
 async function confirmSwapped(gh: GitHub, repo: string, release: Release, recorded: string): Promise<void> {

@@ -11,6 +11,7 @@ const entry = z
     releaseId: z.number().int().positive(),
     checksums: z.string().regex(/^[0-9a-f]{64}$/),
     status: z.enum(["publishing", "published"]),
+    app: z.object({ macos: z.string().regex(/^[a-z_]+$/), identifiers: z.array(z.string().regex(/^[A-Za-z0-9.-]+$/)) }).strict().optional(),
   })
   .strict();
 const schema = z.object({ version: z.literal(1), packages: z.record(z.string().regex(NAME), z.array(entry)) }).strict();

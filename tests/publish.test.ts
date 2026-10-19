@@ -122,3 +122,42 @@ test("a published checksums.txt must be the one tapster recorded", () => {
   expect(() => assertRecorded(Buffer.from(signedSums), sha256(Buffer.from(signedSums)))).not.toThrow();
   expect(() => assertRecorded(Buffer.from("other"), sha256(Buffer.from(signedSums)))).toThrow(TapsterError);
 });
+
+test("an app swap renames the outputs, drops the unsigned archive, and commits with checksums last", async () => {
+  const before = [a(1, "HafifPix-1.3.1.app.tar.gz"), a(2, "checksums.txt")];
+  const f = fakeGh(rel(before));
+  await stageAndSwap(
+    f.gh,
+    "o/r",
+    1,
+    [{ name: "checksums.txt", data: Buffer.from("s") }, { name: "HafifPix-1.3.1.dmg", data: Buffer.from("d") }, { name: "appcast.xml", data: Buffer.from("f") }],
+    before,
+    ["HafifPix-1.3.1.app.tar.gz"],
+  );
+  expect(f.log).toEqual([
+    "upload tapster-staging--HafifPix-1.3.1.dmg",
+    "upload tapster-staging--appcast.xml",
+    "upload tapster-staging--checksums.txt",
+    "rename 100 HafifPix-1.3.1.dmg",
+    "rename 101 appcast.xml",
+    "delete 1",
+    "delete 2",
+    "rename 102 checksums.txt",
+  ]);
+});
+
+test("resuming an app swap after the DMG rename finishes it and drops the archive", async () => {
+  const dmg = "4".repeat(64);
+  const feed = "5".repeat(64);
+  const sums = `${feed}  appcast.xml\n${dmg}  HafifPix-1.3.1.dmg\n`;
+  const half = rel([
+    a(1, "HafifPix-1.3.1.app.tar.gz", `sha256:${"9".repeat(64)}`),
+    a(2, "checksums.txt"),
+    a(100, "HafifPix-1.3.1.dmg", `sha256:${dmg}`),
+    a(101, "tapster-staging--appcast.xml", `sha256:${feed}`),
+    a(102, "tapster-staging--checksums.txt"),
+  ]);
+  const f = fakeGh(half, sums);
+  await resumeSwap(f.gh, "o/r", half, sha256(Buffer.from(sums)));
+  expect(f.log).toEqual(["rename 101 appcast.xml", "delete 1", "delete 2", "rename 102 checksums.txt"]);
+});
