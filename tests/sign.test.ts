@@ -55,3 +55,9 @@ test("the identifier is tapster's choice, never the build's", () => {
   ]);
   expect(codesignArgs(kc, "/w/bin/x", "/w/e.plist", "x")).toContain("--entitlements");
 });
+
+test("credentials Apple rejects are named as such", () => {
+  expect(() => parseNotary("", "Error: HTTP status code: 401. Unauthenticated. Ensure that all authentication arguments are correct.\n")).toThrow("Apple rejected the notary key (HTTP 401)");
+  expect(() => parseNotary("", "Error: The operation couldn't be completed. (network down)\n")).toThrow("notarytool failed: Error: The operation couldn't be completed. (network down)");
+  expect(() => parseNotary("not json", "")).toThrow("notarytool returned output tapster could not read");
+});

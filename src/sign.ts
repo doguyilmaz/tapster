@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { TapsterError } from "./errors";
 import type { Keychain } from "./keychain";
-import { register } from "./mask";
+import { register, scrub } from "./mask";
 import { run } from "./run";
 
 export const PRESETS: Record<"go" | "bun", string[]> = {
@@ -63,12 +63,17 @@ export async function verifySigned(file: string, teamId: string, identifier?: st
 export type NotaryKey = { p8Path: string; keyId: string; issuer: string };
 export type NotaryResult = { id: string; status: string };
 
-export function parseNotary(stdout: string): NotaryResult {
+export function parseNotary(stdout: string, stderr = ""): NotaryResult {
   try {
     const j = JSON.parse(stdout) as { id?: unknown; status?: unknown };
     if (typeof j.id === "string" && typeof j.status === "string") return { id: j.id, status: j.status };
   } catch {
   }
+  if (/HTTP status code: 401\b/.test(stderr)) {
+    throw new TapsterError("Apple rejected the notary key (HTTP 401)", "Store the App Store Connect key, its Key ID and the Issuer ID again with tapster init --rotate notary. The draft is untouched.");
+  }
+  const line = stderr.split("\n").find((l) => l.trim() !== "");
+  if (line) throw new TapsterError(`notarytool failed: ${scrub(line.trim()).slice(0, 300)}`, "The draft is untouched; the next run tries again.");
   throw new TapsterError("notarytool returned output tapster could not read", "Re-run the workflow; if it repeats, check the App Store Connect key.");
 }
 
@@ -93,7 +98,7 @@ export async function notarize(zip: string, key: NotaryKey): Promise<NotaryResul
     ["notarytool", "submit", zip, "--key", key.p8Path, "--key-id", key.keyId, "--issuer", key.issuer, "--wait", "--timeout", "30m", "--output-format", "json"],
     { allowFail: true },
   );
-  const result = parseNotary(res.stdout);
+  const result = parseNotary(res.stdout, res.stderr);
   if (result.status !== "Accepted") {
     const issues = result.status === "In Progress" ? "" : await notaryIssues(result.id, key);
     throw new TapsterError(
