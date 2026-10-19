@@ -130,3 +130,11 @@ test("a .p12 must open with the password and hold the private key", () => {
   expect(() => checkP12({ code: 1, stdout: "" }, { code: 1, stdout: "" })).toThrow("the .p12 could not be opened with that password");
   expect(() => checkP12(cert, { code: 0, stdout: "MAC: sha1, Iteration 1\nPKCS7 Data\n" })).toThrow("the .p12 holds the certificate but not its private key");
 });
+
+test("a backup is confirmed by yes in any case", async () => {
+  const { confirmed } = await import("../src/cli/init");
+  expect(confirmed(" Yes ")).toBe(true);
+  expect(confirmed("YES")).toBe(true);
+  expect(confirmed("y")).toBe(false);
+  expect(confirmed("")).toBe(false);
+});

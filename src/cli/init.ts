@@ -69,6 +69,8 @@ export function initSteps(have: { vars: string[]; secrets: string[] }, mac: bool
   return steps;
 }
 
+export const confirmed = (answer: string) => answer.trim().toLowerCase() === "yes";
+
 export function doneSteps(steps: string[], mac: boolean): string[] {
   return ["app", "certificate", "notary"].filter((x) => !steps.includes(x) && (x === "app" ? !steps.includes("app-key") : mac));
 }
@@ -355,6 +357,7 @@ async function updateSparkleEnv(dir: string, labels: string[]): Promise<void> {
 async function storeSparkleKey(gh: GitHub, dir: string, hub: string, label: string, account: string): Promise<void> {
   if (!/^[a-z0-9]+$/.test(label)) throw new TapsterError(`${label} is not a valid label`, "Use lowercase letters and digits, as in sparkle.key.");
   const config = hubConfig(dir, hub);
+  console.log("macOS asks whether tapster may read the Sparkle key from your keychain; choose Allow.");
   const read = await run("security", ["find-generic-password", "-s", "https://sparkle-project.org", "-a", account, "-w"], { allowFail: true });
   if (read.code !== 0) throw new TapsterError(`the login keychain has no Sparkle key for the account ${account}`, "Pass the account generate_keys used with --account (ed25519 by default).");
   const text = read.stdout.trim();
@@ -363,7 +366,7 @@ async function storeSparkleKey(gh: GitHub, dir: string, hub: string, label: stri
   console.log(`The key ${key.publicKey} signs updates for ${users.join(", ")}.`);
   console.log("If it is lost, installed copies can never update again; if it leaks, anyone can sign updates for them.");
   const backup = await ask("Do you keep an offline backup of this key? Type yes to store it in the hub: ");
-  if (backup !== "yes") throw new TapsterError("no offline backup confirmed", "Back the key up first (generate_keys -x exports it), then run this again.");
+  if (!confirmed(backup)) throw new TapsterError("no offline backup confirmed", "Back the key up first (generate_keys -x exports it), then run this again.");
   await setEnvSecret(hub, `SPARKLE_KEY_${label.toUpperCase()}`, text);
   console.log(`Stored SPARKLE_KEY_${label.toUpperCase()}.`);
   await updateSparkleEnv(dir, sparkleLabels(config));
@@ -388,7 +391,7 @@ async function createSparkleKey(dir: string, hub: string, label: string): Promis
   console.log(`Its public key is ${key.publicKey}. Put it in the app as SUPublicEDKey and in tapster.yml as sparkle.public_key.`);
   console.log("If this key is lost, installed copies can never update again. Keep an offline copy too, for example in your password manager:");
   console.log(store.kind === "keychain" ? `  security find-generic-password -s https://sparkle-project.org -a ${label} -w   (macOS asks you first)` : `  secret-tool lookup service https://sparkle-project.org account ${label}`);
-  if ((await ask("Type yes once you keep an offline copy, to store the key in the hub: ")) !== "yes") {
+  if (!confirmed(await ask("Type yes once you keep an offline copy, to store the key in the hub: "))) {
     console.log(`Not stored in the hub yet. Once you keep a copy, run tapster init --sparkle ${label} --account ${label}.`);
     return;
   }
@@ -410,8 +413,12 @@ async function replaceLocal(store: Store, ref: KeyRef, secret: string): Promise<
 const linuxRef = (hub: string, previous = false) => ({ service: "tapster-linux-key", account: previous ? `${hub} previous` : hub, label: `tapster Linux key for ${hub}${previous ? " (previous)" : ""}` });
 
 async function finishLinuxRotation(gh: GitHub, hub: string): Promise<void> {
-  const secrets = (await gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${hub}/environments/tapster/secrets`)).secrets.map((x) => x.name);
-  if (secrets.includes("TAPSTER_LINUX_KEY_PREVIOUS")) await deleteEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS");
+  const secrets = (await hubEnv(gh, hub, "secrets")).map((x) => x.name);
+  if (!secrets.includes("TAPSTER_LINUX_KEY_PREVIOUS")) {
+    console.log("No Linux key rotation is running, so there is nothing to finish.");
+    return;
+  }
+  await deleteEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS");
   await localStore()?.remove(linuxRef(hub, true));
   console.log("The previous Linux key no longer signs; apt and dnf trust only the new one from the next run.");
 }

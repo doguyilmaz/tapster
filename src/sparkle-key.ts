@@ -88,7 +88,7 @@ const PKCS8_SEED = Buffer.from("302e020100300506032b657004220420", "hex");
 const SPKI = Buffer.from("302a300506032b6570032100", "hex");
 
 const badKey = (why: string) =>
-  new TapsterError(`the Sparkle key ${why}`, "Store the text that generate_keys -x writes, with tapster init --sparkle <label>.");
+  new TapsterError(`the Sparkle key ${why}`, "Store the app's Sparkle key again with tapster init --sparkle <label> --account <keychain account>.");
 
 export function decodeSparkleKey(text: string): SparkleKey {
   const trimmed = text.trim();

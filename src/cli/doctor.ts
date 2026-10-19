@@ -240,7 +240,7 @@ async function appNote(gh: GitHub, hub: string, repos: string[]): Promise<string
   const vars = await gh.json<{ variables: { name: string; value: string }[] }>("GET", `/repos/${hub}/environments/tapster/variables`).catch(() => null);
   const slug = vars?.variables.find((v) => v.name === "TAPSTER_APP_SLUG")?.value;
   if (!slug || repos.length === 0) return null;
-  return `note the App must be installed on ${repos.join(", ")} and not on ${hub}; GitHub shows its repositories only to the App itself, so check them at https://github.com/apps/${slug}/installations/new (the hub's check job also reports both)`;
+  return `note: the App must be installed on ${repos.join(", ")} and not on ${hub}; GitHub shows its repositories only to the App itself, so check them at https://github.com/apps/${slug}/installations/new (the hub's check job also reports both)`;
 }
 
 export function configChecks(text: string | null, owner: string): { checks: Check[]; config: HubConfig | null } {
