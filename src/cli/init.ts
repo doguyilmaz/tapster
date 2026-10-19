@@ -313,6 +313,7 @@ async function writeWorkflow(gh: GitHub, dir: string, labels: string[], flag: st
   console.log(`wrote ${FLOW} from the template, ${pinChange(before, after)}; hand edits in it are replaced`);
   if (every === kept) return;
   console.log(`The hub looks for new drafts every ${every} minutes; change it with tapster init --workflow --every <minutes>.`);
+  if (kept !== null) console.log("If the hub has a doorbell, run tapster init --rotate doorbell after you push, so it keeps the same schedule.");
   if (schedule.isPrivate && every >= 60 && schedule.every === null) {
     console.log("GitHub bills every run of a private hub as at least one minute: every 10 minutes would use about 4,300 of the 2,000 free minutes a month. The doorbell (tapster init --doorbell) still publishes right after each release.");
   }
@@ -502,6 +503,11 @@ export function initAction(args: string[]): InitAction {
   throw new TapsterError(`unknown option ${args.join(" ")}`, INIT_USAGE);
 }
 
+function flowEvery(dir: string): number {
+  const flow = join(dir, FLOW);
+  return (existsSync(flow) && everyFromFlow(readFileSync(flow, "utf8"))) || 10;
+}
+
 export async function init(argv: string[]): Promise<void> {
   const pinned = takeOption(argv, "--tapster");
   const timed = takeOption(pinned.rest, "--every");
@@ -519,14 +525,11 @@ export async function init(argv: string[]): Promise<void> {
     if (action.what === "app") return rotateAppKey(gh, hub);
     if (action.what === "certificate") return storeCertificate(hub);
     if (action.what === "notary") return storeNotary(hub);
-    if (action.what === "doorbell") return rotateDoorbell(gh, hub);
+    if (action.what === "doorbell") return rotateDoorbell(gh, hub, flowEvery(dir));
     if (action.what === "linux-finish") return finishLinuxRotation(gh, hub);
     return setupLinux(gh, dir, hub, true);
   }
-  if (action.kind === "doorbell") {
-    const flow = join(dir, FLOW);
-    return setupDoorbell(gh, hub, hubConfig(dir, hub), setRepoVariable, (existsSync(flow) && everyFromFlow(readFileSync(flow, "utf8"))) || 10);
-  }
+  if (action.kind === "doorbell") return setupDoorbell(gh, hub, hubConfig(dir, hub), setRepoVariable, flowEvery(dir));
   if (action.kind === "linux") return setupLinux(gh, dir, hub, false);
   if (action.kind === "sparkle-new") return createSparkleKey(dir, hub, action.label);
   if (action.kind === "sparkle") return storeSparkleKey(gh, dir, hub, action.label, action.account);

@@ -145,6 +145,12 @@ export function accessCheck(collaborators: { login: string }[], keys: { title: s
   return bad(name, `${parts.join("; ")}. Remove them in the hub's settings unless you trust them with your signing keys.`);
 }
 
+export function doorbellEveryCheck(stored: string | undefined, workflowEvery: number): Check {
+  const name = "the doorbell keeps the workflow's schedule";
+  if (stored === String(workflowEvery)) return ok(name);
+  return bad(name, `The doorbell starts the hub every ${stored ?? "10"} minutes and the workflow every ${workflowEvery}. Run tapster init --rotate doorbell to move the doorbell to the workflow's schedule.`);
+}
+
 export function scheduleCheck(runs: { event: string; created_at: string }[], now: number, doorbell: boolean): Check {
   const name = "the hub ran in the last day";
   const recent = runs.some((r) => (r.event === "schedule" || r.event === "workflow_dispatch") && now - Date.parse(r.created_at) < 86_400_000);
@@ -195,6 +201,7 @@ async function apiChecks(gh: GitHub, hub: string, owner: string, config: HubConf
       values[p.repo] = await gh.json<{ value: string }>("GET", `/repos/${p.repo}/actions/variables/TAPSTER_DOORBELL`).then((v) => v.value).catch(() => null);
     }
     checks.push(doorbellCheck(doorbell, values));
+    checks.push(doorbellEveryCheck(vars.find((v) => v.name === "TAPSTER_DOORBELL_EVERY")?.value, everyFromFlow(workflow) ?? 10));
   }
   const perms = await gh.json<{ default_workflow_permissions: string }>("GET", `/repos/${hub}/actions/permissions/workflow`);
   checks.push(perms.default_workflow_permissions === "read" ? ok("the default workflow token is read-only") : bad("the default workflow token is read-only", "Run tapster init."));

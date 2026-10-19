@@ -113,3 +113,12 @@ test("Apple credentials are asked for only when a package ships macOS code", asy
   expect(missing.fix).toContain("tapster init --rotate certificate");
   expect(missing.fix).toContain("tapster init --rotate notary");
 });
+
+test("the doorbell's clock matches the workflow's schedule", async () => {
+  const { doorbellEveryCheck } = await import("../src/cli/doctor");
+  expect(doorbellEveryCheck("60", 60).ok).toBe(true);
+  const stale = doorbellEveryCheck("10", 60);
+  expect(stale.ok).toBe(false);
+  expect(stale.fix).toContain("tapster init --rotate doorbell");
+  expect(doorbellEveryCheck(undefined, 60).fix).toContain("tapster init --rotate doorbell");
+});

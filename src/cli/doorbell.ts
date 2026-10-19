@@ -139,6 +139,23 @@ async function waitForInstall(appId: string, pem: string, hub: string): Promise<
   throw new TapsterError(`the doorbell App was never installed on ${hub}`, `Install it on ${hub}, then ${AGAIN.charAt(0).toLowerCase()}${AGAIN.slice(1)}`);
 }
 
+async function deployWorker(w: Wrangler, gh: GitHub, hub: string, appId: string, pem: string, every: number, installation: number): Promise<string> {
+  const ownerId = (await gh.json<{ id: number }>("GET", `/users/${hub.split("/")[0]}`)).id;
+  const hubId = (await gh.getRepo(hub)).id;
+  await writeFile(join(w.dir, "worker.ts"), source(workerText));
+  await writeFile(join(w.dir, "jwt.ts"), source(jwtText));
+  await writeFile(join(w.dir, "wrangler.jsonc"), doorbellConfig({ APP_ID: appId, INSTALLATION_ID: String(installation), HUB: hub, HUB_ID: String(hubId), OWNER_ID: String(ownerId), INTERVAL: String(every) }));
+  const outFile = join(w.dir, "out.ndjson");
+  const deployed = await w.run(["deploy"], { env: { WRANGLER_OUTPUT_FILE_PATH: outFile } });
+  if (deployed.code !== 0) throw new TapsterError("Wrangler could not deploy the doorbell", `${AGAIN} Wrangler's own message is above.`);
+  const origin = workerOrigin(existsSync(outFile) ? readFileSync(outFile, "utf8") : "");
+  if (!origin) throw new TapsterError("the doorbell has no workers.dev address", `Create your workers.dev subdomain in the Cloudflare dashboard (Workers & Pages). ${AGAIN}`);
+  const key = createPrivateKey(pem).export({ type: "pkcs8", format: "pem" }).toString();
+  if ((await w.run(["secret", "put", "APP_KEY"], { stdin: key })).code !== 0) throw new TapsterError("Wrangler could not store the doorbell key", AGAIN);
+  await setEnvVariable(hub, "TAPSTER_DOORBELL_EVERY", String(every));
+  return origin;
+}
+
 export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, setRepoVariable: (repo: string, name: string, value: string) => Promise<void>, every: number): Promise<void> {
   const vars = await gh.json<Vars>("GET", `/repos/${hub}/environments/tapster/variables`);
   const stage = doorbellStage(vars);
@@ -163,19 +180,7 @@ export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, 
       await setEnvVariable(hub, "TAPSTER_DOORBELL_APP_SLUG", app.slug);
       openUrl(`https://github.com/apps/${app.slug}/installations/new`);
     }
-    const installation = await waitForInstall(appId, pem, hub);
-    const ownerId = (await gh.json<{ id: number }>("GET", `/users/${owner}`)).id;
-    const hubId = (await gh.getRepo(hub)).id;
-    await writeFile(join(w.dir, "worker.ts"), source(workerText));
-    await writeFile(join(w.dir, "jwt.ts"), source(jwtText));
-    await writeFile(join(w.dir, "wrangler.jsonc"), doorbellConfig({ APP_ID: appId, INSTALLATION_ID: String(installation), HUB: hub, HUB_ID: String(hubId), OWNER_ID: String(ownerId), INTERVAL: String(every) }));
-    const outFile = join(w.dir, "out.ndjson");
-    const deployed = await w.run(["deploy"], { env: { WRANGLER_OUTPUT_FILE_PATH: outFile } });
-    if (deployed.code !== 0) throw new TapsterError("Wrangler could not deploy the doorbell", `${AGAIN} Wrangler's own message is above.`);
-    const origin = workerOrigin(existsSync(outFile) ? readFileSync(outFile, "utf8") : "");
-    if (!origin) throw new TapsterError("the doorbell has no workers.dev address", `Create your workers.dev subdomain in the Cloudflare dashboard (Workers & Pages). ${AGAIN}`);
-    const key = createPrivateKey(pem).export({ type: "pkcs8", format: "pem" }).toString();
-    if ((await w.run(["secret", "put", "APP_KEY"], { stdin: key })).code !== 0) throw new TapsterError("Wrangler could not store the doorbell key", AGAIN);
+    const origin = await deployWorker(w, gh, hub, appId, pem, every, await waitForInstall(appId, pem, hub));
     for (const p of config.packages) await setRepoVariable(p.repo, "TAPSTER_DOORBELL", origin);
     await setEnvVariable(hub, "TAPSTER_DOORBELL", origin);
     console.log(`The doorbell answers at ${origin}. Projects ring it after opening a draft.`);
@@ -184,7 +189,7 @@ export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, 
   }
 }
 
-export async function rotateDoorbell(gh: GitHub, hub: string): Promise<void> {
+export async function rotateDoorbell(gh: GitHub, hub: string, every: number): Promise<void> {
   const vars = await gh.json<Vars>("GET", `/repos/${hub}/environments/tapster/variables`);
   if (doorbellStage(vars) !== "done") throw new TapsterError("the hub has no working doorbell yet", "Run tapster init --doorbell.");
   const appId = vars.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_ID")!.value;
@@ -192,10 +197,9 @@ export async function rotateDoorbell(gh: GitHub, hub: string): Promise<void> {
   const w = await installWrangler();
   try {
     await signIn(w);
-    const key = createPrivateKey(pem).export({ type: "pkcs8", format: "pem" }).toString();
-    if ((await w.run(["secret", "put", "APP_KEY", "--name", "tapster-doorbell"], { stdin: key })).code !== 0) throw new TapsterError("Wrangler could not store the doorbell key", "Check that the Worker tapster-doorbell exists in your Cloudflare account.");
+    await deployWorker(w, gh, hub, appId, pem, every, await waitForInstall(appId, pem, hub));
   } finally {
     removeTemp(w.dir);
   }
-  console.log("Stored the new key. Now delete every other key on the App's settings page.");
+  console.log(`Deployed the doorbell again with the new key; it starts the hub every ${every} minutes. Now delete every other key on the App's settings page.`);
 }

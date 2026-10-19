@@ -51,7 +51,9 @@ what is done. A private hub needs GitHub Pro for environments.
 
 The workflow pins the exact tapster that ran `init`. The hub looks for drafts every 10 minutes. A private hub looks
 every hour, because GitHub bills each of its runs as at least a minute; `--every <minutes>` changes it. To move a hub to a newer
-tapster, run `bunx @doguyilmaz/tapster@<version> init --workflow` and review the diff.
+tapster, run `bunx @doguyilmaz/tapster@<version> init --workflow` and review the diff. If the hub has a doorbell, run
+`init --rotate doorbell` too, so the Worker gets the same version and schedule. A hub that moves to this version from
+an earlier one refuses each project until you run `tapster add` in it once, which protects its branches and tags.
 
 ## Add a project
 
