@@ -1,6 +1,6 @@
 import { DoorbellError, type KeySource, jwksSource, verifyOidc } from "./jwt";
 
-export type Env = { APP_ID: string; HUB: string; HUB_ID: string; OWNER_ID: string; APP_KEY: string };
+export type Env = { APP_ID: string; INSTALLATION_ID: string; HUB: string; HUB_ID: string; OWNER_ID: string; APP_KEY: string };
 
 const API = "https://api.github.com";
 const b64url = (data: Uint8Array | string) =>
@@ -32,10 +32,7 @@ async function github(fetchImpl: typeof fetch, method: string, path: string, aut
 
 export async function dispatch(env: Env, fetchImpl: typeof fetch, now: number): Promise<void> {
   const jwt = await appJwt(env, now);
-  const install = await github(fetchImpl, "GET", `/repos/${env.HUB}/installation`, jwt);
-  if (!install.ok) throw new DoorbellError(502, `the dispatch App is not installed on the hub (${install.status})`);
-  const { id } = (await install.json()) as { id: number };
-  const minted = await github(fetchImpl, "POST", `/app/installations/${id}/access_tokens`, jwt, { repository_ids: [Number(env.HUB_ID)], permissions: { actions: "write" } });
+  const minted = await github(fetchImpl, "POST", `/app/installations/${env.INSTALLATION_ID}/access_tokens`, jwt, { repository_ids: [Number(env.HUB_ID)], permissions: { actions: "write" } });
   if (!minted.ok) throw new DoorbellError(502, `GitHub refused a token (${minted.status})`);
   const { token } = (await minted.json()) as { token: string };
   try {

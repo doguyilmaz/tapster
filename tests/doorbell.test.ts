@@ -74,7 +74,7 @@ test("refuses other algorithms, other keys, unknown kids and oversized tokens", 
   await expect(verifyOidc("not a token", ORIGIN, "42", keys, NOW)).rejects.toThrow(DoorbellError);
 });
 
-test("the key set is cached for an hour, fetched again for an unknown kid at most once a minute and never cached when a fetch fails", async () => {
+test("the key set is cached for an hour, fetched again for an unknown kid at most every 5 minutes and never cached when a fetch fails", async () => {
   let calls = 0;
   let fail = false;
   const fetchImpl = async () => {
@@ -89,6 +89,9 @@ test("the key set is cached for an hour, fetched again for an unknown kid at mos
   expect(await source("k9")).toBeNull();
   expect(calls).toBe(1);
   clock += 61;
+  expect(await source("k9")).toBeNull();
+  expect(calls).toBe(1);
+  clock += 240;
   expect(await source("k9")).toBeNull();
   expect(calls).toBe(2);
   expect(await source("k9")).toBeNull();
@@ -109,7 +112,6 @@ function fakeGitHub(dispatchStatus = 204): { calls: Call[]; fetchImpl: typeof fe
   const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
     calls.push({ method: init?.method ?? "GET", url: u, body: init?.body ? JSON.parse(String(init.body)) : null, auth: new Headers(init?.headers).get("authorization") });
-    if (u.endsWith("/repos/o/homebrew-tap/installation")) return Response.json({ id: 77 });
     if (u.endsWith("/app/installations/77/access_tokens")) return Response.json({ token: "ghs_installationtoken" }, { status: 201 });
     if (u.endsWith("/dispatches")) return new Response(null, { status: dispatchStatus });
     if (u.endsWith("/installation/token")) return new Response(null, { status: 204 });
@@ -118,20 +120,19 @@ function fakeGitHub(dispatchStatus = 204): { calls: Call[]; fetchImpl: typeof fe
   return { calls, fetchImpl: fetchImpl as unknown as typeof fetch };
 }
 
-const env = () => ({ APP_ID: "1001", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42", APP_KEY: appPem });
+const env = () => ({ APP_ID: "1001", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42", APP_KEY: appPem });
 
 test("the dispatch asks for an Actions-only token on the hub and always revokes it", async () => {
   const gh = fakeGitHub();
   await dispatch(env(), gh.fetchImpl, NOW);
   expect(gh.calls.map((c) => `${c.method} ${c.url.replace("https://api.github.com", "")}`)).toEqual([
-    "GET /repos/o/homebrew-tap/installation",
     "POST /app/installations/77/access_tokens",
     "POST /repos/o/homebrew-tap/actions/workflows/tapster.yml/dispatches",
     "DELETE /installation/token",
   ]);
-  expect(gh.calls[1]!.body).toEqual({ repository_ids: [555], permissions: { actions: "write" } });
-  expect(gh.calls[2]!.body).toEqual({ ref: "main" });
-  expect(gh.calls[2]!.auth).toBe("Bearer ghs_installationtoken");
+  expect(gh.calls[0]!.body).toEqual({ repository_ids: [555], permissions: { actions: "write" } });
+  expect(gh.calls[1]!.body).toEqual({ ref: "main" });
+  expect(gh.calls[1]!.auth).toBe("Bearer ghs_installationtoken");
   const failing = fakeGitHub(422);
   await expect(dispatch(env(), failing.fetchImpl, NOW)).rejects.toThrow(DoorbellError);
   expect(failing.calls.at(-1)!.method).toBe("DELETE");

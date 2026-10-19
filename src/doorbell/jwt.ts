@@ -16,7 +16,7 @@ const JWKS = `${ISSUER}/.well-known/jwks`;
 const SKEW = 60;
 const MAX_TOKEN = 8192;
 const KEYS_TTL = 3600;
-const REFETCH_GAP = 60;
+const REFETCH_GAP = 300;
 
 const refuse = (reason: string) => new DoorbellError(401, reason);
 
