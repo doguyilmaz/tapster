@@ -168,6 +168,7 @@ jobs:
         with: { mode: linux-sign, template: 2 }
         env:
           TAPSTER_LINUX_KEY: ${{ secrets.TAPSTER_LINUX_KEY }}
+          TAPSTER_LINUX_KEY_PREVIOUS: ${{ secrets.TAPSTER_LINUX_KEY_PREVIOUS }}
       - name: Keep the signed site for Pages
         uses: actions/upload-artifact@__UPLOAD_SHA__ # __UPLOAD_TAG__
         with: { name: linux-site, path: "${{ runner.temp }}/tapster-linux", if-no-files-found: error, retention-days: 1 }

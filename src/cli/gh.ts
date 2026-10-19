@@ -32,3 +32,7 @@ export async function setEnvVariable(repo: string, name: string, value: string):
 export async function setRepoVariable(repo: string, name: string, value: string): Promise<void> {
   await runPath(ghPath(), "gh", ["variable", "set", name, "--repo", repo, "--body", value], { env: userEnv() });
 }
+
+export async function deleteEnvSecret(repo: string, name: string, env = "tapster"): Promise<void> {
+  await runPath(ghPath(), "gh", ["secret", "delete", name, "--env", env, "--repo", repo], { env: userEnv() });
+}

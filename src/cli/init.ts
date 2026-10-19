@@ -15,7 +15,8 @@ import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
 import { appFromManifest, openUrl } from "./appflow";
 import { rotateDoorbell, setupDoorbell } from "./doorbell";
-import { currentRepo, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
+import { currentRepo, deleteEnvSecret, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
+import { localStore, newSparkleKey, requireStore } from "./keystore";
 import { cleanPath, readInput } from "./paths";
 import { ask } from "./prompt";
 
@@ -298,6 +299,42 @@ async function storeSparkleKey(gh: GitHub, dir: string, hub: string, label: stri
   console.log("Review and commit the workflow change, then push.");
 }
 
+async function createSparkleKey(dir: string, hub: string, label: string): Promise<void> {
+  if (!/^[a-z0-9]+$/.test(label)) throw new TapsterError(`${label} is not a valid label`, "Use lowercase letters and digits, as in sparkle.key.");
+  const config = hubConfig(dir, hub);
+  const users = config.packages.filter(isApp).filter((p) => p.sparkle?.key === label || p.sparkle?.next_key === label);
+  if (users.length) {
+    throw new TapsterError(`${users.map((p) => p.name).join(", ")} already sign with the Sparkle key ${label}`, "A new key needs a new label. To change an app's key, follow the Sparkle key change in the README.");
+  }
+  const store = requireStore("the Sparkle key");
+  const ref = { service: "https://sparkle-project.org", account: label, label: "Private key for signing Sparkle updates" };
+  if (await store.exists(ref)) {
+    throw new TapsterError(`your keychain already has a Sparkle key for the account ${label}`, `Store that one with tapster init --sparkle ${label} --account ${label}, or pick another label.`);
+  }
+  const key = newSparkleKey();
+  await store.save({ ...ref, comment: `Public key (SUPublicEDKey value) for this key is: ${key.publicKey}` }, key.seed);
+  console.log(`Saved a new Sparkle key in your ${store.kind === "keychain" ? "login keychain" : "keyring"} under the account ${label}; Sparkle's own tools find it there.`);
+  console.log(`Its public key is ${key.publicKey}. Put it in the app as SUPublicEDKey and in tapster.yml as sparkle.public_key.`);
+  console.log("If this key is lost, installed copies can never update again. Keep an offline copy too, for example in your password manager:");
+  console.log(store.kind === "keychain" ? `  security find-generic-password -s https://sparkle-project.org -a ${label} -w   (macOS asks you first)` : `  secret-tool lookup service https://sparkle-project.org account ${label}`);
+  if ((await ask("Type yes once you keep an offline copy, to store the key in the hub: ")) !== "yes") {
+    console.log(`Not stored in the hub yet. Once you keep a copy, run tapster init --sparkle ${label} --account ${label}.`);
+    return;
+  }
+  await setEnvSecret(hub, `SPARKLE_KEY_${label.toUpperCase()}`, key.seed);
+  console.log(`Stored SPARKLE_KEY_${label.toUpperCase()} in the hub.`);
+  await updateSparkleEnv(dir, [...new Set([...sparkleLabels(config), label])]);
+  console.log("Review and commit the workflow change, then push.");
+}
+
+const linuxRef = (hub: string, previous = false) => ({ service: "tapster-linux-key", account: previous ? `${hub} previous` : hub, label: `tapster Linux key for ${hub}${previous ? " (previous)" : ""}` });
+
+async function finishLinuxRotation(hub: string): Promise<void> {
+  await deleteEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS").catch(() => undefined);
+  await localStore()?.remove(linuxRef(hub, true));
+  console.log("The previous Linux key no longer signs; apt and dnf trust only the new one from the next run.");
+}
+
 export function linuxKeyAllowed(secrets: string[], rotate: boolean): void {
   if (secrets.includes("TAPSTER_LINUX_KEY") && !rotate) {
     throw new TapsterError("the hub already has a Linux signing key", "Replacing it makes every apt and dnf user fetch the new key. To do that, run tapster init --rotate linux.");
@@ -308,6 +345,7 @@ async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean)
   const config = hubConfig(dir, hub);
   const secrets = (await gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${hub}/environments/tapster/secrets`)).secrets.map((x) => x.name);
   linuxKeyAllowed(secrets, rotate);
+  const store = requireStore("the Linux signing key");
   const gpg = ["/opt/homebrew/bin/gpg", "/usr/local/bin/gpg", "/usr/bin/gpg"].find((p) => existsSync(p));
   if (!gpg) throw new TapsterError("gpg is not installed", "Install it with brew install gnupg, then run this again.");
   await gh.json("POST", `/repos/${hub}/pages`, { build_type: "workflow" }).catch(async (e) => {
@@ -321,8 +359,20 @@ async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean)
     await runPath(gpg, "gpg", ["--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-gen-key", `${hub.split("/")[0]} tapster (${hub})`, "rsa4096", "sign", "never"], { env });
     const key = (await runPath(gpg, "gpg", ["--batch", "--armor", "--export-secret-keys"], { env })).stdout;
     const fingerprint = (await runPath(gpg, "gpg", ["--batch", "--with-colons", "--list-secret-keys"], { env })).stdout.split("\n").find((l) => l.startsWith("fpr:"))?.split(":")[9];
+    if (rotate) {
+      if (store.kind === "keychain") console.log("macOS asks whether tapster may read the previous key from your keychain; choose Allow.");
+      const old = await store.read(linuxRef(hub));
+      if (old) {
+        await store.remove(linuxRef(hub, true));
+        await store.save(linuxRef(hub, true), old);
+        await setEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS", old);
+        console.log("The previous key keeps signing next to the new one, so apt and dnf users can fetch the new key. Once they have, run tapster init --rotate linux --finish.");
+      } else console.log("The previous key is not in your keychain, so apt and dnf users must fetch the new key before they can update.");
+    }
+    await store.remove(linuxRef(hub));
+    await store.save(linuxRef(hub), key);
     await setEnvSecret(hub, "TAPSTER_LINUX_KEY", key);
-    console.log(`Stored TAPSTER_LINUX_KEY, fingerprint ${fingerprint}. It is kept nowhere else; if it is lost, run tapster init --rotate linux and users fetch the new key.`);
+    console.log(`Stored the Linux key (fingerprint ${fingerprint}) in the hub and in your ${store.kind === "keychain" ? "login keychain" : "keyring"} as "tapster-linux-key".`);
   } finally {
     await runPath(join(gpg, "..", "gpgconf"), "gpgconf", ["--kill", "all"], { env, allowFail: true }).catch(() => undefined);
     await rm(home, { recursive: true, force: true });
@@ -378,9 +428,11 @@ export async function init(argv: string[]): Promise<void> {
   if (rotate === "certificate") return storeCertificate(hub);
   if (rotate === "notary") return storeNotary(hub);
   if (rotate === "doorbell") return rotateDoorbell(gh, hub);
-  if (rotate === "linux") return setupLinux(gh, dir, hub, true);
+  if (rotate === "linux" && args[2] === "--finish" && args.length === 3) return finishLinuxRotation(hub);
+  if (rotate === "linux" && args.length === 2) return setupLinux(gh, dir, hub, true);
   if (args[0] === "--doorbell" && args.length === 1) return setupDoorbell(gh, hub, hubConfig(dir, hub), setRepoVariable);
   if (args[0] === "--linux" && args.length === 1) return setupLinux(gh, dir, hub, false);
+  if (args[0] === "--sparkle" && args[1] && args[2] === "--new" && args.length === 3) return createSparkleKey(dir, hub, args[1]);
   if (args[0] === "--sparkle" && args[1]) {
     const account = args[2] === "--account" && args[3] ? args[3] : args.length === 2 ? "ed25519" : null;
     if (account) return storeSparkleKey(gh, dir, hub, args[1], account);

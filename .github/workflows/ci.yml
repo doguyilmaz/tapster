@@ -57,13 +57,15 @@ jobs:
         with: { bun-version: 1.4.3 }
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends apt-utils rpm createrepo-c dpkg gnupg
-      - name: A throwaway signing key
+      - name: Two throwaway signing keys
         run: |
-          export GNUPGHOME=$(mktemp -d)
-          gpg --batch --pinentry-mode loopback --passphrase '' --quick-gen-key "tapster e2e" rsa4096 sign never
-          gpg --batch --armor --export-secret-keys > "$RUNNER_TEMP/key.asc"
-          gpgconf --kill all
-      - name: Build, check and sign a fixture repository twice and refuse planted packages
-        run: bun tests/linux/e2e.ts "$RUNNER_TEMP" "$RUNNER_TEMP/key.asc"
+          for k in key previous; do
+            export GNUPGHOME=$(mktemp -d)
+            gpg --batch --pinentry-mode loopback --passphrase '' --quick-gen-key "tapster e2e $k" rsa4096 sign never
+            gpg --batch --armor --export-secret-keys > "$RUNNER_TEMP/$k.asc"
+            gpgconf --kill all
+          done
+      - name: Build, check and sign a fixture repository twice, sign during a key rotation and refuse planted packages
+        run: bun tests/linux/e2e.ts "$RUNNER_TEMP" "$RUNNER_TEMP/key.asc" "$RUNNER_TEMP/previous.asc"
       - name: Install from it with apt and dnf
         run: bash tests/linux/install.sh "$RUNNER_TEMP/site1"
