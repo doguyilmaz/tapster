@@ -107,3 +107,20 @@ test("the repack drops setuid, setgid, sticky and group or other write", () => {
   expect(out.find((e) => e.name === "x")!.mode).toBe(0o755);
   expect(out.find((e) => e.name === "d")!.mode).toBe(0o755);
 });
+
+test("names and link targets longer than macOS's PATH_MAX are refused", () => {
+  expect(() => readTarGz(rawTarGz([{ name: "PaxHeader", type: "x", data: paxRecord("path", "a/".repeat(600) + "x") }, { name: "x", data: "1" }]))).toThrow(TapsterError);
+  expect(() => readTarGz(rawTarGz([{ name: "PaxHeader", type: "x", data: paxRecord("linkpath", "a/".repeat(600)) }, { name: "l", type: "2", linkname: "x" }]))).toThrow(TapsterError);
+});
+
+test("an archive built to make the symlink checks slow finishes quickly", () => {
+  const deep = Array.from({ length: 500 }, () => "d").join("/");
+  const gz = rawTarGz([{ name: "link", type: "2", linkname: "x" }, ...Array.from({ length: 20000 }, (_, i) => ({ name: `${deep.slice(0, 900)}/${i}`, data: "" }))]);
+  const started = Date.now();
+  try {
+    readTarGz(gz);
+  } catch (e) {
+    expect(e).toBeInstanceOf(TapsterError);
+  }
+  expect(Date.now() - started).toBeLessThan(3000);
+});

@@ -44,6 +44,8 @@ function parsePax(data: Buffer): Record<string, string> {
   return out;
 }
 
+const PATH_MAX = 1024;
+const MAX_ENTRIES = 200_000;
 const PRINTABLE = /^[\x20-\x5b\x5d-\x7e]+$/;
 
 function safeName(raw: string): string {
@@ -109,6 +111,8 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
     const base = cstr(h.subarray(0, 100));
     const rawName = pax.path ?? longName ?? (prefix ? `${prefix}/${base}` : base);
     const rawLink = pax.linkpath ?? longLink ?? cstr(h.subarray(157, 257));
+    if (Buffer.byteLength(rawName) > PATH_MAX || Buffer.byteLength(rawLink) > PATH_MAX) throw bad("has a name longer than macOS allows");
+    if (entries.length >= MAX_ENTRIES) throw bad(`holds more than ${MAX_ENTRIES} entries`);
     pax = {};
     longName = null;
     longLink = null;
@@ -128,11 +132,17 @@ export function readTarGz(gz: Buffer, limits: Limits = LIMITS): TarEntry[] {
 function checkSymlinks(entries: TarEntry[]) {
   const links = new Set(entries.filter((e) => e.type === "symlink").map((e) => e.name.toLowerCase()));
   if (links.size === 0) return;
-  for (const e of entries) {
-    const parts = e.name.toLowerCase().split("/");
-    for (let i = 1; i < parts.length; i++) {
-      if (links.has(parts.slice(0, i).join("/"))) throw bad(`has ${e.name}, which passes through a symlink`);
+  const names = entries.map((e) => e.name.toLowerCase()).sort();
+  for (const link of links) {
+    const below = `${link}/`;
+    let lo = 0;
+    let hi = names.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (names[mid]! < below) lo = mid + 1;
+      else hi = mid;
     }
+    if (names[lo]?.startsWith(below)) throw bad(`has ${names[lo]}, which passes through a symlink`);
   }
   for (const e of entries) {
     if (e.type !== "symlink") continue;
