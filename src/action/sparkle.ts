@@ -18,6 +18,10 @@ export function readSparkleKeys(): Map<string, SparkleKey> {
   for (const name of Object.keys(process.env).sort()) {
     const label = ENV.exec(name)?.[1];
     if (!label) continue;
+    if (!process.env[name]) {
+      delete process.env[name];
+      continue;
+    }
     const text = readSecret(name);
     try {
       keys.set(label.toLowerCase(), decodeSparkleKey(text));
@@ -68,7 +72,17 @@ export async function sparkleMode(ctx: Context): Promise<void> {
     return false;
   });
   if (unsigned.length > 0) {
-    const keys = readSparkleKeys();
+    let keys: Map<string, SparkleKey>;
+    try {
+      keys = readSparkleKeys();
+    } catch (e) {
+      for (const { item } of unsigned) {
+        item.status = "failed";
+        failure(`${item.package} ${item.tag}`, e);
+      }
+      await saveManifest(manifest);
+      return;
+    }
     for (const { item, pkg } of unsigned) {
       try {
         const app = item.app!;

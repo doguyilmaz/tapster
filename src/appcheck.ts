@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, openSync, readSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
-import type { TarEntry } from "./archive";
+import { type TarEntry, isMachO } from "./archive";
 import type { ChecksumLine } from "./checksums";
 import { type AppPackage, type PackageConfig, type Platform, assetName, isApp, versionOf } from "./config";
 import { TapsterError } from "./errors";
@@ -189,5 +189,18 @@ export async function appFacts(appDir: string, pkg: AppPackage, all: PackageConf
       if (typeof v === "string" && appNames.has(v.toLowerCase())) throw refuse(`${ownerRel} is named ${v}, like an app the hub publishes`);
     }
   }
+  const regular = (p: string) => existsSync(join(appDir, p)) && lstatSync(join(appDir, p)).isFile();
+  for (const b of pkg.cask.binaries ?? []) {
+    if (!regular(b)) throw refuse(`${b}, listed in cask.binaries, is not a file in the app`, "Fix cask.binaries in tapster.yml.");
+    const fd = openSync(join(appDir, b), "r");
+    const head = Buffer.alloc(8);
+    try {
+      readSync(fd, head, 0, 8, 0);
+    } finally {
+      closeSync(fd);
+    }
+    if (!isMachO(head)) throw refuse(`${b}, listed in cask.binaries, is not a Mach-O executable`, "Fix cask.binaries in tapster.yml.");
+  }
+  if (pkg.dmg.volume_icon && !regular(pkg.dmg.volume_icon)) throw refuse(`${pkg.dmg.volume_icon}, set as dmg.volume_icon, is not a file in the app`, "Fix dmg.volume_icon in tapster.yml.");
   return { version, build: version, minimumSystemVersion: minimum, macos, publicKey };
 }

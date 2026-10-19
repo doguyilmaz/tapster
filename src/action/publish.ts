@@ -96,7 +96,8 @@ export async function publishMode(ctx: Context): Promise<void> {
       const publishedSums = await gh.downloadAsset(pkg.repo, sumsAsset.id);
       assertRecorded(publishedSums, expected!);
       await recordState(hubGh, ctx.hub, pkg.name, { tag: item.tag, releaseId: item.releaseId, checksums: expected!, status: "published", ...(app ? { app } : {}) });
-      for (const f of signed) await writeFile(join(out, f.name), f.data);
+      await mkdir(join(out, pkg.name), { recursive: true, mode: 0o700 });
+      for (const f of signed) await writeFile(join(out, pkg.name, f.name), f.data);
       attest ||= signed.length > 0;
       record({ item: `${pkg.name} ${item.tag}`, result: "published", detail: "" });
     } catch (e) {
@@ -106,5 +107,5 @@ export async function publishMode(ctx: Context): Promise<void> {
     }
   }
   core.setOutput("attest", String(attest));
-  core.setOutput("attest-path", `${out}/*`);
+  core.setOutput("attest-path", `${out}/*/*`);
 }
