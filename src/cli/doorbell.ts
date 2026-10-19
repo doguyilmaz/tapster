@@ -84,7 +84,7 @@ async function askKey(appId: string, slug: string): Promise<string> {
   await new GitHub(appJwt(appId, pem)).json("GET", "/app").catch(() => {
     throw new TapsterError("that key does not belong to the doorbell App", `Generate the key on https://github.com/settings/apps/${slug}.`);
   });
-  console.log(`Delete ${path} once tapster is done, and every older key on that page.`);
+  console.log(`Once tapster is done, delete ${path} and every older key on that page.`);
   return pem;
 }
 
