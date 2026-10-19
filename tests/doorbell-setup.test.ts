@@ -86,3 +86,18 @@ test("a doorbell setup that stopped after creating its App continues with that A
 test("Wrangler is installed by the bun inside a compiled tapster", () => {
   expect(bunEnv("/usr/bin:/bin")).toEqual({ PATH: "/usr/bin:/bin", BUN_BE_BUN: "1" });
 });
+
+test("a doorbell or Linux key before init says to run init first", async () => {
+  const { hubEnv } = await import("../src/cli/gh");
+  const { GitHubError } = await import("../src/errors");
+  const missing = { json: async () => { throw new GitHubError("not found", "check it", 404); } } as never;
+  await expect(hubEnv(missing, "o/hub", "variables")).rejects.toThrow("o/hub has no tapster environment yet");
+  const some = { json: async () => ({ variables: [{ name: "A", value: "1" }] }) } as never;
+  expect(await hubEnv(some, "o/hub", "variables")).toEqual([{ name: "A", value: "1" }]);
+});
+
+test("a failed Wrangler run shows the end of what Wrangler said", async () => {
+  const { wranglerSaid } = await import("../src/cli/doorbell");
+  expect(wranglerSaid({ stdout: "Uploading\n", stderr: "\n✘ [ERROR] You need a workers.dev subdomain\n\nSee the dashboard\n" })).toBe("✘ [ERROR] You need a workers.dev subdomain / See the dashboard");
+  expect(wranglerSaid({ stdout: "", stderr: "" })).toBe("no output");
+});

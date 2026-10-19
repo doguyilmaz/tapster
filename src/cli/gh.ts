@@ -1,4 +1,4 @@
-import { TapsterError } from "../errors";
+import { GitHubError, TapsterError } from "../errors";
 import { GitHub } from "../github";
 import { ghPath, run, runPath } from "../run";
 
@@ -44,4 +44,14 @@ export async function setRepoVariable(repo: string, name: string, value: string)
 
 export async function deleteEnvSecret(repo: string, name: string, env = "tapster"): Promise<void> {
   await runPath(cliGh(), "gh", ["secret", "delete", name, "--env", env, "--repo", repo], { env: userEnv() });
+}
+
+export async function hubEnv(gh: GitHub, hub: string, kind: "variables" | "secrets"): Promise<{ name: string; value?: string }[]> {
+  try {
+    const res = await gh.json<Record<string, { name: string; value?: string }[]>>("GET", `/repos/${hub}/environments/tapster/${kind}?per_page=100`);
+    return res[kind] ?? [];
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 404) throw new TapsterError(`${hub} has no tapster environment yet`, "Run tapster init in a clone of the hub first.");
+    throw e;
+  }
 }

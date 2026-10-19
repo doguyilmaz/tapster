@@ -72,10 +72,13 @@ export async function appFromManifest(manifest: (redirect: string) => object, co
   handle = appRoutes({ manifest, copy, state, port: server.port!, settle });
   console.log(`Opening GitHub to create ${copy.what}. Read the page, then click "Continue to GitHub" and "Create GitHub App".`);
   openUrl(`http://127.0.0.1:${server.port}/start`);
+  console.log("tapster waits up to 30 minutes until GitHub sends you back. If no page opened, open the address above. Ctrl+C stops it.");
+  const timer = setTimeout(() => settle({ error: new TapsterError("no App was created within 30 minutes", `Run ${copy.again} again.`) }), 30 * 60_000);
   const result = await answer;
+  clearTimeout(timer);
   setTimeout(() => server.stop(), 1000);
   if ("error" in result) throw result.error;
   const app = await fetch(`https://api.github.com/app-manifests/${result.code}/conversions`, { method: "POST", headers: { Accept: "application/vnd.github+json" } });
-  if (!app.ok) throw new TapsterError(`GitHub did not convert the App (status ${app.status})`, `Run ${copy.again} again within an hour of creating the App.`);
+  if (!app.ok) throw new TapsterError(`GitHub did not hand over the new App (status ${app.status})`, `Delete it at https://github.com/settings/apps if GitHub created it, then run ${copy.again} again.`);
   return (await app.json()) as CreatedApp;
 }

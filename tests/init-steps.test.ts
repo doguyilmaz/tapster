@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { appleGate } from "../src/action/check";
 import { macosCode } from "../src/config";
 import { cleanPath } from "../src/cli/paths";
-import { checkCertificate, initSteps, notaryArgs, privateHubError } from "../src/cli/init";
+import { checkCertificate, checkP12, doneSteps, initSteps, notaryArgs, notaryCheckError, privateHubError } from "../src/cli/init";
 import { parseConfig } from "../src/config";
 import { GitHubError, TapsterError } from "../src/errors";
 
@@ -105,4 +105,28 @@ test("init repairs a weakened hub ruleset and extra branch rules instead of leav
   expect(writes).toContain("PUT /repos/o/hub/rulesets/9");
   expect(HUB_RULESET.rules.map((r) => r.type)).toEqual(["deletion", "non_fast_forward"]);
   expect(HUB_RULESET.bypass_actors).toEqual([]);
+});
+
+test("init names as done only the parts that are complete", () => {
+  expect(doneSteps(["protect", "app-key", "files"], false)).toEqual([]);
+  expect(doneSteps(["protect", "certificate", "notary", "files"], true)).toEqual(["app"]);
+  expect(doneSteps(["protect", "files"], true)).toEqual(["app", "certificate", "notary"]);
+  expect(doneSteps(["protect", "files"], false)).toEqual(["app"]);
+});
+
+test("a failed notary check at setup speaks about the key, not about a draft", () => {
+  const denied = notaryCheckError("Error: HTTP status code: 401. Unauthenticated.");
+  expect(denied.reason).toBe("Apple rejected the notary key (HTTP 401)");
+  expect(denied.fix).toContain("Key ID");
+  const other = notaryCheckError("\nxcrun: error: unable to find utility \"notarytool\"\n");
+  expect(other.reason).toContain('notarytool could not check the key: xcrun: error: unable to find utility "notarytool"');
+  expect(`${denied.fix} ${other.fix}`).not.toContain("draft");
+});
+
+test("a .p12 must open with the password and hold the private key", () => {
+  const cert = { code: 0, stdout: "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n" };
+  const key = { code: 0, stdout: "MAC: sha1, Iteration 1\nShrouded Keybag: pbeWithSHA1And3-KeyTripleDES-CBC, Iteration 2048\n" };
+  expect(() => checkP12(cert, key)).not.toThrow();
+  expect(() => checkP12({ code: 1, stdout: "" }, { code: 1, stdout: "" })).toThrow("the .p12 could not be opened with that password");
+  expect(() => checkP12(cert, { code: 0, stdout: "MAC: sha1, Iteration 1\nPKCS7 Data\n" })).toThrow("the .p12 holds the certificate but not its private key");
 });

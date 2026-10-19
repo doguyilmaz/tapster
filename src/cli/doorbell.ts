@@ -1,7 +1,7 @@
 import { createPrivateKey } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { type HubConfig } from "../config";
 import { TapsterError } from "../errors";
@@ -14,7 +14,8 @@ import wranglerPackage from "../../templates/wrangler/package.json";
 import * as jwtText from "../doorbell/jwt.ts" with { type: "text" };
 import * as workerText from "../doorbell/worker.ts" with { type: "text" };
 import { appFromManifest, openUrl } from "./appflow";
-import { setEnvVariable } from "./gh";
+import { hubEnv, setEnvVariable } from "./gh";
+import { cleanPath, readInput } from "./paths";
 import { waitFor } from "./poll";
 import { ask } from "./prompt";
 import { removeTemp, tempDir } from "./temp";
@@ -68,6 +69,11 @@ export function workerOrigin(output: string): string | null {
   return null;
 }
 
+export function wranglerSaid(r: { stdout: string; stderr?: string }): string {
+  const lines = `${r.stdout}\n${r.stderr ?? ""}`.split("\n").map((l) => l.trim()).filter(Boolean);
+  return lines.length ? lines.slice(-2).join(" / ") : "no output";
+}
+
 export const bunEnv = (path: string) => ({ PATH: path, BUN_BE_BUN: "1" });
 
 type Vars = { variables: { name: string; value: string }[] };
@@ -83,8 +89,8 @@ const AGAIN = "Run tapster init --doorbell again; it continues with the App it a
 async function askKey(appId: string, slug: string): Promise<string> {
   console.log(`Open the doorbell App's settings, scroll to "Private keys" and click "Generate a private key":`);
   openUrl(`https://github.com/settings/apps/${slug}`);
-  const path = (await ask("Path of the downloaded .pem file: ")).replace(/^~(?=\/)/, process.env.HOME ?? "~");
-  const pem = await readFile(path, "utf8");
+  const path = cleanPath(await ask("Path of the downloaded .pem file (drag it here): "));
+  const pem = (await readInput(path, "the .pem file")).toString("utf8");
   await new GitHub(appJwt(appId, pem)).json("GET", "/app").catch(() => {
     throw new TapsterError("that key does not belong to the doorbell App", `Generate the key on https://github.com/settings/apps/${slug}.`);
   });
@@ -99,7 +105,7 @@ function findNode(): string {
   throw new TapsterError("Wrangler needs Node.js, which is not on PATH", "Install Node.js 20 or newer, then run this again.");
 }
 
-type Wrangler = { dir: string; run(args: string[], opts?: { stdin?: string; env?: Record<string, string>; interactive?: boolean }): Promise<{ code: number; stdout: string }> };
+type Wrangler = { dir: string; run(args: string[], opts?: { stdin?: string; env?: Record<string, string>; interactive?: boolean }): Promise<{ code: number; stdout: string; stderr?: string }> };
 
 async function installWrangler(): Promise<Wrangler> {
   const dir = tempDir("tapster-doorbell-");
@@ -146,7 +152,7 @@ async function deployWorker(w: Wrangler, gh: GitHub, hub: string, appId: string,
   await writeFile(join(w.dir, "wrangler.jsonc"), doorbellConfig({ APP_ID: appId, INSTALLATION_ID: String(installation), HUB: hub, HUB_ID: String(hubId), OWNER_ID: String(ownerId), INTERVAL: String(every) }));
   const outFile = join(w.dir, "out.ndjson");
   const deployed = await w.run(["deploy"], { env: { WRANGLER_OUTPUT_FILE_PATH: outFile } });
-  if (deployed.code !== 0) throw new TapsterError("Wrangler could not deploy the doorbell", `${AGAIN} Wrangler's own message is above.`);
+  if (deployed.code !== 0) throw new TapsterError(`Wrangler could not deploy the doorbell: ${wranglerSaid(deployed)}`, AGAIN);
   const origin = workerOrigin(existsSync(outFile) ? readFileSync(outFile, "utf8") : "");
   if (!origin) throw new TapsterError("the doorbell has no workers.dev address", `Create your workers.dev subdomain in the Cloudflare dashboard (Workers & Pages). ${AGAIN}`);
   const key = createPrivateKey(pem).export({ type: "pkcs8", format: "pem" }).toString();
@@ -156,7 +162,7 @@ async function deployWorker(w: Wrangler, gh: GitHub, hub: string, appId: string,
 }
 
 export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, setRepoVariable: (repo: string, name: string, value: string) => Promise<void>, every: number): Promise<void> {
-  const vars = await gh.json<Vars>("GET", `/repos/${hub}/environments/tapster/variables`);
+  const vars: Vars = { variables: (await hubEnv(gh, hub, "variables")).map((v) => ({ name: v.name, value: v.value ?? "" })) };
   const stage = doorbellStage(vars);
   if (stage === "done") {
     throw new TapsterError("the hub already has a doorbell", "Run tapster init --rotate doorbell to replace its key. To start over, delete the App and the TAPSTER_DOORBELL variables.");
