@@ -46,6 +46,7 @@ const cliPkg = z
     scoop: z.boolean().default(false),
     entitlements: z.array(z.enum(ENTITLEMENTS)).default([]),
     cask: z.object(caskFields).strict().default({}),
+    linux: z.boolean().default(false),
   })
   .strict();
 
@@ -94,6 +95,13 @@ const hub = z
   .object({
     version: z.literal(1),
     tap: z.string().regex(/^[A-Za-z0-9-]+\/[a-z0-9-]+$/),
+    linux: z
+      .object({
+        maintainer: z.string().regex(/^[A-Za-z0-9 .'-]+ <[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}>$/),
+        url: z.url({ protocol: /^https$/ }).regex(/^https:\/\/[A-Za-z0-9.-]+(\/[A-Za-z0-9._-]+)*$/).optional(),
+      })
+      .strict()
+      .optional(),
     packages: z.array(pkg),
   })
   .strict();
@@ -145,6 +153,11 @@ export function parseConfig(text: string, hubOwner: string): HubConfig {
         throw new TapsterError(`${p.name}: the ${platform} asset must be a .tar.gz`, "Pack macOS builds as tar.gz; tapster reads them itself.");
       }
     }
+  }
+  for (const p of result.data.packages) {
+    if (isApp(p) || !p.linux) continue;
+    if (!Object.keys(p.assets).some((k) => k.startsWith("linux-"))) throw new TapsterError(`${p.name}: linux needs a Linux asset`, "Map linux-amd64 or linux-arm64, or remove linux: true.");
+    if (!result.data.linux) throw new TapsterError(`${p.name} ships Linux packages, but tapster.yml names no linux.maintainer`, 'Add linux: { maintainer: "Name <address>" } at the top of tapster.yml.');
   }
   const apps = result.data.packages.filter(isApp);
   const overlaps = (x: string, y: string) => {
@@ -209,6 +222,11 @@ export function compareSemver(a: Semver, b: Semver): number {
 }
 
 export const versionOf = (tag: string) => tag.slice(1);
+
+export function linuxUrl(config: HubConfig, hub: string): string {
+  const [owner, repo] = hub.split("/") as [string, string];
+  return config.linux?.url ?? `https://${owner.toLowerCase()}.github.io/${repo}`;
+}
 
 export function assetName(p: PackageConfig, platform: Platform, version: string): string | undefined {
   return p.assets[platform]?.replaceAll("{version}", version);
