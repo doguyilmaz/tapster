@@ -2,6 +2,8 @@ name: ci
 on:
   push: { branches: [main] }
   pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
 permissions: {}
 jobs:
   test:
@@ -18,7 +20,7 @@ jobs:
       - name: dist/ matches the source
         run: bun run build:action && git diff --exit-code dist/
   protection:
-    if: ${{ github.event_name == 'push' }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     steps:
@@ -43,6 +45,8 @@ jobs:
         with: { bun-version: 1.4.3 }
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun test
+      - name: Homebrew accepts the casks tapster renders
+        run: bun tests/brew/audit.ts
   linux:
     runs-on: ubuntu-24.04
     permissions: { contents: read }

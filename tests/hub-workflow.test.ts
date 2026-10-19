@@ -50,3 +50,17 @@ test("check gets a read-only token to see who changed the hub", () => {
   expect(check.permissions).toEqual({ contents: "read" });
   expect(check.steps.find((s) => s.id === "check")!.env!.GITHUB_TOKEN).toBe("${{ github.token }}");
 });
+
+test("rendering runs tapster's code only, on ubuntu", () => {
+  const render = flow.jobs.render as unknown as { "runs-on": string; permissions: Record<string, string> };
+  expect(render["runs-on"]).toBe("ubuntu-24.04");
+  expect(render.permissions).toEqual({ contents: "write" });
+  expect(readFileSync("src/action/render.ts", "utf8")).not.toMatch(/"brew"|runPath|\/bin\/brew/);
+});
+
+test("tapster's CI audits the casks the renderers produce, on every change and weekly", () => {
+  const ci = parse(readFileSync(".github/workflows/ci.yml", "utf8")) as { on: { schedule?: { cron: string }[] }; jobs: Record<string, { steps: { run?: string }[] }> };
+  expect(ci.on.schedule?.length).toBe(1);
+  expect(ci.jobs.macos!.steps.some((s) => s.run === "bun tests/brew/audit.ts")).toBe(true);
+  expect(readFileSync("tests/brew/audit.ts", "utf8")).toContain('"brew", "trust"');
+});

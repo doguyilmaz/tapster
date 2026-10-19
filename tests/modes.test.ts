@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appCaskInput, auditArgs, auditEach, buildDownloads, renderNeeded } from "../src/action/render";
+import { appCaskInput, buildDownloads, renderNeeded } from "../src/action/render";
 import { signMode } from "../src/action/sign";
 import { type AppPackage, type CliPackage, parseConfig } from "../src/config";
 import { serializeState, upsert, emptyState } from "../src/state";
@@ -58,26 +58,6 @@ test("private packages never make render run", async () => {
   const ctx = { hub: "o/homebrew-tap", owner: "o", config: cfg, invalid: [], workspace: ws };
   expect(await renderNeeded(ctx)).toBe(true);
   expect(await renderNeeded(ctx, new Set(["aims"]))).toBe(false);
-});
-
-test("one cask failing its audit leaves the others", async () => {
-  const seen: string[] = [];
-  const failed = await auditEach(["a", "b", "c"], async (name) => {
-    seen.push(name);
-    if (name === "b") throw new Error("style");
-  });
-  expect(seen).toEqual(["a", "b", "c"]);
-  expect([...failed.keys()]).toEqual(["b"]);
-});
-
-test("each cask is audited for the systems it ships for", () => {
-  expect(auditArgs("o/tapster-audit", "a", true, ["darwin-arm64", "darwin-amd64", "linux-amd64"])).toEqual([
-    ["audit", "--cask", "--online", "--arch", "arm", "o/tapster-audit/a"],
-    ["audit", "--cask", "--online", "--arch", "intel", "o/tapster-audit/a"],
-    ["audit", "--cask", "--online", "--os", "linux", "--arch", "intel", "o/tapster-audit/a"],
-  ]);
-  expect(auditArgs("o/tapster-audit", "b", false, ["linux-arm64"])).toEqual([["audit", "--cask", "--os", "linux", "--arch", "arm", "o/tapster-audit/b"]]);
-  expect(auditArgs("o/tapster-audit", "c", false, ["darwin-universal", "windows-amd64"])).toEqual([["audit", "--cask", "o/tapster-audit/c"]]);
 });
 
 test("an app cask takes the DMG digest from the published checksums and the floor from the state", () => {

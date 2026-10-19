@@ -105,7 +105,7 @@ jobs:
   render:
     needs: [check, sign]
     if: ${{ !cancelled() && needs.check.outputs.render == 'true' }}
-    runs-on: macos-15
+    runs-on: ubuntu-24.04
     permissions: { contents: write }
     steps:
       - uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
