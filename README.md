@@ -71,13 +71,16 @@ bunx @doguyilmaz/tapster doctor
 - **One place for credentials.** The Apple certificate, the notary key and the App key live only in the hub's
   `tapster` environment. Only workflows on `main` can open it. Projects hold nothing.
 - **Nothing printed.** tapster reads each credential once, registers it and every derived value with the runner's
-  masking and removes it from the environment. Its CI proves on every change that no credential appears in any log
-  (in plain text or encoded) on the success path and on every failure path.
+  masking and removes it from the environment. On every change its CI runs each stage with known fake credentials:
+  the success path, GitHub errors (404, 422, 5xx and dropped connections), a broken certificate and a rejected
+  signature. It searches every log line for the fake values, in plain text and encoded. A second run uses them as real
+  secrets and fails if a tapster step prints anything the runner had to mask.
 - **Short-lived access.** The hub reaches each project with an App token limited to that repository, revoked when the
   work is done.
 - **Only checked builds are signed.** Every file must match `checksums.txt`. Public projects must attest their
   archives in their own release workflow. The hub verifies that before signing.
-- **Rendering holds no secret.** The job that runs Homebrew to check the casks has no credential at all.
+- **Rendering holds no credential.** The job that runs Homebrew to check the casks has only the hub's own workflow
+  token.
 
 ## Limits
 
