@@ -38,7 +38,10 @@ test("entitlements come only from config; the build cannot add one", () => {
   const p = { code: { "Contents/MacOS/Helper": { entitlements: { "com.apple.application-identifier": "{team}.com.o.B.Helper" } } } } as never;
   expect(entitlementsFor("Contents/MacOS/Helper", {}, p, "TEAM000001").entitlements).toEqual({ "com.apple.application-identifier": "TEAM000001.com.o.B.Helper" });
   expect(entitlementsFor("Contents/MacOS/Helper", { "com.apple.application-identifier": "TEAM000001.com.o.B.Helper" }, p, "TEAM000001").dropped).toEqual([]);
-  expect(() => entitlementsFor("Contents/MacOS/Helper", { "com.apple.application-identifier": "OTHER.x" }, p, "TEAM000001")).toThrow(TapsterError);
-  expect(() => entitlementsFor("Contents/MacOS/App", { "com.apple.security.network.client": true }, p, "TEAM000001")).toThrow(TapsterError);
+  expect(entitlementsFor("Contents/MacOS/Helper", { "com.apple.application-identifier": "OTHER.x" }, p, "TEAM000001")).toEqual({
+    entitlements: { "com.apple.application-identifier": "TEAM000001.com.o.B.Helper" },
+    dropped: ["com.apple.application-identifier"],
+  });
+  expect(entitlementsFor("Contents/MacOS/App", { "com.apple.security.network.client": true }, p, "TEAM000001")).toEqual({ entitlements: {}, dropped: ["com.apple.security.network.client"] });
   expect(entitlementsFor("Contents/MacOS/App", { "com.apple.security.get-task-allow": true }, p, "TEAM000001")).toEqual({ entitlements: {}, dropped: ["com.apple.security.get-task-allow"] });
 });

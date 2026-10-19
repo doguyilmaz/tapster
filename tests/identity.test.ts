@@ -32,3 +32,14 @@ test.each([
 ])("refuses %s", (_, item) => {
   expect(() => identifierFor(item, pkg)).toThrow(TapsterError);
 });
+
+test("a configured identifier for a bundle must match its CFBundleIdentifier", () => {
+  const withBundle = { ...pkg, code: { ...pkg.code, "Contents/PlugIns/X.appex": { identifier: "com.o.B.X" } } } as AppPackage;
+  expect(identifierFor({ path: "Contents/PlugIns/X.appex", kind: "bundle", bundleId: "com.o.B.X" }, withBundle)).toBe("com.o.B.X");
+  expect(() => identifierFor({ path: "Contents/PlugIns/X.appex", kind: "bundle", bundleId: "com.o.B.Y" }, withBundle)).toThrow(TapsterError);
+});
+
+test("Sparkle identifiers are allowed only inside the app's own Sparkle framework", () => {
+  expect(() => identifierFor({ path: "Contents/Resources/Sparkle.framework/Versions/B/XPCServices/X.xpc", kind: "bundle", bundleId: "org.sparkle-project.X" }, pkg)).toThrow(TapsterError);
+  expect(identifierFor({ path: "Contents/Frameworks/Sparkle.framework/Versions/B", kind: "bundle", bundleId: "org.sparkle-project.Sparkle" }, pkg)).toBe("org.sparkle-project.Sparkle");
+});

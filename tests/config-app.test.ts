@@ -80,3 +80,31 @@ test("the app itself can take entitlements under code '.'", () => {
   if (!isApp(p)) throw new Error("not an app");
   expect(p.code["."]!.entitlements).toEqual({ "com.apple.security.network.client": true });
 });
+
+test("bundle ids overlap without regard to case, and app commands are named once", () => {
+  const second = `${app}  - name: other
+    repo: o/other
+    kind: app
+    app: Other.app
+    bundle_id: COM.O.HAFIFPIX.sub
+    assets:
+      darwin-arm64: "Other-{version}.app.tar.gz"
+    dmg: { name: "Other-{version}.dmg" }
+`;
+  expect(() => parseConfig(second, "o")).toThrow(/overlapping bundle ids/);
+  const cli = `${app}  - name: tool
+    repo: o/tool
+    binaries: [hafif]
+    assets:
+      linux-amd64: "t.tar.gz"
+`;
+  expect(() => parseConfig(cli, "o")).toThrow(/both ship a binary named hafif/);
+});
+
+test("a rotation names the next key and its public half together", () => {
+  const rot = app.replace(`sparkle: { key: shared, public_key: "${"A".repeat(43)}=" }`, `sparkle: { key: shared, public_key: "${"A".repeat(43)}=", next_key: newer, next_public_key: "${"B".repeat(43)}=" }`);
+  const p = parseConfig(rot, "o").packages[0]!;
+  if (!isApp(p)) throw new Error("not an app");
+  expect(p.sparkle!.next_key).toBe("newer");
+  expect(() => parseConfig(rot.replace(", next_key: newer", ""), "o")).toThrow(/next_key and next_public_key/);
+});

@@ -73,6 +73,8 @@ const appPkg = z
         key: z.string().regex(/^[a-z0-9]+$/),
         feed: z.string().regex(/^[A-Za-z0-9._-]+\.xml$/).default("appcast.xml"),
         public_key: z.string().regex(/^[A-Za-z0-9+/]{43}=$/),
+        next_key: z.string().regex(/^[a-z0-9]+$/).optional(),
+        next_public_key: z.string().regex(/^[A-Za-z0-9+/]{43}=$/).optional(),
       })
       .strict()
       .optional(),
@@ -122,7 +124,7 @@ export function parseConfig(text: string, hubOwner: string): HubConfig {
     if (names.has(p.name)) throw new TapsterError(`package ${p.name} is listed twice`, "Keep one entry per package.");
     names.add(p.name);
     if (isApp(p)) checkApp(p);
-    for (const b of isApp(p) ? [] : p.binaries) {
+    for (const b of isApp(p) ? (p.cask.binaries ?? []) : p.binaries) {
       const id = b.split("/").pop()!;
       const owner = binaryOwners.get(id);
       if (owner && owner !== p.name) throw new TapsterError(`${p.name} and ${owner} both ship a binary named ${id}`, "Signed tools are identified by name, so each name may belong to one package.");
@@ -145,13 +147,17 @@ export function parseConfig(text: string, hubOwner: string): HubConfig {
     }
   }
   const apps = result.data.packages.filter(isApp);
-  const overlaps = (a: string, b: string) => a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+  const overlaps = (x: string, y: string) => {
+    const a = x.toLowerCase();
+    const b = y.toLowerCase();
+    return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+  };
   for (const [i, a] of apps.entries()) {
     for (const b of apps.slice(i + 1)) {
       if (overlaps(a.bundle_id, b.bundle_id)) throw new TapsterError(`${a.name} and ${b.name} have overlapping bundle ids`, "Each app needs its own bundle id, not one inside another.");
     }
     for (const id of binaryOwners.keys()) {
-      if (overlaps(id, a.bundle_id) && (id === a.bundle_id || id.startsWith(`${a.bundle_id}.`))) {
+      if (id.toLowerCase() === a.bundle_id.toLowerCase() || id.toLowerCase().startsWith(`${a.bundle_id.toLowerCase()}.`)) {
         throw new TapsterError(`the binary ${id} would carry ${a.name}'s identity`, "Rename the binary.");
       }
     }
@@ -165,6 +171,9 @@ function checkApp(p: AppPackage): void {
     throw new TapsterError(`${p.name}: an app needs exactly one darwin asset and nothing else`, "Map one of darwin-arm64, darwin-amd64 or darwin-universal to the app archive.");
   }
   p.dmg.volume ??= p.app.replace(/\.app$/, "").slice(0, 27);
+  if (p.sparkle && (p.sparkle.next_key === undefined) !== (p.sparkle.next_public_key === undefined)) {
+    throw new TapsterError(`${p.name}: a rotation needs both sparkle.next_key and next_public_key`, "Set both, or neither.");
+  }
   for (const [path, c] of Object.entries(p.code)) {
     if (c.identifier && !c.identifier.startsWith(`${p.bundle_id}.`)) {
       throw new TapsterError(`${p.name}: the identifier for ${path} is outside ${p.bundle_id}`, `Use an identifier that starts with ${p.bundle_id}.`);

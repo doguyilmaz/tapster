@@ -34,7 +34,7 @@ test.skipIf(process.platform !== "darwin")("an app built and packed like a proje
   const out = mkdtempSync(join(tmpdir(), "signed-"));
   await writeTree(readTarGz(Buffer.from(await Bun.file(gz).arrayBuffer())), out);
   const app = join(out, "T.app");
-  const result = await signApp({ path: "", identity: "-", teamId: "", close: async () => {} }, app, pkg, "TEAM000001", false);
+  const result = await signApp({ path: "", identity: "-", teamId: "", close: async () => {} }, app, pkg, "TEAM000001");
   expect(Bun.spawnSync(["/usr/bin/codesign", "--verify", "--strict", "--deep", app]).exitCode).toBe(0);
   expect(identifier(app)).toBe("com.t.T");
   expect(identifier(join(app, "Contents/MacOS/Helper"))).toBe("com.t.T.Helper");
@@ -44,3 +44,15 @@ test.skipIf(process.platform !== "darwin")("an app built and packed like a proje
   expect(identifier(join(app, "Contents/Frameworks/F.framework/Versions/A/XPCServices/X.xpc"))).toBe("com.t.T.X");
   expect(result.identifiers.at(-1)).toBe("com.t.T");
 }, 60_000);
+
+test("a code path that matches nothing, or two items with one identifier, stop the signing", async () => {
+  const { checkPlan } = await import("../src/appsign");
+  const items = [
+    { path: "Contents/MacOS/Helper", kind: "file" as const, bundleId: null },
+    { path: ".", kind: "bundle" as const, bundleId: "com.t.T" },
+  ];
+  expect(() => checkPlan(items, { ...pkg, code: { "Contents/MacOS/Helpr": { identifier: "com.t.T.Helper" } } } as AppPackage)).toThrow(/Contents\/MacOS\/Helpr/);
+  const twice = [{ path: "Contents/MacOS/PowerHelper", kind: "file" as const, bundleId: null }, { path: "Contents/Helpers/PowerHelper", kind: "file" as const, bundleId: null }, items[1]!];
+  expect(() => checkPlan(twice, { ...pkg, code: {} } as AppPackage)).toThrow(/com.t.T.PowerHelper/);
+  expect(checkPlan(items, pkg)).toEqual(["com.t.T.Helper", "com.t.T"]);
+});

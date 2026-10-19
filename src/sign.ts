@@ -19,12 +19,12 @@ ${body}
 `;
 }
 
-export function codesignArgs(kc: Keychain, file: string, entitlements: string | null, identifier: string, timestamp = true): string[] {
+export function codesignArgs(kc: Keychain, file: string, entitlements: string | null, identifier: string): string[] {
   return [
     "--force",
     "--options",
     "runtime",
-    timestamp ? "--timestamp" : "--timestamp=none",
+    "--timestamp",
     ...(kc.path ? ["--keychain", kc.path] : []),
     "--sign",
     kc.identity,

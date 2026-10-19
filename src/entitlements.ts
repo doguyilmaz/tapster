@@ -64,9 +64,7 @@ export function entitlementsFor(path: string, found: Entitlements, pkg: AppPacka
       dropped.push(key);
       continue;
     }
-    if (!(key in configured) || JSON.stringify(configured[key]) !== JSON.stringify(value)) {
-      throw refuse(`${path} asks for the entitlement ${key}`, `If the app needs it, set it with the same value under code: ${path} in tapster.yml.`);
-    }
+    if (!(key in configured) || JSON.stringify(configured[key]) !== JSON.stringify(value)) dropped.push(key);
   }
   return { entitlements: configured, dropped };
 }
