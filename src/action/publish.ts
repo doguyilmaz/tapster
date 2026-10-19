@@ -10,7 +10,7 @@ import { GitHub } from "../github";
 import { commitToHub, readHubFile } from "../hubcommit";
 import { readSecret, requireVar } from "../mask";
 import { type Outgoing, assertRecorded, makeLatest, resumeSwap, stageAndSwap, waitDownloadable } from "../publish";
-import { failure, record, warn } from "../report";
+import { failure, info, record, warn } from "../report";
 import { STATE_PATH, type State, type StateEntry, parseState, recordedChecksums, serializeState, upsert } from "../state";
 import { type InstallationToken, installationToken } from "../token";
 import { loadManifest, workdir } from "../workdir";
@@ -36,6 +36,12 @@ function recordedApp(state: State, pkg: string, releaseId: number): StateEntry["
   const app = state.packages[pkg]?.find((e) => e.releaseId === releaseId)?.app;
   if (!app) throw new TapsterError("the state has no app facts for this release", "Delete the draft and release again.");
   return app;
+}
+
+export function attestDecision(signed: boolean, hubPrivate: boolean): { attest: boolean; note: string | null } {
+  if (!signed) return { attest: false, note: null };
+  if (hubPrivate) return { attest: false, note: "the hub is a private repository, where GitHub offers no attestations; the published files are not attested" };
+  return { attest: true, note: null };
 }
 
 export async function publishMode(ctx: Context): Promise<void> {
@@ -106,6 +112,8 @@ export async function publishMode(ctx: Context): Promise<void> {
       await tok?.revoke();
     }
   }
-  core.setOutput("attest", String(attest));
+  const decision = attestDecision(attest, attest && (await hubGh.getRepo(ctx.hub)).private);
+  if (decision.note) info(`hub: ${decision.note}`);
+  core.setOutput("attest", String(decision.attest));
   core.setOutput("attest-path", `${out}/*/*`);
 }

@@ -49,7 +49,8 @@ jobs:
   expect(Object.keys(steps[0].env)).toEqual(["GITHUB_TOKEN"]);
   expect(steps[1].uses).toBe(`actions/attest-build-provenance@${pins["actions/attest-build-provenance"].sha}`);
   expect(steps[1].with).toEqual({ "subject-checksums": "dist/checksums.txt" });
-  expect(steps[1]["continue-on-error"]).toBe("${{ github.event.repository.private }}");
+  expect(steps[1].if).toBe("${{ !github.event.repository.private }}");
+  expect(steps[1]["continue-on-error"]).toBeUndefined();
   expect(text).toContain(`actions/attest-build-provenance@${pins["actions/attest-build-provenance"].sha} # v3`);
   expect(y.jobs.release.permissions).toEqual({ contents: "write", "id-token": "write", attestations: "write" });
 });
@@ -63,7 +64,8 @@ test("bun workflow builds every target and drafts the release", () => {
   expect(flow).not.toContain("__");
   expect(flow).not.toContain("secrets.");
   expect(flow).toContain("subject-checksums: dist/checksums.txt");
-  expect(flow).toContain("continue-on-error: ${{ github.event.repository.private }}");
+  expect(flow).toContain("if: ${{ !github.event.repository.private }}");
+  expect(flow).not.toContain("continue-on-error");
   expect(flow).toContain('tar -C "$t" -czf "konvoy_${v}_${p/-/_}.tar.gz" konvoy');
 });
 
@@ -138,6 +140,9 @@ test("the app template builds without write access and only the release job writ
   expect(release).toContain('cp "scripts/legacy-appcast.xml" "dist/appcast.xml"');
   expect(release).toContain(`actions/attest-build-provenance@${pins["actions/attest-build-provenance"].sha}`);
   expect(release).not.toContain("make app");
+  const attest = flow.jobs.release!.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@")) as { if?: string; "continue-on-error"?: string };
+  expect(attest.if).toBe("${{ !github.event.repository.private }}");
+  expect(attest["continue-on-error"]).toBeUndefined();
 });
 
 test("add finds an XcodeGen app with Sparkle and prints its hub entry", () => {

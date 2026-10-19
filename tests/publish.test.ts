@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { attestDecision } from "../src/action/publish";
 import { assertRecorded, makeLatest, resumeSwap, sameAssets, stageAndSwap, waitDownloadable } from "../src/publish";
 import type { Asset, GitHub, Release } from "../src/github";
 import { TapsterError } from "../src/errors";
@@ -174,4 +175,11 @@ test("an unexpected unlisted asset stops the resume without deleting it", async 
   const f = fakeGh(extra, signedSums);
   await expect(resumeSwap(f.gh, "o/r", extra, sha256(Buffer.from(signedSums)))).rejects.toBeInstanceOf(TapsterError);
   expect(f.log).toEqual([]);
+});
+
+test("a private hub publishes without asking for attestations and says why", () => {
+  expect(attestDecision(true, false)).toEqual({ attest: true, note: null });
+  expect(attestDecision(false, false)).toEqual({ attest: false, note: null });
+  expect(attestDecision(true, true).attest).toBe(false);
+  expect(attestDecision(true, true).note).toContain("private");
 });

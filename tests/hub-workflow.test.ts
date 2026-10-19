@@ -18,7 +18,9 @@ test("one failed item never stops the steps and jobs after it", () => {
   }
 });
 
-test("the hub's attestation does not fail a private hub, where GitHub offers none", () => {
+test("the hub attests only what publish asks for, so a private hub skips the step instead of failing it", () => {
   const attest = flow.jobs.sign!.steps.find((s) => (s.uses ?? "").startsWith("actions/attest-build-provenance@"))!;
-  expect((attest as { "continue-on-error"?: string })["continue-on-error"]).toBe("${{ github.event.repository.private }}");
+  expect(attest.if).toContain("steps.publish.outputs.attest == 'true'");
+  expect((attest as { "continue-on-error"?: string })["continue-on-error"]).toBeUndefined();
+  expect(readFileSync(".github/workflows/release.yml", "utf8")).not.toContain("continue-on-error");
 });
