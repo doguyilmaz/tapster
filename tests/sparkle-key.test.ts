@@ -62,3 +62,11 @@ test("derived forms of the key are masked", () => {
   decodeSparkleKey(seed.toString("base64"));
   expect(scrub(`x ${seed.toString("hex")} y`)).toBe("x *** y");
 });
+
+test("both key formats sign exactly as Sparkle's sign_update 2.10.0 does", () => {
+  const blob = Buffer.from("pretend this is a stapled DMG\n".repeat(1000));
+  const sparkle = "ScOfTZqLCFI5Eshwz+oJ+oMm2YjeppNddVpDs2+JL2O73qig0EyHz0YruKKqCfSV7A5x7dsWccJSIloosaH2Ag==";
+  const v = vectors[0]!;
+  expect(decodeSparkleKey(Buffer.from(v.seed, "hex").toString("base64")).sign(blob).toString("base64")).toBe(sparkle);
+  expect(decodeSparkleKey(Buffer.concat([expand(v.seed), Buffer.from(v.pub, "hex")]).toString("base64")).sign(blob).toString("base64")).toBe(sparkle);
+});

@@ -49,3 +49,9 @@ test("a signed feed passes Sparkle's extraction rule and verifies", () => {
 test("dates are RFC 822 in UTC", () => {
   expect(rfc822(new Date("2026-10-19T00:05:09Z"))).toBe("Mon, 19 Oct 2026 00:05:09 +0000");
 });
+
+test("the signed feed is byte for byte what Sparkle's sign_update writes", () => {
+  const key = decodeSparkleKey(Buffer.from("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60", "hex").toString("base64"));
+  const golden = readFileSync(new URL("./golden/hafifpix.appcast.signed.xml", import.meta.url), "utf8");
+  expect(signFeed(renderAppcast(input), (b) => key.sign(b))).toBe(golden);
+});
