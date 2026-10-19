@@ -2,6 +2,7 @@ import { isSeq, parse, parseDocument } from "yaml";
 import { NAME, PLATFORMS, type Platform, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
+import { descProblems } from "../render";
 
 export function hubName(text: string): string {
   if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(text)) throw new TapsterError(`${text} is not a repository name`, "Name the hub as owner/repo, for example you/homebrew-tap.");
@@ -100,6 +101,13 @@ export function withEntry(hubYaml: string, entry: string, name: string): string 
   packages.flow = false;
   packages.items.push(item.items[0] as never);
   return doc.toString({ flowCollectionPadding: false });
+}
+
+export function suggestDescription(desc: string | null, name: string): string | null {
+  if (!desc || descProblems(desc, name).length === 0) return null;
+  let s = desc.trim().replace(/^(?:the|an?)\s+/i, "").replace(/command ?line/gi, "command-line").replace(/\.$/, "");
+  s = s.charAt(0).toUpperCase() + s.slice(1);
+  return descProblems(s, name).length === 0 ? s : null;
 }
 
 export const installLink = (slug: string, ownerId: number, repoId: number) =>

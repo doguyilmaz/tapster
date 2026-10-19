@@ -133,3 +133,12 @@ linux: { maintainer: "O <o@x.yz>" }
   const flow = withEntry("version: 1\ntap: o/tap\npackages: []\nlinux: { maintainer: \"O <o@x.yz>\" }\n", bunEntry("tool", "o/tool", "tool"), "tool");
   expect(valid(flow).packages.map((p) => p.name)).toEqual(["tool"]);
 });
+
+test("a repository description Homebrew would reject becomes a suggested one in the entry", async () => {
+  const { suggestDescription } = await import("../src/cli/hubpr");
+  expect(suggestDescription("tapster end-to-end fixture (Go)", "tapster-e2e-go")).toBe("Tapster end-to-end fixture (Go)");
+  expect(suggestDescription("A command line tool for pictures.", "pix")).toBe("Command-line tool for pictures");
+  expect(suggestDescription("Fast tool", "pix")).toBeNull();
+  expect(suggestDescription("pix does things", "pix")).toBeNull();
+  expect(suggestDescription(null, "pix")).toBeNull();
+});

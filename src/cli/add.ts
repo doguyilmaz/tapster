@@ -15,7 +15,8 @@ import appTemplate from "../../templates/project/app-release.yml" with { type: "
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
-import { autoTagSteps, binName, bunEntry, goEntry, hubName, installOnProject, proposeEntry } from "./hubpr";
+import { autoTagSteps, binName, bunEntry, goEntry, hubName, installOnProject, proposeEntry, suggestDescription } from "./hubpr";
+import { descProblems } from "../render";
 import { ask } from "./prompt";
 
 type Pins = typeof pinsJson;
@@ -384,6 +385,14 @@ export async function add(args: string[]): Promise<void> {
   let { entry, reason } = prepared;
   if (prepared.kind === "go") ({ entry, reason } = goEntry(name, repo, prepared.goreleaser, await latestDraftOrRelease(gh, repo)));
   if (entry && opts.dependabot) entry = `${entry}\n    protection: dependabot`;
+  const repoDesc = (await gh.getRepo(repo)).description;
+  if (entry && descProblems(repoDesc ?? name, name).length) {
+    const better = suggestDescription(repoDesc, name);
+    if (better) {
+      entry = `${entry}\n    description: ${JSON.stringify(better)}`;
+      console.log(`- Homebrew would reject the repository's description (${descProblems(repoDesc ?? name, name).join(" and ")}); the entry says "${better}" instead`);
+    } else console.log(`- Homebrew would reject the repository's description (${descProblems(repoDesc ?? name, name).join(" and ")}); add description: to the hub entry before the first release`);
+  }
   if (entry) {
     try {
       console.log(`- proposed the hub entry in ${await proposeEntry(gh, hub, name, repo, entry)}; merge it to start publishing`);
