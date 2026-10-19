@@ -93,3 +93,29 @@ test("the automatic tag step pushes with the deploy key from the release environ
   expect(text).toContain('ssh-key: "${{ secrets.TAPSTER_TAG_KEY }}"');
   expect(text).toContain("git push origin");
 });
+
+test("add puts the project into the App's installation when the hub knows it, and otherwise links to it", async () => {
+  const { installOnProject } = await import("../src/cli/hubpr");
+  const calls: string[] = [];
+  const fake = (vars: { name: string; value: string }[], put: number) =>
+    ({
+      getRepo: async () => ({ id: 22 }),
+      json: async (method: string, path: string) => {
+        calls.push(`${method} ${path}`);
+        if (path.endsWith("/environments/tapster/variables")) return { variables: vars };
+        if (path === "/users/o") return { id: 11 };
+        if (method === "PUT") {
+          if (put !== 204) throw new (await import("../src/errors")).GitHubError("no", "x", put);
+          return undefined;
+        }
+        throw new Error(path);
+      },
+    }) as never;
+  const slug = { name: "TAPSTER_APP_SLUG", value: "tapster-o-tap" };
+  expect(await installOnProject(fake([slug, { name: "TAPSTER_APP_INSTALLATION_ID", value: "77" }], 204), "o/hub", "o/p")).toBe("- the hub's App can reach o/p");
+  expect(calls).toContain("PUT /user/installations/77/repositories/22");
+  const link = await installOnProject(fake([slug], 204), "o/hub", "o/p");
+  expect(link).toContain("make sure the hub's App is installed on o/p");
+  expect(link).toContain("suggested_target_id=11&repository_ids[]=22");
+  expect(await installOnProject(fake([slug, { name: "TAPSTER_APP_INSTALLATION_ID", value: "77" }], 403), "o/hub", "o/p")).toContain("make sure");
+});

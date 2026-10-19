@@ -30,9 +30,10 @@ test("init does only the steps that are not done yet", () => {
   expect(initSteps(none, false)).toEqual(["protect", "app", "files"]);
   const app = { vars: ["TAPSTER_APP_ID", "TAPSTER_APP_SLUG"], secrets: ["TAPSTER_APP_PRIVATE_KEY"] };
   expect(initSteps(app, true)).toEqual(["protect", "certificate", "notary", "files"]);
+  expect(initSteps({ vars: ["TAPSTER_APP_ID", "TAPSTER_APP_SLUG"], secrets: [] }, false)).toEqual(["protect", "app-key", "files"]);
   const all = { vars: [...app.vars, "TAPSTER_TEAM_ID"], secrets: [...app.secrets, "MACOS_SIGN_P12", "MACOS_SIGN_PASSWORD", "MACOS_NOTARY_KEY", "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER_ID"] };
   expect(initSteps(all, true)).toEqual(["protect", "files"]);
-  expect(initSteps({ vars: ["TAPSTER_APP_ID"], secrets: [] }, true)).toContain("app");
+  expect(initSteps({ vars: ["TAPSTER_APP_ID"], secrets: ["TAPSTER_APP_PRIVATE_KEY"] }, true)).toContain("app");
 });
 
 test("the notary key is checked by file, never on the command line", () => {

@@ -60,7 +60,8 @@ export function initSteps(have: { vars: string[]; secrets: string[] }, mac: bool
   const v = new Set(have.vars);
   const s = new Set(have.secrets);
   const steps = ["protect"];
-  if (!(v.has("TAPSTER_APP_ID") && s.has("TAPSTER_APP_PRIVATE_KEY"))) steps.push("app");
+  if (!(v.has("TAPSTER_APP_ID") && v.has("TAPSTER_APP_SLUG"))) steps.push("app");
+  else if (!s.has("TAPSTER_APP_PRIVATE_KEY")) steps.push("app-key");
   if (mac && !(v.has("TAPSTER_TEAM_ID") && s.has("MACOS_SIGN_P12") && s.has("MACOS_SIGN_PASSWORD"))) steps.push("certificate");
   if (mac && !["MACOS_NOTARY_KEY", "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER_ID"].every((n) => s.has(n))) steps.push("notary");
   steps.push("files");
@@ -119,15 +120,31 @@ export function fillWorkflow(template: string, pins: Pins, tapster: { sha: strin
     .replaceAll("__TAPSTER_TAG__", tapster.tag);
 }
 
+async function rememberInstallation(appId: string, pem: string, owner: string, hub: string, slug: string): Promise<void> {
+  const app = new GitHub(appJwt(appId, pem));
+  for (let i = 0; i < 5; i++) {
+    const found = await app.json<{ id: number }>("GET", `/users/${owner}/installation`).catch(() => null);
+    if (found) {
+      await setEnvVariable(hub, "TAPSTER_APP_INSTALLATION_ID", String(found.id));
+      const onHub = await app.json("GET", `/repos/${hub}/installation`).then(() => true, () => false);
+      if (onHub) console.log(`The App is installed on ${hub}; remove it there at https://github.com/settings/installations/${found.id}, or the hub refuses to run.`);
+      return;
+    }
+    await ask(`Install the App (choose "Only select repositories" and pick your projects, never ${hub}), then press Enter. `);
+  }
+  console.log(`The App is not installed yet. Install it at https://github.com/apps/${slug}/installations/new, then run tapster init --rotate app to finish.`);
+}
+
 async function createApp(owner: string, hub: string): Promise<void> {
   console.log("GitHub creates a private App for your hub; it lets the hub publish your projects' releases. Confirm it on the page that opens.");
   const created = await appFromManifest((redirect) => appManifest(owner, hub, redirect), "your tapster App");
-  await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", created.pem);
   await setEnvVariable(hub, "TAPSTER_APP_ID", String(created.id));
   await setEnvVariable(hub, "TAPSTER_APP_SLUG", created.slug);
+  await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", created.pem);
   console.log("Stored the App and its key in the hub. Now install it: choose \"Only select repositories\" and pick the projects tapster should publish.");
   console.log(`Never pick ${hub}: the App can write to every repository it is installed on, and the hub holds your signing keys. tapster add can also install it on a project later.`);
   openUrl(`https://github.com/apps/${created.slug}/installations/new`);
+  await rememberInstallation(String(created.id), created.pem, owner, hub, created.slug);
 }
 
 export function appKeyFingerprint(pem: string): string {
@@ -157,6 +174,7 @@ async function rotateAppKey(gh: GitHub, hub: string): Promise<void> {
   });
   await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", pem);
   console.log(`Stored the new key (${fingerprint}).`);
+  await rememberInstallation(appId, pem, hub.split("/")[0]!, hub, slug);
   console.log(`Now delete every other key on that page so the old one stops working. Then delete ${path}.`);
 }
 
@@ -517,6 +535,7 @@ export async function init(argv: string[]): Promise<void> {
   for (const step of steps) {
     if (step === "protect") await protectHub(gh, hub, have.private);
     if (step === "app") await createApp(hub.split("/")[0]!, hub);
+    if (step === "app-key") await rotateAppKey(gh, hub);
     if (step === "certificate") await storeCertificate(hub);
     if (step === "notary") await storeNotary(hub);
     if (step === "files") await writeFiles(gh, dir, hub, flag, { every, isPrivate: have.private });
