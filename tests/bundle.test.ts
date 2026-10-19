@@ -6,8 +6,8 @@ import { findCode } from "../src/bundle";
 import { TapsterError } from "../src/errors";
 
 const MACHO = Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01]);
-const plist = (exe?: string) =>
-  `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>x</string>${exe ? `<key>CFBundleExecutable</key><string>${exe}</string>` : ""}</dict></plist>`;
+const plist = (exe?: string, extra = "") =>
+  `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>x</string>${exe ? `<key>CFBundleExecutable</key><string>${exe}</string>` : ""}${extra}</dict></plist>`;
 
 function tree(files: Record<string, string | Buffer>, links: Record<string, string> = {}): string {
   const root = mkdtempSync(join(tmpdir(), "bundle-"));
@@ -86,4 +86,31 @@ test("a main executable that is not Mach-O is rejected", () => {
 test("CFBundleExecutable cannot leave the bundle", () => {
   const app = tree({ "App.app/Contents/Info.plist": plist("../../x"), "App.app/Contents/MacOS/App": MACHO });
   expect(() => findCode(app)).toThrow(TapsterError);
+});
+test("a bundle is found by its structure, whatever its name", () => {
+  const app = tree({
+    "App.app/Contents/Info.plist": plist("App"),
+    "App.app/Contents/MacOS/App": MACHO,
+    "App.app/Contents/Library/Spotlight/X.mdimporter/Contents/Info.plist": plist("X"),
+    "App.app/Contents/Library/Spotlight/X.mdimporter/Contents/MacOS/X": MACHO,
+  });
+  expect(findCode(app).map((i) => `${i.kind} ${i.path}`)).toContain("bundle Contents/Library/Spotlight/X.mdimporter");
+});
+
+test("a provisioning profile or a nested Sparkle feed stops the app", () => {
+  const withProfile = tree({ "App.app/Contents/Info.plist": plist("App"), "App.app/Contents/MacOS/App": MACHO, "App.app/Contents/embedded.provisionprofile": "x" });
+  expect(() => findCode(withProfile)).toThrow(TapsterError);
+  const nestedFeed = tree({
+    "App.app/Contents/Info.plist": plist("App"),
+    "App.app/Contents/MacOS/App": MACHO,
+    "App.app/Contents/Helpers/H.app/Contents/Info.plist": plist("H", "<key>SUFeedURL</key><string>https://x</string>"),
+    "App.app/Contents/Helpers/H.app/Contents/MacOS/H": MACHO,
+  });
+  expect(() => findCode(nestedFeed)).toThrow(TapsterError);
+});
+
+test("bundle identifiers come with the items", () => {
+  const items = findCode(sparkleLike());
+  expect(items.find((i) => i.path.endsWith("Installer.xpc"))!.bundleId).toBe("x");
+  expect(items.find((i) => i.kind === "file")!.bundleId).toBeNull();
 });
