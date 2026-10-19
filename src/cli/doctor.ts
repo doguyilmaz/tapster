@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { type HubConfig, isApp, linuxUrl, parseConfig } from "../config";
+import { type HubConfig, isApp, linuxUrl, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { currentRepo, userGitHub } from "./gh";
@@ -130,19 +130,26 @@ async function appNote(gh: GitHub, hub: string, repos: string[]): Promise<string
   return `note the App must be installed on ${repos.join(", ")} and not on ${hub}; GitHub shows its repositories only to the App itself, so check them at https://github.com/apps/${slug}/installations/new (the hub's check job also reports both)`;
 }
 
+export function configChecks(text: string | null, owner: string): { checks: Check[]; config: HubConfig | null } {
+  if (text === null) return { checks: [bad("tapster.yml is valid", "Run tapster init.")], config: null };
+  try {
+    const { config, invalid } = parseHub(text, owner);
+    if (invalid.length === 0) return { checks: [ok("tapster.yml is valid")], config };
+    return { checks: invalid.map((i) => bad(`${i.name} in tapster.yml is valid`, `${i.reason}. ${i.fix}`)), config };
+  } catch (e) {
+    return { checks: [bad("tapster.yml is valid", e instanceof TapsterError ? `${e.reason}. ${e.fix}` : "Run tapster init.")], config: null };
+  }
+}
+
 export async function doctor(_args: string[]): Promise<number> {
   const dir = process.cwd();
   const hub = await currentRepo(dir);
   const checks: Check[] = [];
-  let repos: string[] = [];
-  let config: HubConfig | null = null;
-  try {
-    config = parseConfig(readFileSync(join(dir, "tapster.yml"), "utf8"), hub.split("/")[0]!);
-    repos = config.packages.map((p) => p.repo);
-    checks.push(ok("tapster.yml is valid"));
-  } catch (e) {
-    checks.push(bad("tapster.yml is valid", e instanceof TapsterError ? `${e.reason}. ${e.fix}` : "Run tapster init."));
-  }
+  const path = join(dir, "tapster.yml");
+  const parsed = configChecks(existsSync(path) ? readFileSync(path, "utf8") : null, hub.split("/")[0]!);
+  const config = parsed.config;
+  const repos = config?.packages.map((p) => p.repo) ?? [];
+  checks.push(...parsed.checks);
   const flowsDir = join(dir, ".github/workflows");
   const flows = existsSync(flowsDir) ? Object.fromEntries(readdirSync(flowsDir).map((f) => [f, readFileSync(join(flowsDir, f), "utf8")])) : {};
   checks.push(flows["tapster.yml"] ? workflowTriggerCheck(flows["tapster.yml"]) : bad("the hub workflow exists", "Run tapster init."));

@@ -33,3 +33,21 @@ packages:
   expect(sparkleCheck(cfg, [], flow).fix).toContain("tapster init --sparkle shared");
   expect(sparkleCheck(cfg, ["SPARKLE_KEY_SHARED"], "env: {}").fix).toContain("tapster init --workflow");
 });
+
+test("doctor names each invalid package and keeps the valid ones", async () => {
+  const { configChecks } = await import("../src/cli/doctor");
+  const text = `version: 1
+tap: o/tap
+packages:
+  - { name: good, repo: o/good, binaries: [good], assets: { darwin-arm64: "g.tar.gz" } }
+  - { name: bad, repo: o/bad, binaries: [bad], assets: { darwin-arm64: "b.zip" } }
+`;
+  const { checks, config } = configChecks(text, "o");
+  expect(config!.packages.map((p) => p.name)).toEqual(["good"]);
+  expect(checks.map((c) => [c.name, c.ok])).toEqual([["bad in tapster.yml is valid", false]]);
+  expect(checks[0]!.fix).toContain(".tar.gz");
+  expect(configChecks(text.replace(/  - \{ name: bad.*\n/, ""), "o").checks).toEqual([{ name: "tapster.yml is valid", ok: true, fix: "" }]);
+  const broken = configChecks("version: 9\n", "o");
+  expect(broken.config).toBeNull();
+  expect(broken.checks[0]!.ok).toBe(false);
+});

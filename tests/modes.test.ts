@@ -31,7 +31,7 @@ test("render is needed when a cask is behind the state or an entry is publishing
   const ws = mkdtempSync(join(tmpdir(), "ws-"));
   mkdirSync(join(ws, ".tapster"), { recursive: true });
   mkdirSync(join(ws, "Casks"), { recursive: true });
-  const ctx = { hub: "o/homebrew-tap", owner: "o", config: cfg, workspace: ws };
+  const ctx = { hub: "o/homebrew-tap", owner: "o", config: cfg, invalid: [], workspace: ws };
   const published = upsert(emptyState(), "aims", { tag: "v1.0.0", releaseId: 1, checksums: "b".repeat(64), status: "published" });
   writeFileSync(join(ws, ".tapster/state.json"), serializeState(published));
   writeFileSync(join(ws, "Casks/aims.rb"), 'cask "aims" do\n  version "0.9.0"\nend\n');
@@ -47,7 +47,7 @@ test("review focus 3: a release with nothing to sign passes without reading cred
   process.env.RUNNER_TEMP = mkdtempSync(join(tmpdir(), "rt-"));
   for (const k of ["MACOS_SIGN_P12", "MACOS_SIGN_PASSWORD", "MACOS_NOTARY_KEY"]) delete process.env[k];
   await saveManifest({ items: [{ package: "aims", tag: "v1.0.0", releaseId: 1, resume: false, before: [], checksums: [], archives: [], status: "fetched" }] });
-  await signMode({ hub: "o/homebrew-tap", owner: "o", config: cfg, workspace: "/tmp" });
+  await signMode({ hub: "o/homebrew-tap", owner: "o", config: cfg, invalid: [], workspace: "/tmp" });
   expect((await loadManifest()).items[0]!.status).toBe("signed");
 });
 
@@ -55,7 +55,7 @@ test("private packages never make render run", async () => {
   const ws = mkdtempSync(join(tmpdir(), "ws-"));
   mkdirSync(join(ws, ".tapster"), { recursive: true });
   writeFileSync(join(ws, ".tapster/state.json"), serializeState(upsert(emptyState(), "aims", { tag: "v1.0.0", releaseId: 1, checksums: "b".repeat(64), status: "published" })));
-  const ctx = { hub: "o/homebrew-tap", owner: "o", config: cfg, workspace: ws };
+  const ctx = { hub: "o/homebrew-tap", owner: "o", config: cfg, invalid: [], workspace: ws };
   expect(await renderNeeded(ctx)).toBe(true);
   expect(await renderNeeded(ctx, new Set(["aims"]))).toBe(false);
 });

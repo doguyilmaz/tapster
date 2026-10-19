@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { missingAttestations } from "../attest";
 import { parseChecksums } from "../checksums";
-import { type AppPackage, type HubConfig, isApp } from "../config";
+import { type AppPackage, type HubConfig, type InvalidPackage, isApp } from "../config";
 import { GitHub, type Release } from "../github";
 import { readSecret, requireVar } from "../mask";
 import { type WorkItem, planPackage } from "../plan";
@@ -25,6 +25,10 @@ export function feedWarning(latest: Release | null, state: State, pkg: AppPackag
   return `${pkg.name}: the latest release ${latest.tag_name} did not come from the hub; installed copies read its ${pkg.sparkle.feed}, so check who published it`;
 }
 
+export function reportInvalid(invalid: InvalidPackage[], only: string): void {
+  for (const i of invalid) if (!only || i.name === only) failure(i.name, new TapsterError(i.reason, i.fix));
+}
+
 async function latestRelease(gh: GitHub, repo: string): Promise<Release | null> {
   try {
     return await gh.json<Release>("GET", `/repos/${repo}/releases/latest`);
@@ -44,6 +48,7 @@ export async function check(ctx: Context): Promise<void> {
   if (await installationExists(appId, pem, ctx.hub)) {
     failure(ctx.hub, new TapsterError("the App is installed on the hub", "Remove the hub from the App's repositories; the App only needs the projects."));
   }
+  reportInvalid(ctx.invalid, only);
   for (const pkg of ctx.config.packages) {
     if (only && pkg.name !== only) continue;
     let tok: InstallationToken | undefined;
