@@ -101,3 +101,9 @@ test("Mach-O detection", () => {
   expect(isMachO(javaClass)).toBe(false);
   expect(isMachO(Buffer.from("#!/bin/sh\n"))).toBe(false);
 });
+
+test("the repack drops setuid, setgid, sticky and group or other write", () => {
+  const out = readTarGz(writeTarGz([{ name: "x", type: "file", mode: 0o7777, data: Buffer.from("x") }, { name: "d", type: "dir", mode: 0o1777, data: Buffer.alloc(0) }], 1));
+  expect(out.find((e) => e.name === "x")!.mode).toBe(0o755);
+  expect(out.find((e) => e.name === "d")!.mode).toBe(0o755);
+});

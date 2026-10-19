@@ -195,7 +195,7 @@ export function writeTarGz(entries: TarEntry[], mtime: number): Buffer {
     }
     const data = e.type === "file" ? e.data : Buffer.alloc(0);
     const type = e.type === "file" ? "0" : e.type === "dir" ? "5" : "2";
-    blocks.push(header(name.slice(0, 100), e.mode & 0o7777, data.length, mtime, type, link.slice(0, 100)), data, pad(data.length));
+    blocks.push(header(name.slice(0, 100), e.mode & 0o755, data.length, mtime, type, link.slice(0, 100)), data, pad(data.length));
   }
   blocks.push(Buffer.alloc(1024));
   return gzipSync(Buffer.concat(blocks), { level: 9 });
