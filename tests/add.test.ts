@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { parse } from "yaml";
-import { add, adaptGoreleaser, adaptReleaseWorkflow, bunWorkflow, inferEntry } from "../src/cli/add";
+import { add, adaptGoreleaser, adaptReleaseWorkflow, appEntry, appWorkflow, bunWorkflow, findApp, inferEntry } from "../src/cli/add";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -120,4 +120,68 @@ test("workflow-level and write-all permissions are respected", () => {
   expect(parse(adaptReleaseWorkflow(top, "a".repeat(40), "v4").text).jobs.release.permissions).toEqual({ contents: "write", pages: "write", "id-token": "write", attestations: "write" });
   const all = goFlow.replace("permissions: { contents: write, packages: write }", "permissions: write-all");
   expect(parse(adaptReleaseWorkflow(all, "a".repeat(40), "v4").text).jobs.release.permissions).toBe("write-all");
+});
+
+test("the app template builds without write access and only the release job writes", () => {
+  const text = appWorkflow({ build: "make app", appPath: "dist/Battistics.app", runner: "macos-26", carry: ["scripts/legacy-appcast.xml:appcast.xml"] }, pins);
+  expect(text).not.toContain("__");
+  const flow = parse(text) as { on: Record<string, unknown>; permissions: unknown; jobs: Record<string, { permissions: Record<string, string>; "runs-on": string; steps: { uses?: string; run?: string; if?: string }[] }> };
+  expect(Object.keys(flow.on).sort()).toEqual(["push", "workflow_dispatch"]);
+  expect(flow.permissions).toEqual({});
+  expect(flow.jobs.build!.permissions).toEqual({ contents: "read" });
+  expect(flow.jobs.build!["runs-on"]).toBe("macos-26");
+  expect(flow.jobs.release!.permissions).toEqual({ contents: "write", "id-token": "write", attestations: "write" });
+  expect(flow.jobs.build!.steps[0]!.if).toContain("github.ref_type != 'tag'");
+  expect(JSON.stringify(flow.jobs.build)).not.toContain("secrets.");
+  expect(flow.jobs.build!.steps.map((s) => s.run ?? "").join("\n")).toContain("make app");
+  const release = flow.jobs.release!.steps.map((s) => `${s.uses ?? ""} ${s.run ?? ""}`).join("\n");
+  expect(release).toContain('cp "scripts/legacy-appcast.xml" "dist/appcast.xml"');
+  expect(release).toContain(`actions/attest-build-provenance@${pins["actions/attest-build-provenance"].sha}`);
+  expect(release).not.toContain("make app");
+});
+
+test("add finds an XcodeGen app with Sparkle and prints its hub entry", () => {
+  const dir = mkdtempSync(join(tmpdir(), "app-"));
+  writeFileSync(
+    join(dir, "project.yml"),
+    `name: Battistics
+settings: { base: { ARCHS: arm64 } }
+targets:
+  BattisticsCLI: { type: tool, settings: { base: { PRODUCT_BUNDLE_IDENTIFIER: com.o.Battistics.CLI } } }
+  Battistics:
+    type: application
+    info:
+      path: Sources/Info.plist
+      properties:
+        SUFeedURL: https://github.com/o/battistics/releases/latest/download/appcast-2.xml
+        SUPublicEDKey: ${"A".repeat(43)}=
+    settings: { base: { PRODUCT_BUNDLE_IDENTIFIER: com.o.Battistics, PRODUCT_NAME: Battistics } }
+`,
+  );
+  writeFileSync(join(dir, "Makefile"), "APP = dist/Battistics.app\n\napp: gen\n\txcodebuild\n");
+  const found = findApp(dir)!;
+  expect(found).toEqual({ name: "Battistics", bundleId: "com.o.Battistics", feed: "appcast-2.xml", publicKey: `${"A".repeat(43)}=`, universal: false, build: "make app", appPath: "dist/Battistics.app" });
+  const entry = appEntry("battistics", "o/battistics", found);
+  expect(entry).toContain("    kind: app\n    app: Battistics.app\n    bundle_id: com.o.Battistics\n");
+  expect(entry).toContain('      darwin-arm64: "Battistics-{version}.app.tar.gz"');
+  expect(entry).toContain("      feed: appcast-2.xml\n");
+  expect(entry).toContain(`      public_key: "${"A".repeat(43)}="`);
+  expect(findApp(mkdtempSync(join(tmpdir(), "none-")))).toBeNull();
+});
+
+test("add finds a plain Info.plist with a feed when there is no project.yml", () => {
+  const dir = mkdtempSync(join(tmpdir(), "app-"));
+  mkdirSync(join(dir, "Recesso.xcodeproj"));
+  mkdirSync(join(dir, "Recesso"));
+  writeFileSync(
+    join(dir, "Recesso", "Info.plist"),
+    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string><key>SUFeedURL</key><string>https://github.com/o/recesso/releases/latest/download/appcast.xml</string><key>SUPublicEDKey</key><string>${"B".repeat(43)}=</string></dict></plist>`,
+  );
+  writeFileSync(join(dir, "Recesso.xcodeproj", "project.pbxproj"), "PRODUCT_BUNDLE_IDENTIFIER = com.o.Recesso;\nPRODUCT_BUNDLE_IDENTIFIER = com.o.RecessoTests;\n");
+  const found = findApp(dir)!;
+  expect(found.name).toBe("Recesso");
+  expect(found.bundleId).toBe("com.o.Recesso");
+  expect(found.feed).toBe("appcast.xml");
+  expect(found.build).toBeNull();
+  expect(appEntry("recesso", "o/recesso", found)).not.toContain("feed:");
 });
