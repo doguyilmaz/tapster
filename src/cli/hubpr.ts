@@ -1,4 +1,4 @@
-import { parse, parseDocument } from "yaml";
+import { isSeq, parse, parseDocument } from "yaml";
 import { NAME, PLATFORMS, type Platform, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
@@ -93,8 +93,13 @@ export function withEntry(hubYaml: string, entry: string, name: string): string 
   const doc = parseDocument(hubYaml);
   const raw = (doc.toJS() as { packages?: { name?: string }[] }).packages ?? [];
   if (raw.some((p) => p?.name === name)) throw new TapsterError(`${name} is already in the hub's tapster.yml`, "Edit its entry there instead.");
-  const text = /^packages:\s*\[\s*\]\s*$/m.test(hubYaml) ? hubYaml.replace(/^packages:\s*\[\s*\]\s*$/m, "packages:") : hubYaml;
-  return `${text.replace(/\n*$/, "\n")}${entry}\n`;
+  const packages = doc.get("packages", true);
+  if (!isSeq(packages)) throw new TapsterError("the hub's tapster.yml has no packages list", "Add packages: [] to it.");
+  const item = parseDocument(entry).contents;
+  if (!isSeq(item) || item.items.length !== 1) throw new TapsterError("the entry is not one package", "Report this as a tapster bug.");
+  packages.flow = false;
+  packages.items.push(item.items[0] as never);
+  return doc.toString({ flowCollectionPadding: false });
 }
 
 export const installLink = (slug: string, ownerId: number, repoId: number) =>

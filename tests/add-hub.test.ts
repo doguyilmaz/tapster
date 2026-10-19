@@ -119,3 +119,17 @@ test("add puts the project into the App's installation when the hub knows it, an
   expect(link).toContain("suggested_target_id=11&repository_ids[]=22");
   expect(await installOnProject(fake([slug, { name: "TAPSTER_APP_INSTALLATION_ID", value: "77" }], 403), "o/hub", "o/p")).toContain("make sure");
 });
+
+test("the entry joins the packages list even when other sections follow it", () => {
+  const hub = `version: 1
+tap: o/tap
+packages:
+${bunEntry("other", "o/other", "other")}
+linux: { maintainer: "O <o@x.yz>" }
+`;
+  const next = withEntry(hub, bunEntry("tool", "o/tool", "tool"), "tool");
+  expect(valid(next).packages.map((p) => p.name)).toEqual(["other", "tool"]);
+  expect(next).toContain("linux:");
+  const flow = withEntry("version: 1\ntap: o/tap\npackages: []\nlinux: { maintainer: \"O <o@x.yz>\" }\n", bunEntry("tool", "o/tool", "tool"), "tool");
+  expect(valid(flow).packages.map((p) => p.name)).toEqual(["tool"]);
+});
