@@ -75,3 +75,11 @@ test("installationRepos refuses to guess when the list is longer than it reads",
   };
   await expect(installationRepos("1", pem, "o", fetchImpl)).rejects.toThrow(/more than 1000/);
 });
+
+test("a project the App is not installed on is named, with the command that fixes it", async () => {
+  const fetchImpl = async (url: string) => (url.endsWith("/repos/o/aims/installation") ? new Response(null, { status: 404 }) : new Response(null, { status: 500 }));
+  await expect(installationToken("1", pem, "o/aims", { contents: "write" }, fetchImpl)).rejects.toMatchObject({
+    reason: "the hub's App is not installed on o/aims",
+    fix: expect.stringContaining("tapster add"),
+  });
+});
