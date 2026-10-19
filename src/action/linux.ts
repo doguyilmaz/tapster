@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { TapsterError } from "../errors";
 import { buildLinux } from "../linux/build";
 import { NFPM, installNfpm, nfpmPackager } from "../linux/nfpm";
+import { signLinux } from "../linux/sign";
+import { readSecret } from "../mask";
+import { linuxUrl } from "../config";
 import { failure, info } from "../report";
 import { STATE_PATH, parseState } from "../state";
 import { workdir } from "../workdir";
@@ -23,4 +26,11 @@ export async function linuxBuildMode(ctx: Context): Promise<void> {
   for (const f of built.failed) failure("linux", new TapsterError(f, "The live repositories stay as they are; fix the release and run the workflow with linux set."));
   if (!built.failed.length) info(built.changed ? "linux: packages built" : "linux: the live repositories are current");
   core.setOutput("changed", String(built.changed));
+}
+
+export async function linuxSignMode(ctx: Context): Promise<void> {
+  const key = readSecret("TAPSTER_LINUX_KEY");
+  const state = parseState(await readFile(join(ctx.workspace, STATE_PATH), "utf8").catch(() => null));
+  const signed = await signLinux({ dir: linuxDir(), config: ctx.config, state, owner: ctx.owner.toLowerCase(), url: linuxUrl(ctx.config, ctx.hub), key, fetch });
+  info(`linux: checked and signed ${signed.packages} packages with ${signed.fingerprint}`);
 }

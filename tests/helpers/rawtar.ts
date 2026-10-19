@@ -1,6 +1,6 @@
 import { gzipSync } from "node:zlib";
 
-export type Raw = { name: string; type?: string; data?: string | Buffer; linkname?: string; mode?: number; prefix?: string; gnu?: boolean };
+export type Raw = { name: string; type?: string; data?: string | Buffer; linkname?: string; mode?: number; prefix?: string; gnu?: boolean; uid?: number };
 
 function field(h: Buffer, off: number, len: number, value: string) {
   h.write(value, off, Math.min(len, Buffer.byteLength(value)), "utf8");
@@ -13,7 +13,7 @@ export function rawTarGz(entries: Raw[]): Buffer {
     const h = Buffer.alloc(512);
     field(h, 0, 100, e.name);
     field(h, 100, 8, `${(e.mode ?? 0o644).toString(8).padStart(7, "0")}\0`);
-    field(h, 108, 8, "0000000\0");
+    field(h, 108, 8, `${(e.uid ?? 0).toString(8).padStart(7, "0")}\0`);
     field(h, 116, 8, "0000000\0");
     field(h, 124, 12, `${data.length.toString(8).padStart(11, "0")}\0`);
     field(h, 136, 12, "00000000000\0");

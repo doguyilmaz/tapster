@@ -1,6 +1,6 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { readTarGz } from "../archive";
+import { type TarEntry, readTarGz } from "../archive";
 import { parseChecksums, sha256 } from "../checksums";
 import { type CliPackage, type HubConfig, isApp, linuxUrl, versionOf } from "../config";
 import { TapsterError } from "../errors";
@@ -76,23 +76,36 @@ async function download(fetchImpl: typeof fetch, url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
-async function buildOne(t: LinuxTarget, config: HubConfig, o: BuildOptions, stage: string): Promise<void> {
+export async function fetchArchives(t: LinuxTarget, fetchImpl: typeof fetch): Promise<Map<LinuxPlatform, TarEntry[]>> {
   const base = `https://github.com/${t.pkg.repo}/releases/download/${t.tag}`;
-  const sums = await download(o.fetch, `${base}/checksums.txt`);
+  const sums = await download(fetchImpl, `${base}/checksums.txt`);
   if (sha256(sums) !== t.checksums) throw new TapsterError(`${t.tag}: checksums.txt differs from the one tapster published`, "Check who edited the release.");
   const lines = parseChecksums(sums.toString("utf8"));
+  const out = new Map<LinuxPlatform, TarEntry[]>();
   for (const asset of t.assets) {
-    const data = await download(o.fetch, `${base}/${asset.name}`);
+    const data = await download(fetchImpl, `${base}/${asset.name}`);
     const line = lines.find((l) => l.name === asset.name);
     if (!line || sha256(data) !== line.sha256) throw new TapsterError(`${asset.name} does not match checksums.txt`, "Check who edited the release.");
-    const entries = readTarGz(data);
+    out.set(asset.platform, readTarGz(data));
+  }
+  return out;
+}
+
+export function archiveFile(entries: TarEntry[], rel: string, asset: string): TarEntry {
+  const e = entries.find((x) => x.type === "file" && x.name === rel);
+  if (!e) throw new TapsterError(`${asset}: ${rel} is missing`, "Check binaries and completions in tapster.yml.");
+  return e;
+}
+
+async function buildOne(t: LinuxTarget, config: HubConfig, o: BuildOptions, stage: string): Promise<void> {
+  const archives = await fetchArchives(t, o.fetch);
+  for (const asset of t.assets) {
+    const entries = archives.get(asset.platform)!;
     const dir = join(stage, t.pkg.name, asset.platform);
     for (const kind of ["deb", "rpm"] as const) {
       const files = packageFiles(t.pkg, kind, dir);
       for (const f of files) {
-        const rel = f.src.slice(dir.length + 1);
-        const e = entries.find((x) => x.type === "file" && x.name === rel);
-        if (!e) throw new TapsterError(`${asset.name}: ${rel} is missing`, "Check binaries and completions in tapster.yml.");
+        const e = archiveFile(entries, f.src.slice(dir.length + 1), asset.name);
         await mkdir(dirname(f.src), { recursive: true, mode: 0o700 });
         await writeFile(f.src, e.data, { mode: f.mode });
       }

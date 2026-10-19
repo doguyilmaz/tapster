@@ -14,13 +14,21 @@ export const TOOLS = {
   xattr: "/usr/bin/xattr",
   plutil: "/usr/bin/plutil",
   spctl: "/usr/sbin/spctl",
+  gpg: "/usr/bin/gpg",
+  gpgconf: "/usr/bin/gpgconf",
+  rpm: "/usr/bin/rpm",
+  rpmsign: "/usr/bin/rpmsign",
+  rpm2archive: "/usr/bin/rpm2archive",
+  "dpkg-deb": "/usr/bin/dpkg-deb",
+  createrepo_c: "/usr/bin/createrepo_c",
+  "apt-ftparchive": "/usr/bin/apt-ftparchive",
 } as const;
 export type Tool = keyof typeof TOOLS;
 
 const GH = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"];
 
 export type RunOptions = { env?: Record<string, string>; stdin?: string | Uint8Array; allowFail?: boolean; cwd?: string; maxOutput?: number; timeoutMs?: number };
-export type RunResult = { code: number; stdout: string; stderr: string };
+export type RunResult = { code: number; stdout: string; stderr: string; bytes: Buffer };
 
 export function childEnv(extra: Record<string, string> = {}): Record<string, string> {
   return {
@@ -75,7 +83,8 @@ export function runPath(path: string, label: string, args: string[], opts: RunOp
         reject(stopped);
         return;
       }
-      const res = { code: code ?? -1, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") };
+      const bytes = Buffer.concat(out);
+      const res = { code: code ?? -1, stdout: bytes.toString("utf8"), stderr: Buffer.concat(err).toString("utf8"), bytes };
       if (res.code !== 0 && !opts.allowFail) {
         reject(new TapsterError(`${label} exited with ${res.code}`, excerpt(res.stderr) || "No error output."));
         return;

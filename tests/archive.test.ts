@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import { isMachO, readTarGz, writeTarGz } from "../src/archive";
+import { isMachO, readTar, readTarGz, writeTarGz } from "../src/archive";
 import { TapsterError } from "../src/errors";
+import { gunzipSync } from "node:zlib";
 import { paxRecord, rawTarGz } from "./helpers/rawtar";
 
 test("reads files, folders and inner symlinks", () => {
@@ -173,4 +174,12 @@ test("forty links that each add 500 folders are cut off quickly", () => {
     expect(e).toBeInstanceOf(TapsterError);
   }
   expect(Date.now() - started).toBeLessThan(1000);
+});
+
+test("owners are read and a plain tar reads like a gzipped one", () => {
+  const gz = rawTarGz([{ name: "./usr/bin/x", data: "a", uid: 1000 }]);
+  const [e] = readTarGz(gz);
+  expect(e!.uid).toBe(1000);
+  expect(e!.gid).toBe(0);
+  expect(readTar(gunzipSync(gz))[0]!.name).toBe("usr/bin/x");
 });
