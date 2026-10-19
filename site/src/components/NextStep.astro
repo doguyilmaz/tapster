@@ -1,0 +1,70 @@
+---
+import { TUTORIAL } from "../tutorial";
+
+const { step } = Astro.props as { step: number };
+const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
+const next = TUTORIAL[step];
+---
+
+<div class="ns not-content">
+  {
+    next ? (
+      <a class="card" href={`${base}${next.slug}/`}>
+        <span class="kicker">Next, step {step + 1} of {TUTORIAL.length}</span>
+        <span class="title">{next.title}</span>
+        <span class="blurb">{next.blurb}</span>
+      </a>
+    ) : (
+      <div class="card done">
+        <span class="kicker">Tutorial complete</span>
+        <span class="title">Your hub publishes signed releases.</span>
+        <span class="blurb">
+          Next, make it faster with the <a href={`${base}guides/doorbell/`}>doorbell</a>, add{" "}
+          <a href={`${base}guides/linux/`}>apt and dnf</a> or ship a <a href={`${base}guides/sparkle/`}>Mac app</a>.
+        </span>
+      </div>
+    )
+  }
+</div>
+
+<style>
+  .ns {
+    margin-top: 3rem;
+  }
+  .card {
+    display: grid;
+    gap: 0.3rem;
+    padding: 1.4rem 1.5rem;
+    border-radius: 14px;
+    border: 1px solid var(--sl-color-accent);
+    background: var(--sl-color-accent-low);
+    color: var(--sl-color-white);
+    text-decoration: none;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  a.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px -14px var(--sl-color-accent);
+  }
+  .kicker {
+    font-size: var(--sl-text-sm);
+    font-weight: 600;
+    color: var(--sl-color-accent-high);
+  }
+  .title {
+    font-size: var(--sl-text-2xl);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .blurb {
+    color: var(--sl-color-gray-2);
+  }
+  .blurb a {
+    color: var(--sl-color-accent-high);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card {
+      transition: none;
+    }
+  }
+</style>

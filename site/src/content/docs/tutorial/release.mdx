@@ -1,0 +1,104 @@
+---
+title: "Ship the first release"
+description: "Push a tag, watch the hub sign and publish it, then install it with Homebrew."
+sidebar:
+  order: 5
+  label: "5. Ship the first release"
+next: false
+---
+import { Steps } from "@astrojs/starlight/components";
+import TutorialProgress from "../../../components/TutorialProgress.astro";
+import NextStep from "../../../components/NextStep.astro";
+
+<TutorialProgress step={5} />
+
+## 1. Push a tag
+
+In the project, push a tag shaped like `v1.2.3`:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub accepts the tag with the note you saw in [step 4](/tutorial/project/#2-the-project-is-protected).
+
+## 2. The project opens a draft
+
+The project's release workflow builds the archives, writes `checksums.txt`, attests the files and opens a **draft**
+release. Follow it on the project's **Actions** tab or with:
+
+```sh
+gh run watch
+```
+
+:::tip[You should see]{icon="approve-check-circle"}
+A draft release named `v0.1.0` with the archives and `checksums.txt`. It is not public yet.
+:::
+
+## 3. The hub signs and publishes it
+
+The hub looks for drafts every 10 minutes. With the [doorbell](/guides/doorbell/) it starts right away. Follow it on
+the hub's **Actions** tab, workflow **tapster**:
+
+<Steps>
+
+1. **check** finds the draft and checks where it came from. The tag must exist. The draft and every file must come from
+   the project's workflow or from you.
+2. **sign** downloads the files and compares each one with `checksums.txt` and its build attestation. It signs the macOS
+   binaries, sends them to Apple for notarization and waits for Apple's answer. Then it replaces the archives in the
+   draft and publishes the release.
+3. **attest** attests the signed files.
+4. **render** writes `Casks/my-tool.rb` (and `bucket/my-tool.json` for Windows builds) to the hub.
+
+</Steps>
+
+:::caution[tapster waits here]{icon="clock"}
+Apple's notarization usually answers within a few minutes. tapster waits up to 30 minutes for it.
+:::
+
+:::tip[You should see]{icon="approve-check-circle"}
+The release `v0.1.0` is published on the project. The hub has a new commit, `my-tool v0.1.0`, with the cask.
+:::
+
+## 4. Install it
+
+Anyone can now install the tool from your tap:
+
+```sh
+brew tap you/tap
+brew trust you/tap
+brew install you/tap/my-tool
+```
+
+Homebrew loads casks only from taps you trust, so `brew trust` comes once per tap.
+
+Check that macOS sees your signature:
+
+```sh
+codesign -dv --verbose=2 "$(command -v my-tool)" 2>&1 | grep Authority
+```
+
+:::tip[You should see]{icon="approve-check-circle"}
+`Authority=Developer ID Application: Your Name (TEAMID)` on the first line.
+:::
+
+## If the hub does not publish
+
+The hub writes the reason at the top of the draft's release notes. See [Troubleshooting](/reference/troubleshooting/#on-a-draft)
+for each reason.
+
+Then check the whole setup:
+
+```sh
+cd homebrew-tap
+bunx @doguyilmaz/tapster doctor
+```
+
+## What next
+
+- [Faster releases](/guides/doorbell/): start the hub within a minute of each release.
+- [apt and dnf](/guides/linux/): publish Linux packages too.
+- [Mac apps with Sparkle](/guides/sparkle/): sign, notarize and update Mac apps.
+
+<NextStep step={5} />

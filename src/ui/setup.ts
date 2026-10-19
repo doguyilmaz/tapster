@@ -11,7 +11,7 @@ body { padding: 7vh 16px 48px; }
 h1 { font-size: 1.6rem; }
 .lead { font-size: 1.05rem; }
 .facts { margin: 1.4rem 0 1.6rem; }
-.facts dt { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-top: 1.1rem; }
+.facts dt { font-size: 0.95rem; font-weight: 700; color: var(--ink); margin-top: 1.2rem; }
 .facts dd { margin: 0.3rem 0 0; }
 .facts ul { padding-left: 1.1rem; margin: 0; }
 ol.next { padding-left: 1.3rem; }

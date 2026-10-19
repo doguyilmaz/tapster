@@ -1,0 +1,127 @@
+---
+import { TUTORIAL } from "../tutorial";
+
+const { step } = Astro.props as { step: number };
+const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
+---
+
+<nav class="tp not-content" aria-label="Tutorial progress">
+  <p class="tp-count">Step {step} of {TUTORIAL.length}</p>
+  <ol>
+    {TUTORIAL.map((s, i) => {
+      const n = i + 1;
+      const state = n < step ? "done" : n === step ? "here" : "todo";
+      return (
+        <li class={state}>
+          <a href={`${base}${s.slug}/`} aria-current={n === step ? "step" : undefined}>
+            <span class="dot">
+              {n < step ? (
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              ) : (
+                n
+              )}
+            </span>
+            <span class="name">{s.short}</span>
+          </a>
+        </li>
+      );
+    })}
+  </ol>
+</nav>
+
+<style>
+  .tp {
+    margin: 0 0 2.5rem;
+    padding: 1.1rem 1.25rem 1rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 14px;
+    background: var(--sl-color-gray-7, var(--sl-color-gray-6));
+  }
+  .tp-count {
+    margin: 0 0 0.9rem;
+    font-size: var(--sl-text-sm);
+    font-weight: 600;
+    color: var(--sl-color-gray-3);
+  }
+  ol {
+    display: flex;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  li {
+    flex: 1;
+    position: relative;
+    margin: 0;
+  }
+  li + li::before {
+    content: "";
+    position: absolute;
+    top: 14px;
+    right: calc(50% + 18px);
+    left: calc(-50% + 18px);
+    height: 2px;
+    background: var(--sl-color-gray-5);
+  }
+  li.done + li::before,
+  li.done + li.here::before {
+    background: var(--sl-color-accent);
+  }
+  a {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.45rem;
+    text-decoration: none;
+    color: var(--sl-color-gray-3);
+    text-align: center;
+  }
+  .dot {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 2px solid var(--sl-color-gray-4);
+    background: var(--sl-color-black);
+    font-size: var(--sl-text-sm);
+    font-weight: 700;
+    color: var(--sl-color-gray-3);
+  }
+  .name {
+    font-size: var(--sl-text-xs);
+    font-weight: 600;
+    line-height: 1.25;
+    max-width: 9em;
+  }
+  li.done .dot {
+    border-color: var(--sl-color-accent);
+    background: var(--sl-color-accent);
+    color: var(--sl-color-black);
+  }
+  li.here .dot {
+    border-color: var(--sl-color-accent);
+    color: var(--sl-color-accent);
+    box-shadow: 0 0 0 4px var(--sl-color-accent-low);
+  }
+  li.here .name {
+    color: var(--sl-color-white);
+  }
+  a:hover .name {
+    color: var(--sl-color-white);
+  }
+  @media (max-width: 40rem) {
+    .name {
+      display: none;
+    }
+    li.here .name {
+      display: block;
+      position: absolute;
+      top: 38px;
+      white-space: nowrap;
+    }
+    ol {
+      padding-bottom: 1.4rem;
+    }
+  }
+</style>

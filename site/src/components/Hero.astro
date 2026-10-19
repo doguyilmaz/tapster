@@ -1,0 +1,244 @@
+---
+import { LinkButton } from "@astrojs/starlight/components";
+import { Image } from "astro:assets";
+import courier from "../assets/courier.webp";
+import logo from "../assets/logo-128.webp";
+
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, actions = [] } = data.hero || {};
+
+const sha = "9f2c41d07b3ea1655c0de8f4b2a97e31c6d58f0a2b4e7c913d6af05e8b21e41a";
+const bars: { x: number; w: number }[] = [];
+let x = 0;
+for (const ch of sha) {
+  const v = Number.parseInt(ch, 16);
+  const w = 1 + (v % 3);
+  bars.push({ x, w });
+  x += w + 1 + ((v >> 2) % 2);
+}
+
+const seal = (() => {
+  let d = "";
+  for (let i = 0; i <= 120; i++) {
+    const t = (i / 120) * Math.PI * 2;
+    const r = 46 + 3.2 * Math.sin(5 * t + 0.7) + 1.8 * Math.sin(8 * t + 2.1) + Math.sin(13 * t);
+    d += `${i ? "L" : "M"}${(50 + r * Math.cos(t)).toFixed(1)},${(50 + r * Math.sin(t)).toFixed(1)}`;
+  }
+  return `${d}Z`;
+})();
+---
+
+<section class="hero not-content">
+  <div class="pitch">
+    <h1 id="_top">{title}</h1>
+    {tagline && <p class="tagline" set:html={tagline} />}
+    <div class="actions">
+      {actions.map(({ text, link, variant = "primary" }) => (
+        <LinkButton href={link} variant={variant}>{text}</LinkButton>
+      ))}
+    </div>
+  </div>
+
+  <div class="parcel" aria-label="A tapster release, shown as a shipping label">
+    <div class="frame">
+      <div class="sheet">
+        <div class="head">
+          <span class="mark"><Image src={logo} width={22} height={22} alt="" />tapster<span class="service">Signed release</span></span>
+        </div>
+        <dl>
+          <div><dt>From</dt><dd>you/my-tool</dd></div>
+          <div><dt>To</dt><dd><code>brew install you/tap/my-tool</code></dd></div>
+          <div><dt>Contents</dt><dd>my-tool 1.4.0, five archives</dd></div>
+          <div><dt>Signed</dt><dd>Developer ID Application: You</dd></div>
+          <div><dt>Notarized</dt><dd>Accepted by Apple</dd></div>
+        </dl>
+        <div class="code">
+          <svg viewBox={`0 0 ${x} 40`} preserveAspectRatio="none" aria-hidden="true">
+            {bars.map((b) => <rect x={b.x} width={b.w} height="40" />)}
+          </svg>
+          <p>sha256 {sha.slice(0, 8)} {sha.slice(8, 16)} {sha.slice(-8)}</p>
+        </div>
+      </div>
+    </div>
+    <Image class="courier" src={courier} width={220} height={220} alt="The tapster octopus in a courier cap, carrying sealed parcels" loading="eager" />
+    <svg class="seal" viewBox="0 0 100 100" aria-hidden="true">
+      <defs>
+        <radialGradient id="wax" cx="0.36" cy="0.3" r="0.8">
+          <stop offset="0" stop-color="#ee6b56" />
+          <stop offset="0.6" stop-color="#c8392f" />
+          <stop offset="1" stop-color="#8f2019" />
+        </radialGradient>
+      </defs>
+      <path d={seal} fill="url(#wax)" />
+      <circle cx="50" cy="50" r="30" fill="#b42e26" />
+      <circle cx="50" cy="50" r="30" fill="none" stroke="#f3917c" stroke-opacity="0.5" stroke-width="1.5" transform="translate(-0.8 -1)" />
+      <path d="M37 51 l8.5 8.5 l18 -20" fill="none" stroke="#ffe0d8" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  </div>
+</section>
+
+<style>
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    gap: clamp(2.5rem, 6vw, 5rem);
+    align-items: center;
+    padding: clamp(1.5rem, 5vw, 4rem) 0 clamp(2.5rem, 6vw, 4.5rem);
+  }
+  h1 {
+    font-size: clamp(2.6rem, 5.2vw, 4.25rem);
+    line-height: 1.02;
+    font-weight: 750;
+    letter-spacing: -0.035em;
+    color: var(--sl-color-white);
+    margin: 0 0 1.25rem;
+  }
+  .tagline {
+    font-size: clamp(1.1rem, 1.6vw, 1.3rem);
+    line-height: 1.55;
+    color: var(--sl-color-gray-2);
+    max-width: 32em;
+    margin: 0 0 2rem;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+  }
+
+  .parcel {
+    position: relative;
+    padding: 7.5rem 2.5rem 2.5rem 0;
+  }
+  .frame {
+    padding: 9px;
+    border-radius: 14px;
+    background: repeating-linear-gradient(-45deg, var(--tp-wax) 0 12px, #fffdf9 12px 18px, var(--tp-navy) 18px 30px, #fffdf9 30px 36px);
+    transform: rotate(-2deg);
+    box-shadow: 0 28px 56px -30px rgb(20 18 40 / 0.55), 0 2px 6px rgb(20 18 40 / 0.1);
+  }
+  .sheet {
+    background: #fffdf9;
+    color: #1f2433;
+    border-radius: 7px;
+    padding: 1.1rem 1.25rem 1rem;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    padding-bottom: 0.75rem;
+    border-bottom: 1.5px solid #1f2433;
+  }
+  .mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-weight: 750;
+    font-size: 1.05rem;
+    letter-spacing: -0.02em;
+  }
+  .mark img {
+    border-radius: 6px;
+  }
+  .service {
+    margin-left: 0.35rem;
+    font-size: 0.74rem;
+    font-weight: 650;
+    color: #1d7a4c;
+    background: #e3f4ea;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+  }
+  dl {
+    margin: 0.2rem 0 0;
+  }
+  dl > div {
+    display: grid;
+    grid-template-columns: 5.6rem minmax(0, 1fr);
+    gap: 0.75rem;
+    padding: 0.55rem 0;
+    border-bottom: 1px dashed #d3d0ca;
+  }
+  dt {
+    font-size: 0.82rem;
+    color: #7a766e;
+  }
+  dd {
+    margin: 0;
+    font-size: 0.93rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  dd code {
+    font-family: var(--sl-font-mono);
+    font-size: 0.85rem;
+    background: none;
+    padding: 0;
+    color: inherit;
+  }
+  .code {
+    margin-top: 0.9rem;
+  }
+  .code svg {
+    display: block;
+    width: 100%;
+    height: 40px;
+    fill: #1f2433;
+  }
+  .code p {
+    margin: 0.4rem 0 0;
+    font-family: var(--sl-font-mono);
+    font-size: 0.72rem;
+    color: #7a766e;
+    letter-spacing: 0.04em;
+  }
+  .courier {
+    position: absolute;
+    top: 0;
+    right: 1rem;
+    width: clamp(120px, 34%, 200px);
+    height: auto;
+    aspect-ratio: 1;
+    border-radius: 24%;
+    transform: rotate(5deg);
+    box-shadow: 0 22px 40px -22px rgb(20 18 40 / 0.6);
+  }
+  .seal {
+    position: absolute;
+    right: 0.5rem;
+    bottom: 0.4rem;
+    width: clamp(78px, 22%, 108px);
+    transform: rotate(-9deg);
+    filter: drop-shadow(0 6px 8px rgb(90 15 10 / 0.35));
+    animation: stamp 0.55s cubic-bezier(0.2, 0.9, 0.25, 1) 0.35s both;
+  }
+  @keyframes stamp {
+    from {
+      transform: scale(1.7) rotate(-26deg);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1) rotate(-9deg);
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .seal {
+      animation: none;
+    }
+  }
+  @media (max-width: 50rem) {
+    .hero {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .parcel {
+      max-width: 34rem;
+      padding-right: 1.5rem;
+    }
+  }
+  @media (max-width: 30rem) {
+    dl > div {
+      grid-template-columns: 4.6rem minmax(0, 1fr);
+    }
+  }
+</style>

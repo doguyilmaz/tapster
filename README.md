@@ -1,4 +1,4 @@
-<p><img src="https://raw.githubusercontent.com/doguyilmaz/tapster/main/site/assets/logo-512.png" width="112" alt="The tapster octopus, a courier carrying sealed parcels"></p>
+<p><img src="https://raw.githubusercontent.com/doguyilmaz/tapster/main/site/public/logo-512.png" width="112" alt="The tapster octopus, a courier carrying sealed parcels"></p>
 
 # tapster
 
@@ -6,7 +6,7 @@ tapster turns your Homebrew tap into the one place that signs, notarizes and pub
 projects. Each project builds its files and opens a draft release. It holds no signing certificate, no notary key and
 no tap token.
 
-**Tutorial and docs: [doguyilmaz.github.io/tapster](https://doguyilmaz.github.io/tapster/)**
+**Tutorial and docs: [tapster.doguyilmaz.com](https://tapster.doguyilmaz.com/)**
 
 ## How it works
 
@@ -35,7 +35,7 @@ cd ../my-tool                   # a clone of a project
 bunx @doguyilmaz/tapster add    # prepares its release workflow and proposes it to the hub
 ```
 
-Then push a tag in the project. The [tutorial](https://doguyilmaz.github.io/tapster/tutorial/before/) walks through
+Then push a tag in the project. The [tutorial](https://tapster.doguyilmaz.com/tutorial/before/) walks through
 every step and shows what you should see.
 
 ## Your keys stay in your accounts
@@ -43,29 +43,29 @@ every step and shows what you should see.
 tapster has no server. Your Apple certificate, notary key and App key are secrets of your hub's `tapster` environment,
 which only its `main` branch can open. Projects hold no signing keys. No one else, including tapster's author, ever
 receives them. tapster's own code uses them only inside your hub's runs, at the commit your hub workflow pins. Read the
-[security model](https://doguyilmaz.github.io/tapster/reference/security/).
+[security model](https://tapster.doguyilmaz.com/reference/security/).
 
 ## The Action
 
 You do not write the hub workflow yourself. `tapster init` writes it and pins this Action by commit. To move a hub to a
-newer release, see [Upgrade tapster](https://doguyilmaz.github.io/tapster/guides/upgrade/).
+newer release, see [Upgrade tapster](https://tapster.doguyilmaz.com/guides/upgrade/).
 
 ## Docs
 
-- [Tutorial](https://doguyilmaz.github.io/tapster/tutorial/before/): from an empty tap to an installed release
-- Guides: [GoReleaser](https://doguyilmaz.github.io/tapster/guides/goreleaser/),
-  [Bun](https://doguyilmaz.github.io/tapster/guides/bun/),
-  [Mac apps with Sparkle](https://doguyilmaz.github.io/tapster/guides/sparkle/),
-  [apt and dnf](https://doguyilmaz.github.io/tapster/guides/linux/),
-  [the doorbell](https://doguyilmaz.github.io/tapster/guides/doorbell/),
-  [workflow tags](https://doguyilmaz.github.io/tapster/guides/auto-tag/),
-  [Dependabot](https://doguyilmaz.github.io/tapster/guides/dependabot/),
-  [key rotation](https://doguyilmaz.github.io/tapster/guides/rotate/),
-  [upgrades](https://doguyilmaz.github.io/tapster/guides/upgrade/)
-- Reference: [Commands](https://doguyilmaz.github.io/tapster/reference/commands/),
-  [tapster.yml](https://doguyilmaz.github.io/tapster/reference/config/),
-  [Security](https://doguyilmaz.github.io/tapster/reference/security/),
-  [Troubleshooting](https://doguyilmaz.github.io/tapster/reference/troubleshooting/)
+- [Tutorial](https://tapster.doguyilmaz.com/tutorial/before/): from an empty tap to an installed release
+- Guides: [GoReleaser](https://tapster.doguyilmaz.com/guides/goreleaser/),
+  [Bun](https://tapster.doguyilmaz.com/guides/bun/),
+  [Mac apps with Sparkle](https://tapster.doguyilmaz.com/guides/sparkle/),
+  [apt and dnf](https://tapster.doguyilmaz.com/guides/linux/),
+  [the doorbell](https://tapster.doguyilmaz.com/guides/doorbell/),
+  [workflow tags](https://tapster.doguyilmaz.com/guides/auto-tag/),
+  [Dependabot](https://tapster.doguyilmaz.com/guides/dependabot/),
+  [key rotation](https://tapster.doguyilmaz.com/guides/rotate/),
+  [upgrades](https://tapster.doguyilmaz.com/guides/upgrade/)
+- Reference: [Commands](https://tapster.doguyilmaz.com/reference/commands/),
+  [tapster.yml](https://tapster.doguyilmaz.com/reference/config/),
+  [Security](https://tapster.doguyilmaz.com/reference/security/),
+  [Troubleshooting](https://tapster.doguyilmaz.com/reference/troubleshooting/)
 
 The design documents are in [docs/superpowers/specs](docs/superpowers/specs).
 
