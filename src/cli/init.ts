@@ -358,7 +358,7 @@ async function createSparkleKey(dir: string, hub: string, label: string): Promis
   }
   const key = newSparkleKey();
   await store.save({ ...ref, comment: `Public key (SUPublicEDKey value) for this key is: ${key.publicKey}` }, key.seed);
-  console.log(`Saved a new Sparkle key in your ${store.kind === "keychain" ? "login keychain" : "keyring"} under the account ${label}; Sparkle's own tools find it there.`);
+  console.log(`Saved a new Sparkle key in your ${store.kind === "keychain" ? "login keychain" : "keyring"} under the account ${label}; Sparkle's own tools find it there, and macOS asks you before any app reads it.`);
   console.log(`Its public key is ${key.publicKey}. Put it in the app as SUPublicEDKey and in tapster.yml as sparkle.public_key.`);
   console.log("If this key is lost, installed copies can never update again. Keep an offline copy too, for example in your password manager:");
   console.log(store.kind === "keychain" ? `  security find-generic-password -s https://sparkle-project.org -a ${label} -w   (macOS asks you first)` : `  secret-tool lookup service https://sparkle-project.org account ${label}`);
