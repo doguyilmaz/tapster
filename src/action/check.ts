@@ -50,7 +50,8 @@ export async function foreignWrites(gh: GitHub, hub: string, owner: string): Pro
   const [last] = await gh.json<{ after: string }[]>("GET", `/repos/${hub}/activity?ref=${ref}&actor=${owner}&per_page=1`);
   if (!last) return [`GitHub shows no push by ${owner} to main`];
   const at = last.after.slice(0, 7);
-  const cmp = await gh.json<{ status: string; files?: { filename: string }[] }>("GET", `/repos/${hub}/compare/${last.after}...main`);
+  const head = (await gh.json<{ object: { sha: string } }>("GET", `/repos/${hub}/git/ref/heads/main`)).object.sha;
+  const cmp = await gh.json<{ status: string; files?: { filename: string }[] }>("GET", `/repos/${hub}/compare/${last.after}...${head}`);
   if (cmp.status === "identical") return [];
   if (cmp.status !== "ahead") return [`main no longer contains your last push (${at})`];
   const files = cmp.files ?? [];

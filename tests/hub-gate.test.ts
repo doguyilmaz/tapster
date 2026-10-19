@@ -10,6 +10,7 @@ function fake(pushes: unknown[], compare: { status: string; files: string[] }) {
     json: async (_m: string, path: string) => {
       asked.push(path);
       if (path.includes("/activity?")) return pushes;
+      if (path.endsWith("/git/ref/heads/main")) return { object: { sha: "m41n" } };
       if (path.includes("/compare/")) return { status: compare.status, files: compare.files.map((filename) => ({ filename })) };
       throw new Error(path);
     },
@@ -20,7 +21,7 @@ function fake(pushes: unknown[], compare: { status: string; files: string[] }) {
 test("only the hub's own files changed since the owner's last push", async () => {
   const { gh, asked } = fake([ownerPush], { status: "ahead", files: [".tapster/state.json", "Casks/aims.rb", "bucket/aims.json"] });
   expect(await foreignWrites(gh, "o/hub", "o")).toEqual([]);
-  expect(asked).toEqual(["/repos/o/hub/activity?ref=refs%2Fheads%2Fmain&actor=o&per_page=1", "/repos/o/hub/compare/b...main"]);
+  expect(asked).toEqual(["/repos/o/hub/activity?ref=refs%2Fheads%2Fmain&actor=o&per_page=1", "/repos/o/hub/git/ref/heads/main", "/repos/o/hub/compare/b...m41n"]);
 });
 
 test("tapster.yml or a workflow changed by anyone but the owner since their last push stops the hub", async () => {
