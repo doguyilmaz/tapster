@@ -137,6 +137,6 @@ export class GitHub {
 
   deleteAsset = (repo: string, id: number) => this.request("DELETE", `/repos/${repo}/releases/assets/${id}`).then(() => undefined);
   renameAsset = (repo: string, id: number, name: string) => this.json<Asset>("PATCH", `/repos/${repo}/releases/assets/${id}`, { name });
-  updateRelease = (repo: string, id: number, patch: { draft?: boolean; make_latest?: "true" | "false" }) =>
-    this.json<Release>("PATCH", `/repos/${repo}/releases/${id}`, patch);
+  updateRelease = (repo: string, id: number, tag: string, patch: { draft?: boolean; make_latest?: "true" | "false" }) =>
+    this.json<Release>("PATCH", `/repos/${repo}/releases/${id}`, { ...patch, tag_name: tag });
 }

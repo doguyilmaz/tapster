@@ -87,7 +87,8 @@ const server = createServer({ cert: readFileSync(certPath!), key: readFileSync(k
   if (path === `${repo}/releases`) return send(res, 200, url.searchParams.get("page") === "1" ? [view(release)] : []);
   if (path === `${repo}/releases/${release.id}` && method === "GET") return send(res, 200, view(release));
   if (path === `${repo}/releases/${release.id}` && method === "PATCH") {
-    const patch = JSON.parse(data.toString() || "{}") as { draft?: boolean };
+    const patch = JSON.parse(data.toString() || "{}") as { draft?: boolean; tag_name?: string };
+    if (release.draft && patch.tag_name !== release.tag_name) release.tag_name = "untagged-stub";
     if (patch.draft === false) {
       release.draft = false;
       release.published_at = new Date().toISOString();

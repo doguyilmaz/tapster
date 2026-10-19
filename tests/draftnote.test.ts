@@ -49,3 +49,12 @@ test("a problem fails the run once, when the hub first writes it on the draft", 
   expect(stale.result).toBe("failed");
   expect(stale.reason).toBe("x is not listed for more than an hour");
 });
+
+test("writing the note keeps the draft's tag, which GitHub drops from a body-only edit", async () => {
+  const { writeNote } = await import("../src/action/check");
+  const sent: unknown[] = [];
+  const gh = { json: async (_m: string, _p: string, body: unknown) => { sent.push(body); return {}; } } as never;
+  const release = { id: 7, tag_name: "v1.2.3", body: "notes" } as never;
+  await writeNote(gh, "o/p", release, withNote("notes", "x"));
+  expect(sent).toEqual([{ body: withNote("notes", "x"), tag_name: "v1.2.3" }]);
+});

@@ -95,7 +95,7 @@ export async function publishMode(ctx: Context): Promise<void> {
         await stageAndSwap(gh, pkg.repo, item.releaseId, files, item.before);
       }
       await assertFinal(gh, pkg.repo, item.releaseId, expected!);
-      await gh.updateRelease(pkg.repo, item.releaseId, { draft: false, make_latest: makeLatest(item.tag, await gh.listReleases(pkg.repo)) });
+      await gh.updateRelease(pkg.repo, item.releaseId, item.tag, { draft: false, make_latest: makeLatest(item.tag, await gh.listReleases(pkg.repo)) });
       const published = await gh.getRelease(pkg.repo, item.releaseId);
       if ((await gh.getRepo(pkg.repo)).private) warn(`${pkg.name}: ${pkg.repo} is private, so its files cannot be downloaded by Homebrew users`);
       else await waitDownloadable(published.assets.map((a) => a.browser_download_url));

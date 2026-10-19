@@ -113,9 +113,9 @@ async function hubGate(ctx: Context, appId: string, pem: string): Promise<void> 
   if (inst.extra.length) warn(`the App can also write to ${inst.extra.join(", ")}, which tapster.yml does not list; remove them at https://github.com/settings/installations`);
 }
 
-async function writeNote(gh: GitHub, repo: string, release: Release, body: string): Promise<void> {
+export async function writeNote(gh: GitHub, repo: string, release: Release, body: string): Promise<void> {
   if (body === (release.body ?? "")) return;
-  await gh.json("PATCH", `/repos/${repo}/releases/${release.id}`, { body });
+  await gh.json("PATCH", `/repos/${repo}/releases/${release.id}`, { body, tag_name: release.tag_name });
 }
 
 async function tagExists(gh: GitHub, repo: string, tag: string): Promise<boolean> {
