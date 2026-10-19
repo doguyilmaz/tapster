@@ -135,7 +135,19 @@ async function checkInstallation(appId: string, pem: string, owner: string, hub:
 
 async function createApp(owner: string, hub: string): Promise<void> {
   console.log("GitHub creates a private App for your hub; it lets the hub publish your projects' releases. Confirm it on the page that opens.");
-  const created = await appFromManifest((redirect) => appManifest(owner, hub, redirect), "your tapster App");
+  const created = await appFromManifest((redirect) => appManifest(owner, hub, redirect), {
+    what: "your tapster App",
+    title: "Create your tapster App",
+    lead: `GitHub asks you to confirm a private App on your account. ${hub} uses it to publish the releases of the projects you install it on.`,
+    key: `GitHub hands the App's private key to tapster in your terminal, once. tapster stores it as a secret of the tapster environment in ${hub}. It goes nowhere else and no one else receives it.`,
+    done: "Your tapster App is created",
+    next: [
+      `tapster stores the App's ID and key in ${hub} and opens the App's install page in a new tab.`,
+      `There, choose "Only select repositories" and pick the projects tapster should publish. Never pick ${hub}: it holds your signing keys.`,
+      'Click "Install". tapster notices within seconds and continues.',
+    ],
+    again: "tapster init",
+  });
   await setEnvVariable(hub, "TAPSTER_APP_ID", String(created.id));
   await setEnvVariable(hub, "TAPSTER_APP_SLUG", created.slug);
   await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", created.pem);

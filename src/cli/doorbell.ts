@@ -172,7 +172,19 @@ export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, 
       console.log("Continuing with the doorbell App created earlier.");
       pem = await askKey(appId, vars.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_SLUG")!.value);
     } else {
-      const app = await appFromManifest((redirect) => doorbellManifest(owner, hub, redirect), "the doorbell App");
+      const app = await appFromManifest((redirect) => doorbellManifest(owner, hub, redirect), {
+        what: "the doorbell App",
+        title: "Create the doorbell App",
+        lead: `GitHub asks you to confirm a second private App. The doorbell uses it only to start ${hub}'s workflow when a project releases.`,
+        key: "GitHub hands the App's private key to tapster in your terminal, once. tapster stores it as a secret of the doorbell Worker in your Cloudflare account. It goes nowhere else and no one else receives it.",
+        done: "The doorbell App is created",
+        next: [
+          "tapster opens the App's install page in a new tab.",
+          `There, choose "Only select repositories" and pick ${hub}, only that one.`,
+          'Click "Install". tapster notices within seconds and deploys the Worker.',
+        ],
+        again: "tapster init --doorbell",
+      });
       appId = String(app.id);
       pem = app.pem;
       await setEnvVariable(hub, "TAPSTER_DOORBELL_APP_ID", appId);
