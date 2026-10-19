@@ -83,13 +83,25 @@ export async function protectionProblems(gh: GitHub, repo: string, branch: strin
   return [...found.tag, ...found.branch];
 }
 
-export async function createProtection(gh: GitHub, repo: string, branch: string, deployKeys = false, dependabot = false): Promise<"created" | "exists" | "unavailable"> {
-  const before = await assess(gh, repo, branch, "admin", dependabot);
-  if (before.tag.concat(before.branch).some((p) => p.includes("offers no rulesets"))) return "unavailable";
-  const existing = await gh.json<Ruleset[]>("GET", `/repos/${repo}/rulesets`);
-  const rewrite = deployKeys || dependabot;
-  if (before.tag.length + before.branch.length === 0 && !rewrite) return "exists";
-  const [tagBody, branchBody] = rulesetBodies(deployKeys, dependabot);
+export type Protection = { status: "created" | "exists" | "unavailable"; deployKeys: boolean; dependabot: boolean };
+
+export async function createProtection(gh: GitHub, repo: string, branch: string, deployKeys = false, dependabot = false): Promise<Protection> {
+  let existing: Ruleset[];
+  try {
+    existing = await gh.json<Ruleset[]>("GET", `/repos/${repo}/rulesets`);
+  } catch (e) {
+    if (e instanceof GitHubError && (e.status === 403 || e.status === 404)) return { status: "unavailable", deployKeys, dependabot };
+    throw e;
+  }
+  const ours = await Promise.all(existing.filter((r) => r.name === TAG_RULESET.name || r.name === BRANCH_RULESET.name).map((r) => gh.json<Ruleset>("GET", `/repos/${repo}/rulesets/${r.id}`)));
+  const keys = deployKeys || ours.some((r) => (r.bypass_actors ?? []).some((a) => a.actor_type === "DeployKey"));
+  const bot = dependabot || ours.some((r) => (r.conditions?.ref_name?.exclude ?? []).includes(DEPENDABOT_BRANCHES));
+  const result = (status: Protection["status"]): Protection => ({ status, deployKeys: keys, dependabot: bot });
+  const before = await assess(gh, repo, branch, "admin", bot);
+  if (before.tag.concat(before.branch).some((p) => p.includes("offers no rulesets"))) return result("unavailable");
+  const rewrite = keys !== ours.some((r) => (r.bypass_actors ?? []).some((a) => a.actor_type === "DeployKey")) || bot !== ours.some((r) => (r.conditions?.ref_name?.exclude ?? []).includes(DEPENDABOT_BRANCHES));
+  if (before.tag.length + before.branch.length === 0 && !rewrite) return result("exists");
+  const [tagBody, branchBody] = rulesetBodies(keys, bot);
   try {
     for (const [body, problems] of [[tagBody, before.tag], [branchBody, before.branch]] as const) {
       if (problems.length === 0 && !rewrite) continue;
@@ -98,8 +110,8 @@ export async function createProtection(gh: GitHub, repo: string, branch: string,
       else await gh.json("POST", `/repos/${repo}/rulesets`, body);
     }
   } catch (e) {
-    if (e instanceof GitHubError && (e.status === 403 || e.status === 422)) return "unavailable";
+    if (e instanceof GitHubError && (e.status === 403 || e.status === 422)) return result("unavailable");
     throw e;
   }
-  return (await protectionProblems(gh, repo, branch, "admin", dependabot)).length === 0 ? "created" : "unavailable";
+  return result((await protectionProblems(gh, repo, branch, "admin", bot)).length === 0 ? "created" : "unavailable");
 }
