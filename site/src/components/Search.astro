@@ -1,0 +1,112 @@
+---
+import Default from "@astrojs/starlight/components/Search.astro";
+
+const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
+const groups = [
+  {
+    label: "Start here",
+    items: [
+      { title: "Before you start", hint: "Tutorial, step 1", href: "tutorial/before/" },
+      { title: "Create the hub", hint: "Tutorial, step 3", href: "tutorial/hub/" },
+      { title: "Add a project", hint: "Tutorial, step 4", href: "tutorial/project/" },
+    ],
+  },
+  {
+    label: "Often looked up",
+    items: [
+      { title: "Commands", hint: "Every option of init, add and doctor", href: "reference/commands/" },
+      { title: "tapster.yml", hint: "Every key of the hub's config", href: "reference/config/" },
+      { title: "Troubleshooting", hint: "What a message means and what to do", href: "reference/troubleshooting/" },
+      { title: "Security", hint: "Where each key lives", href: "reference/security/" },
+      { title: "Move a GoReleaser project", hint: "Guide", href: "guides/goreleaser/" },
+    ],
+  },
+];
+---
+
+<Default {...Astro.props} />
+
+<template id="tp-suggestions">
+  <div class="tp-suggestions">
+    {groups.map((g) => (
+      <section>
+        <h2>{g.label}</h2>
+        <ul>
+          {g.items.map((i) => (
+            <li>
+              <a href={`${base}${i.href}`}>
+                <span class="t">{i.title}</span>
+                <span class="h">{i.hint}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))}
+  </div>
+</template>
+
+<script>
+  const template = document.getElementById("tp-suggestions") as HTMLTemplateElement | null;
+  for (const search of document.querySelectorAll("site-search")) {
+    const container = search.querySelector(".search-container");
+    if (!template || !container) continue;
+    const box = (template.content.firstElementChild as HTMLElement).cloneNode(true) as HTMLElement;
+    container.appendChild(box);
+    const sync = () => {
+      const input = search.querySelector<HTMLInputElement>(".pagefind-ui__search-input");
+      box.hidden = Boolean(input?.value.trim());
+    };
+    search.addEventListener("input", sync);
+    search.addEventListener("click", () => requestAnimationFrame(sync));
+    search.querySelector("dialog")?.addEventListener("close", () => requestAnimationFrame(sync));
+  }
+</script>
+
+<style is:global>
+  .tp-suggestions {
+    padding: 0.5rem 0 1rem;
+  }
+  .tp-suggestions h2 {
+    margin: 1rem 0 0.4rem;
+    font-size: var(--sl-text-sm);
+    font-weight: 600;
+    color: var(--sl-color-gray-3);
+  }
+  .tp-suggestions ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.3rem;
+  }
+  .tp-suggestions a {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.1rem 1rem;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    background: var(--sl-color-black);
+    color: var(--sl-color-white);
+    text-decoration: none;
+  }
+  .tp-suggestions a:hover,
+  .tp-suggestions a:focus-visible {
+    border-color: var(--sl-color-accent);
+    background: var(--sl-color-accent-low);
+    outline: none;
+  }
+  .tp-suggestions .t {
+    font-weight: 600;
+  }
+  .tp-suggestions .h {
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+  .tp-suggestions[hidden] {
+    display: none;
+  }
+</style>

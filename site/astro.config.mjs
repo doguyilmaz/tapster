@@ -18,7 +18,7 @@ export default defineConfig({
       ],
       social: [{ icon: "github", label: "tapster on GitHub", href: "https://github.com/doguyilmaz/tapster" }],
       customCss: ["./src/styles/theme.css"],
-      components: { Hero: "./src/components/Hero.astro" },
+      components: { Hero: "./src/components/Hero.astro", Search: "./src/components/Search.astro" },
       sidebar: [
         { label: "Tutorial", items: [{ autogenerate: { directory: "tutorial" } }] },
         { label: "Guides", items: [{ autogenerate: { directory: "guides" } }] },
