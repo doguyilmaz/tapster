@@ -17,3 +17,10 @@ test("the Marketplace snippet runs the guide: mode is optional, defaults to guid
   expect(meta.inputs.mode!.description).toContain("Leave it empty on first use");
   expect(Object.keys(meta.inputs).filter((k) => /token|key|secret/i.test(k))).toEqual([]);
 });
+
+test("the action declares the health issue's inputs and outputs", () => {
+  const meta = parse(readFileSync("action.yml", "utf8")) as { inputs: Record<string, { default?: string }>; outputs: Record<string, unknown> };
+  expect(meta.inputs.findings!.default).toBe("");
+  expect(meta.inputs.check!.default).toBe("");
+  expect(Object.keys(meta.outputs)).toEqual(expect.arrayContaining(["findings", "report"]));
+});

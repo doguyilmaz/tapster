@@ -29,6 +29,14 @@ inputs:
     description: Path of the hub config
     required: false
     default: tapster.yml
+  findings:
+    description: Findings from the check job (JSON, report mode)
+    required: false
+    default: ""
+  check:
+    description: Result of the check job (report mode)
+    required: false
+    default: ""
 outputs:
   work:
     description: Work list (JSON, check mode)
@@ -44,6 +52,10 @@ outputs:
     description: "true when the Linux jobs have something to do (check mode)"
   changed:
     description: "true when the Linux repositories need a new deploy (linux-build mode)"
+  findings:
+    description: What needs the owner, with fixes (JSON, check mode)
+  report:
+    description: "true when the hub's health issue needs a change (check mode)"
 runs:
   using: node24
   main: dist/index.js
