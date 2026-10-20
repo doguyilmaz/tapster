@@ -240,6 +240,17 @@ function App({ h }: { h: HubView }) {
           <dt>Key</dt>
           <dd>A secret of the tapster environment in {h.name}</dd>
         </dl>
+        <p class="muted small">
+          Optional: give the App tapster's logo.{" "}
+          <a href="/logo.png" download="tapster-logo.png">
+            Download the logo
+          </a>
+          , then upload it under Display information in{" "}
+          <a href={`https://github.com/settings/apps/${h.app.slug}`} target="_blank" rel="noopener noreferrer">
+            the App's settings
+          </a>
+          . GitHub has no API for this.
+        </p>
         <Installation h={h} slug={h.app.slug!} />
       </div>
     );

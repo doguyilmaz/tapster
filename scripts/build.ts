@@ -1,13 +1,18 @@
 import { basename, dirname } from "node:path";
 import type { BunPlugin } from "bun";
+import { LOGO_PATH } from "../src/web/assets";
 import { clientBundle } from "../src/web/bundle";
 
 const [what, target, outfile] = process.argv.slice(2);
 const script = await clientBundle();
+const logo = Buffer.from(await Bun.file(LOGO_PATH).bytes()).toString("base64");
 const inline: BunPlugin = {
   name: "tapster-web-script",
   setup(build) {
-    build.onLoad({ filter: /[\\/]src[\\/]web[\\/]assets\.ts$/ }, () => ({ contents: `export const webScript = async (): Promise<string> => ${JSON.stringify(script)};`, loader: "ts" }));
+    build.onLoad({ filter: /[\\/]src[\\/]web[\\/]assets\.ts$/ }, () => ({
+      contents: `export const webScript = async (): Promise<string> => ${JSON.stringify(script)};\nexport const logoPng = async (): Promise<Uint8Array> => Uint8Array.from(Buffer.from(${JSON.stringify(logo)}, "base64"));`,
+      loader: "ts",
+    }));
   },
 };
 const entry = "src/cli/main.ts";

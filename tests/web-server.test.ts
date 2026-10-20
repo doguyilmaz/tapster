@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { join } from "node:path";
 import { TapsterError } from "../src/errors";
 import { appCallback } from "../src/web/api/hub";
 import { CSP } from "../src/web/http";
@@ -50,6 +51,16 @@ test("pages carry a strict policy and never get cached", async () => {
   expect(await res.text()).toContain('<script type="module" src="/app.js"></script>');
   expect((await call("/logo.webp")).headers.get("content-type")).toBe("image/webp");
   expect((await call("/elsewhere")).status).toBe(404);
+});
+
+test("the logo for the GitHub App downloads as site/public/logo-512.png, from this host only", async () => {
+  const { call } = app();
+  const res = await call("/logo.png");
+  expect(res.headers.get("content-type")).toBe("image/png");
+  expect(res.headers.get("content-disposition")).toBe('attachment; filename="tapster-logo.png"');
+  expect(res.headers.get("content-security-policy")).toBe(CSP);
+  expect(new Uint8Array(await res.arrayBuffer())).toEqual(await Bun.file(join(import.meta.dir, "..", "site", "public", "logo-512.png")).bytes());
+  expect((await call("/logo.png", { host: "evil.example:8277" })).status).toBe(421);
 });
 
 test("the API answers only with the session token", async () => {
