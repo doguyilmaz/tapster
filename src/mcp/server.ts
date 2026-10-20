@@ -12,6 +12,7 @@ import { run } from "../run";
 import { checkHub, hubChoices, hubView } from "../web/api/hub";
 import { defaultRoots, scanClones } from "../web/scan";
 import { type Deps, newSession } from "../web/server";
+import { realDeps } from "../web/start";
 import { stops } from "../web/steps";
 
 const VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -192,4 +193,10 @@ export async function serve(ctx: Ctx, input: NodeJS.ReadableStream = process.std
     const answer = await handle(msg, ctx);
     if (answer) write(JSON.stringify(answer));
   }
+}
+
+export async function mcp(args: string[]): Promise<void> {
+  if (args.length) throw new TapsterError(`unknown option ${args.join(" ")}`, "tapster mcp takes no options.");
+  const deps = { ...realDeps(null), log: (line: string) => process.stderr.write(`${line}\n`) };
+  await serve({ deps, gh: () => deps.github() });
 }

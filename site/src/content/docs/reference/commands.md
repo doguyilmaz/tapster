@@ -64,6 +64,11 @@ hub. See [Add a project](/tutorial/project/).
 Run it in a clone of your hub. It reads the hub as it is on GitHub's `main` branch and checks every setting its security
 depends on. Each finding names the command that fixes it. It takes no options.
 
+## tapster mcp
+
+Serves tapster's tools to an AI assistant over MCP, on stdin and stdout. See
+[Use tapster with an AI assistant](/guides/ai/). It takes no options.
+
 ## tapster --version
 
 Shows the version of tapster and the commit it pins hubs to.

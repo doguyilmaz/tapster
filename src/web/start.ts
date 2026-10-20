@@ -50,7 +50,7 @@ function openBrowser(url: string): void {
   void runPath(opener, "open", [url], { allowFail: true }).catch(() => undefined);
 }
 
-function realDeps(pin: string | null): Deps {
+export function realDeps(pin: string | null): Deps {
   let cached: { gh: GitHub; at: number } | null = null;
   return {
     async github() {
