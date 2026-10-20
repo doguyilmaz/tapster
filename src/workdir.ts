@@ -6,7 +6,7 @@ import type { ChecksumLine } from "./checksums";
 import type { Platform } from "./config";
 import type { Asset } from "./github";
 
-export type DarwinArchive = { asset: string; platform: Platform; dir: string; binaries: string[] };
+export type DarwinArchive = { asset: string; platform: Platform; dir: string; binaries: string[]; app?: string };
 export type AppWork = { dir: string; facts: AppFacts; created: string; identifiers: string[]; dmg: string | null; feed: string | null };
 export type Fetched = {
   package: string;

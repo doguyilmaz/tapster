@@ -56,7 +56,7 @@ ${body}
 `;
 }
 
-export function entitlementsFor(path: string, found: Entitlements, pkg: AppPackage, teamId: string): { entitlements: Entitlements; dropped: string[] } {
+export function entitlementsFor(path: string, found: Entitlements, pkg: Pick<AppPackage, "code">, teamId: string): { entitlements: Entitlements; dropped: string[] } {
   const configured = mergeEntitlements({}, (pkg.code[path]?.entitlements ?? {}) as Entitlements, teamId);
   const dropped: string[] = [];
   for (const [key, value] of Object.entries(found)) {

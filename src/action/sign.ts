@@ -1,8 +1,9 @@
-import { cp, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { signApp, verifyApp } from "../appsign";
+import { signApp, stapleApp, toolBundle, verifyApp } from "../appsign";
 import { isApp } from "../config";
 import { failure, info, warn } from "../report";
+import { run } from "../run";
 import { PRESETS, entitlementsPlist, notarize, signFile, verifySigned, zipForNotary } from "../sign";
 import { loadManifest, saveManifest, workdir } from "../workdir";
 import { withApple } from "./apple";
@@ -34,12 +35,17 @@ export async function signMode(ctx: Context): Promise<void> {
               await signFile(kc, join(a.dir, b), ent, basename(b));
               await verifySigned(join(a.dir, b), team, basename(b));
             }
+            if (!a.app || !pkg.app) continue;
+            const signed = await signApp(kc, join(a.dir, a.app), toolBundle(pkg.app, keys), team);
+            await verifyApp(join(a.dir, a.app), signed, team);
+            for (const d of signed.dropped) warn(`${item.package} ${item.tag}: the entitlement ${d} of ${a.app} is not in the tool's entitlements, so it was not signed`);
           }
           const root = join(workdir(), pkg.name, item.tag, "notary");
           await mkdir(root, { recursive: true, mode: 0o700 });
-          for (const a of item.archives) await cp(a.dir, join(root, a.asset), { recursive: true });
+          for (const a of item.archives) await run("ditto", [a.dir, join(root, a.asset)]);
           await zipForNotary(root, `${root}.zip`);
           await notarize(`${root}.zip`, notary);
+          for (const a of item.archives) if (a.app) await stapleApp(join(a.dir, a.app));
           item.status = "signed";
           info(`${item.package} ${item.tag}: signed and notarized`);
         } catch (e) {

@@ -1,12 +1,12 @@
 import * as core from "@actions/core";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { appFacts, carryCheck, checkArchiveRoot, systemPlist } from "../appcheck";
+import { dirname, join, posix } from "node:path";
+import { type ReadPlist, appFacts, carryCheck, checkArchiveRoot, checkToolApp, systemPlist } from "../appcheck";
 import { isMachO, readTarGz } from "../archive";
 import { verifyAttestation } from "../attest";
 import { macCodeIn } from "../maccode";
 import { parseChecksums, sha256 } from "../checksums";
-import { type AppPackage, type Platform, assetName, isApp, versionOf } from "../config";
+import { type AppPackage, type CliPackage, type PackageConfig, type Platform, assetName, isApp, versionOf } from "../config";
 import { TapsterError } from "../errors";
 import { GitHub, type Release } from "../github";
 import { type WorkItem, draftOrigin } from "../plan";
@@ -24,6 +24,43 @@ async function unpackApp(ctx: Context, pkg: AppPackage, tag: string, archive: Bu
   const appDir = join(dir, "app", pkg.app);
   const facts = await appFacts(appDir, pkg, ctx.config.packages, tag, systemPlist);
   return { dir: appDir, facts, created, identifiers: [], dmg: null, feed: null };
+}
+
+export async function unpackTool(pkg: CliPackage, all: PackageConfig[], name: string, archive: Buffer, binDir: string, readPlist: ReadPlist = systemPlist): Promise<{ binaries: string[]; app?: string }> {
+  const app = pkg.app;
+  const entries = readTarGz(archive);
+  const inApp = (n: string) => app !== undefined && n.split("/")[0] === app.name;
+  if (app) {
+    const twin = entries.map((e) => e.name.split("/")[0]!).find((top) => top !== app.name && top.toLowerCase() === app.name.toLowerCase());
+    if (twin) throw new TapsterError(`${name} holds both ${app.name} and ${twin}, which macOS treats as one folder`, "Pack the app once, under the name in tapster.yml.");
+    for (const e of entries) {
+      if (e.type !== "symlink" || !inApp(e.name)) continue;
+      if (!posix.normalize(posix.join(posix.dirname(e.name), e.linkname!)).startsWith(`${app.name}/`)) {
+        throw new TapsterError(`${name} has a symlink ${e.name} that leaves ${app.name}`, "Keep the app's symlinks inside the app.");
+      }
+    }
+  }
+  const found: string[] = [];
+  for (const e of entries) {
+    if (e.type !== "file" || inApp(e.name)) continue;
+    const listed = pkg.binaries.includes(e.name);
+    const macho = isMachO(e.data);
+    if (macho && !listed) throw new TapsterError(`${name} holds ${e.name}, a Mach-O file not listed in binaries`, "List every macOS executable in binaries.");
+    if (listed && !macho) throw new TapsterError(`${e.name} in ${name} is not a Mach-O binary`, "binaries must name the macOS executables in the archive.");
+    if (!listed) continue;
+    const out = join(binDir, e.name);
+    await mkdir(dirname(out), { recursive: true, mode: 0o700 });
+    await writeFile(out, e.data, { mode: 0o755 });
+    found.push(e.name);
+  }
+  const missing = pkg.binaries.filter((b) => !found.includes(b));
+  if (missing.length) throw new TapsterError(`${name} does not contain ${missing.join(", ")}`, "Check binaries in tapster.yml.");
+  if (!app) return { binaries: found };
+  const own = entries.filter((e) => inApp(e.name));
+  if (!own.some((e) => e.name.startsWith(`${app.name}/`))) throw new TapsterError(`${name} does not contain ${app.name}`, "Pack the app at the top of the archive or remove app from tapster.yml.");
+  await writeTree(own, binDir);
+  await checkToolApp(join(binDir, app.name), app, all, readPlist);
+  return { binaries: found, app: app.name };
 }
 
 export function assertFetchable(release: Release, item: WorkItem, owner: string): void {
@@ -85,22 +122,8 @@ export async function fetchMode(ctx: Context): Promise<void> {
         } else for (const platform of (Object.keys(pkg.assets) as Platform[]).filter((p) => p.startsWith("darwin"))) {
           const name = assetName(pkg, platform, version)!;
           const binDir = join(dir, "bin", name);
-          const found: string[] = [];
-          for (const e of readTarGz(await readFile(join(dir, "assets", name)))) {
-            if (e.type !== "file") continue;
-            const listed = pkg.binaries.includes(e.name);
-            const macho = isMachO(e.data);
-            if (macho && !listed) throw new TapsterError(`${name} holds ${e.name}, a Mach-O file not listed in binaries`, "List every macOS executable in binaries.");
-            if (listed && !macho) throw new TapsterError(`${e.name} in ${name} is not a Mach-O binary`, "binaries must name the macOS executables in the archive.");
-            if (!listed) continue;
-            const out = join(binDir, e.name);
-            await mkdir(dirname(out), { recursive: true, mode: 0o700 });
-            await writeFile(out, e.data, { mode: 0o755 });
-            found.push(e.name);
-          }
-          const missing = pkg.binaries.filter((b) => !found.includes(b));
-          if (missing.length) throw new TapsterError(`${name} does not contain ${missing.join(", ")}`, "Check binaries in tapster.yml.");
-          fetched.archives.push({ asset: name, platform, dir: binDir, binaries: found });
+          const unpacked = await unpackTool(pkg, ctx.config.packages, name, await readFile(join(dir, "assets", name)), binDir);
+          fetched.archives.push({ asset: name, platform, dir: binDir, ...unpacked });
         }
       }
       manifest.items.push(fetched);
