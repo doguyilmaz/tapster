@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { reportNote, tapsterUpdate } from "../src/action/check";
+import { hubPin, reportNote, tapsterUpdate } from "../src/action/check";
 import { GitHubError } from "../src/errors";
 import type { GitHub } from "../src/github";
 import { failedCount, findings, resetReportForTests } from "../src/report";
@@ -55,4 +55,12 @@ test("a refused draft stays the same finding on later runs, so the health issue 
 test("a draft that is still waiting is not a finding", () => {
   reportNote("aims", "v1.0.0", { result: "waiting", reason: "assets are still uploading" });
   expect(findings()).toEqual([]);
+});
+
+test("the running tapster comes from the pin in the hub workflow, since the Action bundle carries no version", () => {
+  const sha = "a".repeat(40);
+  expect(hubPin(`      - uses: doguyilmaz/tapster@${sha} # v1.2.3\n`)).toEqual({ version: "1.2.3", sha });
+  expect(hubPin(`uses: doguyilmaz/tapster@${sha} # v2.0.0-rc.1`)).toEqual({ version: "2.0.0-rc.1", sha });
+  expect(hubPin(`uses: doguyilmaz/tapster@${sha} # main`)).toBeNull();
+  expect(hubPin("uses: doguyilmaz/tapster@v1 # v1.2.3")).toBeNull();
 });

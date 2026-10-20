@@ -13,7 +13,6 @@ import { protectionProblems } from "../rulesets";
 import { GitHubError, TapsterError } from "../errors";
 import { STATE_PATH, type State, parseState, recordedChecksums } from "../state";
 import { type InstallationToken, installationRepos, installationToken } from "../token";
-import { TAPSTER } from "../version";
 import type { Context } from "./context";
 import { renderNeeded } from "./render";
 import { foreignWrites } from "../foreign";
@@ -146,10 +145,16 @@ export async function tapsterUpdate(gh: GitHub, running: { version: string; sha:
   };
 }
 
+export function hubPin(flow: string): { version: string; sha: string } | null {
+  const pin = /doguyilmaz\/tapster@([0-9a-f]{40}) # v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\s*$/m.exec(flow);
+  return pin ? { version: pin[2]!, sha: pin[1]! } : null;
+}
+
 export async function check(ctx: Context, token: string): Promise<void> {
   const appId = requireVar("TAPSTER_APP_ID");
   const pem = readSecret("TAPSTER_APP_PRIVATE_KEY");
-  const update = token ? await tapsterUpdate(new GitHub(token), TAPSTER) : null;
+  const pin = hubPin(await readFile(join(ctx.workspace, ".github/workflows/tapster.yml"), "utf8").catch(() => ""));
+  const update = token && pin ? await tapsterUpdate(new GitHub(token), pin) : null;
   if (update) concern("tapster", update.reason, update.fix);
   const only = core.getInput("package");
   const items: WorkItem[] = [];
