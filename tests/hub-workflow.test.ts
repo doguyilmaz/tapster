@@ -45,10 +45,29 @@ test("a check that fails before writing outputs runs no later job", () => {
   expect(linux.if).not.toContain("needs.check.result");
 });
 
-test("check gets a read-only token to see who changed the hub", () => {
-  const check = flow.jobs.check as unknown as { permissions: Record<string, string>; steps: { id?: string; env?: Record<string, string> }[] };
-  expect(check.permissions).toEqual({ contents: "read" });
+test("check gets a read-only token to see who changed the hub and whether its health issue is open", () => {
+  const check = flow.jobs.check as unknown as { permissions: Record<string, string>; outputs: Record<string, string>; steps: { id?: string; env?: Record<string, string> }[] };
+  expect(check.permissions).toEqual({ contents: "read", issues: "read" });
   expect(check.steps.find((s) => s.id === "check")!.env!.GITHUB_TOKEN).toBe("${{ github.token }}");
+  expect(check.outputs.findings).toBe("${{ steps.check.outputs.findings }}");
+  expect(check.outputs.report).toBe("${{ steps.check.outputs.report }}");
+});
+
+test("the report job can write issues and nothing else, holds no keys and gets the findings as an input", () => {
+  type Job = { needs: string; if: string; "runs-on": string; environment?: unknown; permissions: Record<string, string>; steps: (Step & { name: string; run?: string; env?: Record<string, string> })[] };
+  const report = flow.jobs.report as unknown as Job;
+  expect(report.needs).toBe("check");
+  expect(report.if).toBe("${{ !cancelled() && (needs.check.outputs.report == 'true' || (needs.check.result == 'failure' && needs.check.outputs.findings == '')) }}");
+  expect(report["runs-on"]).toBe("ubuntu-24.04");
+  expect(report.permissions).toEqual({ issues: "write" });
+  expect(report.environment).toBeUndefined();
+  expect(report.steps).toHaveLength(1);
+  const [step] = report.steps;
+  expect(step!.name).toBe("Update the hub's health issue");
+  expect(step!.uses).toBe("doguyilmaz/tapster@__TAPSTER_SHA__");
+  expect(step!.run).toBeUndefined();
+  expect(step!.with).toEqual({ mode: "report", template: 2, findings: "${{ needs.check.outputs.findings }}", check: "${{ needs.check.result }}" });
+  expect(step!.env).toEqual({ GITHUB_TOKEN: "${{ github.token }}" });
 });
 
 test("rendering runs tapster's code only, on ubuntu", () => {

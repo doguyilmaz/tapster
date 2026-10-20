@@ -20,12 +20,14 @@ jobs:
   check:
     runs-on: ubuntu-24.04
     environment: { name: tapster, deployment: false }
-    permissions: { contents: read }
+    permissions: { contents: read, issues: read }
     outputs:
       work: ${{ steps.check.outputs.work }}
       macos: ${{ steps.check.outputs.macos }}
       render: ${{ steps.check.outputs.render }}
       linux: ${{ steps.check.outputs.linux }}
+      findings: ${{ steps.check.outputs.findings }}
+      report: ${{ steps.check.outputs.report }}
     steps:
       - name: Check out the hub
         uses: actions/checkout@__CHECKOUT_SHA__ # __CHECKOUT_TAG__
@@ -40,6 +42,17 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           TAPSTER_TEAM_ID: ${{ vars.TAPSTER_TEAM_ID }}
           TAPSTER_CERT_EXPIRES: ${{ vars.TAPSTER_CERT_EXPIRES }}
+  report:
+    needs: check
+    if: ${{ !cancelled() && (needs.check.outputs.report == 'true' || (needs.check.result == 'failure' && needs.check.outputs.findings == '')) }}
+    runs-on: ubuntu-24.04
+    permissions: { issues: write }
+    steps:
+      - name: Update the hub's health issue
+        uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
+        with: { mode: report, template: 2, findings: "${{ needs.check.outputs.findings }}", check: "${{ needs.check.result }}" }
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
   sign:
     needs: check
     if: ${{ !cancelled() && needs.check.outputs.work != '[]' && needs.check.outputs.work != '' }}
