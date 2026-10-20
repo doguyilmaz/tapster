@@ -1,6 +1,7 @@
 import { GitHubError, TapsterError } from "../errors";
 import { GitHub } from "../github";
-import { ghPath, run, runPath } from "../run";
+import { readGit } from "../clone";
+import { ghPath, runPath } from "../run";
 
 const userEnv = (): Record<string, string> => ({
   HOME: process.env.HOME ?? "/tmp",
@@ -24,7 +25,7 @@ export async function userGitHub(): Promise<GitHub> {
 }
 
 export async function currentRepo(dir = process.cwd()): Promise<string> {
-  const url = (await run("git", ["-C", dir, "remote", "get-url", "origin"], { allowFail: true })).stdout.trim();
+  const url = (await readGit(dir, ["remote", "get-url", "origin"])).stdout.trim();
   const m = /github\.com[:/]([A-Za-z0-9-]+\/[A-Za-z0-9._-]+?)(?:\.git)?$/.exec(url);
   if (!m) throw new TapsterError("this folder is not a clone of a GitHub repository", "Run tapster inside a clone (git remote origin on github.com).");
   return m[1]!;

@@ -9,7 +9,7 @@ import { noteIn } from "../draftnote";
 import { TAPSTER } from "../version";
 import { doctorChecks } from "../cli/doctor";
 import { currentRepo } from "../cli/gh";
-import { run } from "../run";
+import { readGit } from "../clone";
 import { checkHub, hubChoices, hubView } from "../web/api/hub";
 import { defaultRoots, scanClones } from "../web/scan";
 import { type Deps, newSession } from "../web/server";
@@ -31,7 +31,7 @@ async function resolveHub(ctx: Ctx, given: unknown): Promise<{ gh: GitHub; hub: 
   const login = (await gh.json<{ login: string }>("GET", "/user")).login;
   if (typeof given === "string" && given) return { gh, hub: checkHub(given, login), login };
   const mine = (name: string | null) => (name && name.split("/")[0]!.toLowerCase() === login.toLowerCase() && /\/homebrew-/.test(name) ? name : null);
-  const saved = mine((await run("git", ["-C", ctx.deps.cwd, "config", "--get", "tapster.hub"], { allowFail: true })).stdout.trim());
+  const saved = mine((await readGit(ctx.deps.cwd, ["config", "--get", "tapster.hub"])).stdout.trim());
   if (saved) return { gh, hub: checkHub(saved, login), login };
   const here = mine(await currentRepo(ctx.deps.cwd).catch(() => null));
   if (here) return { gh, hub: checkHub(here, login), login };

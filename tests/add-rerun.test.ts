@@ -85,6 +85,18 @@ test("a second add finds GoReleaser's Homebrew section in the clone's history an
   expect(existsSync(marker)).toBe(false);
 });
 
+test("reading history never fetches a missing object through the clone's own remote", async () => {
+  const dir = await migrated("partial");
+  const marker = join(base, "partial-fetched");
+  const blob = (await run("git", ["-C", dir, "rev-parse", "HEAD~1:.goreleaser.yaml"])).stdout.trim();
+  rmSync(join(dir, ".git", "objects", blob.slice(0, 2), blob.slice(2)));
+  for (const [k, v] of [["core.repositoryformatversion", "1"], ["extensions.partialClone", "lazy"], ["remote.lazy.promisor", "true"], ["remote.lazy.url", `ext::sh -c touch% ${marker}`], ["protocol.ext.allow", "always"]]) {
+    await run("git", ["-C", dir, "config", k!, v!]);
+  }
+  expect(await homebrewFromHistory(dir)).toBeNull();
+  expect(existsSync(marker)).toBe(false);
+});
+
 test("a clone without that history has nothing to recover", async () => {
   const dir = join(base, "fresh");
   mkdirSync(dir, { recursive: true });

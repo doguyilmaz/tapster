@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { isMap, isSeq, parse, parseDocument, type Scalar, YAMLMap } from "yaml";
 import { BUNDLE_ID } from "../config";
 import { GitHubError, TapsterError } from "../errors";
+import { readGit } from "../clone";
 import { run, runPath } from "../run";
 import type { GitHub } from "../github";
 import { parsePlist } from "../plist";
@@ -326,7 +327,7 @@ const hasHomebrew = (text: string) => {
   }
 };
 
-const quietGit = (dir: string, args: string[], maxOutput: number) => run("git", ["-C", dir, ...args], { allowFail: true, timeoutMs: 10_000, maxOutput }).catch(() => null);
+const quietGit = (dir: string, args: string[], maxOutput: number) => readGit(dir, args, { timeoutMs: 10_000, maxOutput }).catch(() => null);
 
 // rev-list and cat-file never run the clone's filters, textconv, hooks or fsmonitor; log -S/-G, diff and status can.
 export async function homebrewFromHistory(dir: string): Promise<string | null> {
@@ -385,7 +386,7 @@ export async function prepare(dir: string, repo: string, name: string, opts: Add
 }
 
 async function resolveHub(dir: string, flag: string | null): Promise<{ hub: string; remember: () => Promise<void> }> {
-  const saved = (await run("git", ["-C", dir, "config", "--get", "tapster.hub"], { allowFail: true })).stdout.trim();
+  const saved = (await readGit(dir, ["config", "--get", "tapster.hub"])).stdout.trim();
   const hub = flag ?? (saved ? hubName(saved) : hubName(await ask("Which hub publishes this project (owner/repo)? ")));
   return { hub, remember: async () => void (hub !== saved && (await run("git", ["-C", dir, "config", "tapster.hub", hub]))) };
 }
