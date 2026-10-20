@@ -8,11 +8,11 @@ import { GitHub } from "../../github";
 import { commitToHub, readHubFile } from "../../hubcommit";
 import { appJwt, installationRepos } from "../../token";
 import { TAPSTER } from "../../version";
-import { P12_LIMIT, P8_LIMIT, inspectP12, notaryKey, saveCertificate, saveNotary, verifyNotary } from "../../cli/apple";
+import { P12_LIMIT, P8_LIMIT, inspectP12, notaryKey, saveCertificate, saveNotary } from "../../cli/apple";
 import { convertManifest, permissionLines } from "../../cli/appflow";
 import { doctorChecks, hubRulesetCheck, policyCheck } from "../../cli/doctor";
 import { appInstallation, appManifest, storeApp } from "../../cli/hubapp";
-import { FLOW, hubFiles } from "../../cli/hubfiles";
+import { FLOW, hubFiles, starterFiles } from "../../cli/hubfiles";
 import { protectHub } from "../../cli/init";
 import { everyFromFlow } from "../../cli/schedule";
 import type { AccountView, AppStart, FilePlan, FilesView, HealthView, HubChoice, HubView, InstallView, OtherWorkflow } from "../contract";
@@ -283,7 +283,7 @@ async function notary(c: Ctx) {
   const f = await form(c);
   const { hub } = await hubFrom(c, f.get("hub"));
   const key = notaryKey(await file(f, "p8", P8_LIMIT), String(f.get("keyId") ?? ""), String(f.get("issuerId") ?? ""));
-  const checked = await verifyNotary(key);
+  const checked = await c.s.deps.notary(key);
   await saveNotary(hub, key);
   return { checked };
 }
@@ -314,6 +314,10 @@ async function filesPreview(c: Ctx): Promise<FilesView> {
 async function filesCommit(c: Ctx) {
   const q = await readJson(c.req, filesQuery);
   const { gh, hub, login } = await hubFrom(c, q.hub);
+  if ((await or404(gh.json("GET", `/repos/${hub}/git/ref/heads/main`))) === null) {
+    const readme = starterFiles(hub).find((f) => f.path === "README.md")!;
+    await gh.json("PUT", `/repos/${hub}/contents/README.md`, { message: "Start the tap", content: Buffer.from(readme.content).toString("base64") });
+  }
   await guardMain(gh, hub, login);
   const result = await commitToHub(gh, hub, "Set up tapster", async (read) => {
     const plan = await filePlan(c, gh, hub, q.every, q.remove, read);
@@ -332,14 +336,6 @@ async function createHub(c: Ctx) {
     if (e instanceof GitHubError && e.status === 422) throw new TapsterError(`${login}/${body.name} already exists`, "Pick it from the list instead.");
     throw e;
   }
-}
-
-async function firstCommit(c: Ctx) {
-  const { hub } = await readJson(c.req, hubBody);
-  const { gh } = await hubFrom(c, hub);
-  const [owner, repo] = hub.split("/") as [string, string];
-  await gh.json("PUT", `/repos/${hub}/contents/README.md`, { message: "Start the tap", content: Buffer.from(`# ${owner}/${repo.replace(/^homebrew-/, "")}\n`).toString("base64") });
-  return { done: true };
 }
 
 async function health(c: Ctx): Promise<HealthView> {
@@ -369,7 +365,6 @@ export const hubRoutes: Routes = {
     const { gh, hub } = await hubFrom(c, c.url.searchParams.get("hub"));
     return hubView(c.s, gh, hub);
   },
-  "POST /api/hub/first-commit": firstCommit,
   "POST /api/hub/protect": protect,
   "POST /api/hub/app": appStart,
   "GET /api/hub/installation": installation,

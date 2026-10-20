@@ -16,6 +16,7 @@ const deps: Deps = {
   pin: null,
   log: (l) => logs.push(l),
   open: () => {},
+  notary: async () => false,
 };
 
 function app(routes: Routes = {}) {

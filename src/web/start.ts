@@ -3,6 +3,7 @@ import { TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { runPath } from "../run";
 import { TAPSTER } from "../version";
+import { verifyNotary } from "../cli/apple";
 import { currentRepo, userGitHub } from "../cli/gh";
 import { hubRoutes, appCallback } from "./api/hub";
 import { projectRoutes } from "./api/projects";
@@ -63,6 +64,7 @@ function realDeps(pin: string | null): Deps {
     pin,
     log: (line) => console.log(line),
     open: openBrowser,
+    notary: verifyNotary,
   };
 }
 

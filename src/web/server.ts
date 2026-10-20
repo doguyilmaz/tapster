@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { z } from "zod";
 import { TapsterError } from "../errors";
 import type { GitHub } from "../github";
+import type { NotaryKey } from "../cli/apple";
 import { scrub } from "../mask";
 import { COURIER_URI, LOGO_URI } from "../ui/images";
 import { webScript } from "./assets";
@@ -16,6 +17,7 @@ export type Deps = {
   pin: string | null;
   log(line: string): void;
   open(url: string): void;
+  notary(key: NotaryKey): Promise<boolean>;
 };
 
 export type Session = {
