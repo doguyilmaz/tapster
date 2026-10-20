@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { parse } from "yaml";
-import { add, adaptGoreleaser, adaptReleaseWorkflow, appEntry, appWorkflow, bunWorkflow, findApp } from "../src/cli/add";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { adaptGoreleaser, adaptReleaseWorkflow, addOptions, appEntry, appWorkflow, bunWorkflow, findApp, prepare } from "../src/cli/add";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TapsterError } from "../src/errors";
@@ -110,13 +110,7 @@ test("an existing Bun release workflow is not overwritten", async () => {
   writeFileSync(join(dir, "bun.lock"), "{}");
   mkdirSync(join(dir, ".github/workflows"), { recursive: true });
   writeFileSync(join(dir, ".github/workflows/release.yml"), "mine\n");
-  const cwd = process.cwd();
-  process.chdir(dir);
-  try {
-    await expect(add([])).rejects.toBeInstanceOf(TapsterError);
-  } finally {
-    process.chdir(cwd);
-  }
+  await expect(prepare(dir, "o/tool", "tool", addOptions([]))).rejects.toBeInstanceOf(TapsterError);
   expect(readFileSync(join(dir, ".github/workflows/release.yml"), "utf8")).toBe("mine\n");
 });
 
@@ -214,4 +208,19 @@ test("a release workflow missing only the ring step gets it without --force", as
   expect(parse(fixed).jobs.release.steps.at(-1).name).toBe("Ring the tapster hub");
   expect(addRingStep(full)).toBe(full);
   expect(addRingStep("mine\n")).toBeNull();
+});
+
+test("a hub without Apple credentials gets a Bun workflow without macOS builds", () => {
+  const flow = bunWorkflow("tool", "src/cli.ts", pins, false);
+  expect(flow).not.toContain("darwin");
+  expect(flow).toContain("for t in linux-arm64 linux-x64 windows-x64; do");
+  expect(bunWorkflow("tool", "src/cli.ts", pins)).toContain("darwin-arm64 darwin-x64");
+});
+
+test("a Mac app is refused before anything changes when the hub has no Apple credentials", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "add-"));
+  mkdirSync(join(dir, "App"), { recursive: true });
+  writeFileSync(join(dir, "project.yml"), "name: App\ntargets:\n  App:\n    type: application\n    info:\n      properties:\n        SUFeedURL: https://github.com/o/app/releases/latest/download/appcast.xml\n");
+  await expect(prepare(dir, "o/app", "app", addOptions([]), false)).rejects.toThrow("has no Apple credentials, which a Mac app needs");
+  expect(existsSync(join(dir, ".github"))).toBe(false);
 });

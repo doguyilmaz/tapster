@@ -1,5 +1,6 @@
 import type { ChecksumLine } from "./checksums";
 import { type PackageConfig, type Platform, assetName, isApp, parseTag, versionOf } from "./config";
+import { waitingSince } from "./draftnote";
 import { TapsterError } from "./errors";
 import type { Account, Release } from "./github";
 
@@ -57,7 +58,7 @@ export async function planPackage(pkg: PackageConfig, releases: Release[], opts:
   const { checksumsOf, recorded = () => undefined } = opts;
   const items: WorkItem[] = [];
   const notes: Note[] = [];
-  const note = (r: Release, kind: Note["kind"], reason: string) => notes.push({ tag: r.tag_name, releaseId: r.id, kind, reason, since: r.created_at || null });
+  const note = (r: Release, kind: Note["kind"], reason: string) => notes.push({ tag: r.tag_name, releaseId: r.id, kind, reason, since: waitingSince(r) });
   const drafts = releases.filter((r) => r.draft);
   const byTag = new Map<string, Release[]>();
   for (const r of drafts) byTag.set(r.tag_name, [...(byTag.get(r.tag_name) ?? []), r]);

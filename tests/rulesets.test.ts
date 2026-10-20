@@ -69,9 +69,9 @@ test("create posts the exact rulesets and reports when they already protect", as
   const { gh, writes } = fake(sets, enforced, (m, _p, b) => {
     if (m === "POST") sets.push({ id: sets.length + 1, ...(b as { target: string }), current_user_can_bypass: "always", bypass_actors: admin });
   });
-  expect(await createProtection(gh, "o/p", "main")).toBe("created");
+  expect((await createProtection(gh, "o/p", "main")).status).toBe("created");
   expect(writes).toEqual([["POST", "/repos/o/p/rulesets", TAG_RULESET], ["POST", "/repos/o/p/rulesets", BRANCH_RULESET]]);
-  expect(await createProtection(gh, "o/p", "main")).toBe("exists");
+  expect((await createProtection(gh, "o/p", "main")).status).toBe("exists");
   expect(writes).toHaveLength(2);
 });
 
@@ -81,7 +81,7 @@ test("create repairs a tapster ruleset someone weakened", async () => {
   const { gh, writes } = fake(sets, enforced, (m, p, b) => {
     if (m === "PUT" && p.endsWith("/rulesets/1")) Object.assign(sets[0]!, b);
   });
-  expect(await createProtection(gh, "o/p", "main")).toBe("created");
+  expect((await createProtection(gh, "o/p", "main")).status).toBe("created");
   expect(writes).toEqual([["PUT", "/repos/o/p/rulesets/1", TAG_RULESET]]);
 });
 
@@ -89,8 +89,8 @@ test("a plan without rulesets makes create report unavailable", async () => {
   const { gh } = fake([], enforced, () => {
     throw new GitHubError("GitHub POST /repos/o/p/rulesets returned 403", "", 403);
   });
-  expect(await createProtection(gh, "o/p", "main")).toBe("unavailable");
-  expect(await createProtection(fake([]).gh, "o/p", "main")).toBe("unavailable");
+  expect((await createProtection(gh, "o/p", "main")).status).toBe("unavailable");
+  expect((await createProtection(fake([]).gh, "o/p", "main")).status).toBe("unavailable");
 });
 
 test("the rulesets let only the admin role bypass", () => {
@@ -151,4 +151,18 @@ test("a repository where GitHub offers no rulesets gets the plan explained", asy
   const { GitHubError } = await import("../src/errors");
   const gh = { json: async () => { throw new GitHubError("GitHub GET /repos/o/p/rulesets returned 403", "", 403); } } as unknown as GitHub;
   expect((await protectionProblems(gh, "o/p", "main", "app")).join()).toContain("paid plan");
+});
+
+test("running add again keeps the deploy keys and the Dependabot branches it allowed before", async () => {
+  const keys = [...admin, { actor_id: null, actor_type: "DeployKey", bypass_mode: "always" }];
+  const open = { conditions: { ref_name: { include: ["~ALL"], exclude: ["refs/heads/dependabot/**"] } } };
+  const sets = [tags({ bypass_actors: keys }), branch({ bypass_actors: keys, ...open })];
+  const plain = fake(sets);
+  expect(await createProtection(plain.gh, "o/p", "main")).toEqual({ status: "exists", deployKeys: true, dependabot: true });
+  expect(plain.writes).toEqual([]);
+  const dependabotOnly = fake([tags({ bypass_actors: keys }), branch({ bypass_actors: keys })]);
+  await createProtection(dependabotOnly.gh, "o/p", "main", false, true);
+  const bodies = dependabotOnly.writes.map(([, , b]) => b as { bypass_actors: { actor_type: string }[]; conditions: { ref_name: { exclude: string[] } } });
+  expect(bodies.every((b) => b.bypass_actors.some((a) => a.actor_type === "DeployKey"))).toBe(true);
+  expect(bodies[1]!.conditions.ref_name.exclude).toEqual(["refs/heads/dependabot/**"]);
 });

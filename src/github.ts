@@ -1,7 +1,7 @@
 import { GitHubError } from "./errors";
 
 export type Account = { login: string; type: string };
-export type Asset = { id: number; name: string; size: number; state: string; digest: string | null; browser_download_url: string; uploader?: Account | null };
+export type Asset = { id: number; name: string; size: number; state: string; digest: string | null; browser_download_url: string; uploader?: Account | null; created_at?: string };
 export type Release = {
   id: number;
   tag_name: string;
@@ -20,7 +20,7 @@ export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 const USER_HINTS: Record<number, string> = {
   401: "Your GitHub sign-in was rejected; run gh auth login again.",
   403: "Your account may not do this here; check that you own the repository, then run gh auth refresh to renew the sign-in.",
-  404: "Not found, or your gh sign-in cannot see it; check the name and run gh auth status.",
+  404: "Not found or not visible to your gh sign-in; check the name and run gh auth status.",
   409: "GitHub reported a conflict; run the command again.",
   422: "GitHub rejected the request.",
 };

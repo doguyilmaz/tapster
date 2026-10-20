@@ -2,6 +2,7 @@ import { isSeq, parse, parseDocument } from "yaml";
 import { NAME, PLATFORMS, type Platform, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
+import { hubEnv } from "./gh";
 import { descProblems } from "../render";
 
 export function hubName(text: string): string {
@@ -119,6 +120,24 @@ export function suggestDescription(desc: string | null, name: string): string | 
   return descProblems(s, name).length === 0 ? s : null;
 }
 
+export function entryExtras(entry: string, o: { kind: string; workflow: string; dependabot: boolean }): string {
+  let out = entry;
+  if (o.kind === "go" && o.workflow !== "release.yml") out += `\n    workflow: ${o.workflow}`;
+  if (o.dependabot) out += "\n    protection: dependabot";
+  return out;
+}
+
+export function descriptionNote(desc: string | null, name: string): { line?: string; add?: string } {
+  if (!desc) return { line: "- the repository has no description, which Homebrew needs; set one on GitHub or add description: to the hub entry before the first release" };
+  const problems = descProblems(desc, name);
+  if (!problems.length) return {};
+  const better = suggestDescription(desc, name);
+  if (!better) return { line: `- Homebrew would reject the repository's description (${problems.join(" and ")}); add description: to the hub entry before the first release` };
+  return { line: `- Homebrew would reject the repository's description (${problems.join(" and ")}); the entry says "${better}" instead`, add: `    description: ${JSON.stringify(better)}` };
+}
+
+export const releaseSecrets = (names: string[]) => names.filter((n) => /^(HOMEBREW_TAP_|MACOS_)/.test(n));
+
 export const installLink = (slug: string, ownerId: number, repoId: number) =>
   `https://github.com/apps/${slug}/installations/new/permissions?suggested_target_id=${ownerId}&repository_ids[]=${repoId}`;
 
@@ -168,10 +187,21 @@ export async function proposeEntry(gh: GitHub, hub: string, name: string, repo: 
   return pr.html_url;
 }
 
-export async function installOnProject(gh: GitHub, hub: string, repo: string): Promise<string> {
-  const vars = await gh.json<{ variables: { name: string; value: string }[] }>("GET", `/repos/${hub}/environments/tapster/variables`);
-  const slug = vars.variables.find((v) => v.name === "TAPSTER_APP_SLUG")?.value;
-  if (!slug) throw new TapsterError("the hub has no App yet", "Run tapster init in a clone of the hub first.");
+export async function hubFacts(gh: GitHub, hub: string): Promise<{ slug: string; apple: boolean }> {
+  const vars = await hubEnv(gh, hub, "variables");
+  const slug = vars.find((v) => v.name === "TAPSTER_APP_SLUG")?.value;
+  if (!slug) throw new TapsterError(`${hub} has no App yet`, "Run tapster init in a clone of the hub first.");
+  return { slug, apple: vars.some((v) => v.name === "TAPSTER_TEAM_ID") };
+}
+
+export function withoutMac(entry: string): string | null {
+  const lines = entry.split("\n").filter((l) => !/^ {6}darwin-[a-z0-9]+: /.test(l));
+  const at = lines.findIndex((l) => /^ {4}assets:\s*$/.test(l));
+  if (at >= 0 && !/^ {6}\S/.test(lines[at + 1] ?? "")) return null;
+  return lines.join("\n");
+}
+
+export async function installOnProject(gh: GitHub, slug: string, repo: string): Promise<string> {
   const project = await gh.getRepo(repo);
   const owner = await gh.json<{ id: number }>("GET", `/users/${repo.split("/")[0]}`);
   return `- open this page and choose Install, unless the hub's App already reaches ${repo}; the project is preselected (keep "Only select repositories"):\n  ${installLink(slug, owner.id, project.id)}`;

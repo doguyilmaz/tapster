@@ -1,0 +1,252 @@
+---
+import { LinkButton } from "@astrojs/starlight/components";
+import { Image } from "astro:assets";
+import hub from "../assets/hero.webp";
+
+const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
+const route = [
+  { title: "Tag pushed", text: "You push v1.4.0 in the project.", where: "Your project" },
+  { title: "Draft opened", text: "The project's workflow builds the archives, attests them and opens a draft release.", where: "Your project, which holds no keys" },
+  { title: "Checked", text: "The hub matches every file against checksums.txt and its build attestation.", where: "Your hub" },
+  { title: "Signed and notarized", text: "The hub signs the macOS code with your Developer ID. Apple notarizes it.", where: "Your hub" },
+  { title: "Delivered", text: "The release is published and the cask is written. brew install gets the signed build.", where: "Your users' machines" },
+];
+const keys = [
+  { title: "No tapster server", text: "tapster is a command you run and an Action that runs in your hub. The optional doorbell runs in your own Cloudflare account." },
+  { title: "One place for keys", text: "Your Apple certificate, notary key and App key are secrets of your hub. Only its main branch can open them." },
+  { title: "A stolen key is not enough", text: "Only you can tag your projects. The hub signs only drafts that your own workflows built." },
+];
+const dest = [
+  { title: "Homebrew", text: "Casks with signed, notarized builds" },
+  { title: "Scoop", text: "Manifests for Windows builds" },
+  { title: "apt", text: "Signed packages from your Pages site" },
+  { title: "dnf", text: "Signed rpms from the same site" },
+  { title: "Sparkle", text: "Updates inside your Mac app" },
+];
+---
+
+<div class="home not-content">
+  <section class="travels">
+    <div>
+      <h2>How a release travels</h2>
+      <p class="intro">Each project keeps building its own release. The hub does everything that needs a key.</p>
+      <ol class="route">
+        {route.map((r, i) => (
+          <li class={i === route.length - 1 ? "last" : ""}>
+            <span class="pin" aria-hidden="true" />
+            <strong>{r.title}</strong>
+            <span class="text">{r.text}</span>
+            <span class="where">{r.where}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+    <Image class="art" src={hub} width={560} height={560} alt="The tapster octopus takes builds from several projects and sends them out as sealed parcels" />
+  </section>
+
+  <section class="keys">
+    <div>
+      <h2>Your keys stay in your accounts</h2>
+      <p class="intro">Your keys go from your computer to your own GitHub repository and nowhere else. No one else, including tapster's author, ever receives them.</p>
+      <a class="more" href={`${base}reference/security/`}>Read the security model</a>
+    </div>
+    <ul>
+      {keys.map((k) => (
+        <li><strong>{k.title}</strong><span>{k.text}</span></li>
+      ))}
+    </ul>
+  </section>
+
+  <section class="dest">
+    <h2>Where it delivers</h2>
+    <ul>
+      {dest.map((d) => (
+        <li><strong>{d.title}</strong><span>{d.text}</span></li>
+      ))}
+    </ul>
+  </section>
+
+  <section class="start">
+    <div>
+      <h2>Set up your hub</h2>
+      <p>You need a GitHub account, Bun and the GitHub CLI. Signing for macOS also needs an Apple Developer account.</p>
+    </div>
+    <LinkButton href={`${base}tutorial/before/`}>Start the tutorial</LinkButton>
+  </section>
+</div>
+
+<style>
+  .home section {
+    padding: clamp(3rem, 7vw, 5rem) 0;
+    border-top: 1px solid var(--sl-color-gray-6);
+  }
+  h2 {
+    font-size: clamp(1.8rem, 3.4vw, 2.5rem);
+    line-height: 1.1;
+    font-weight: 720;
+    letter-spacing: -0.03em;
+    color: var(--sl-color-white);
+    margin: 0 0 0.9rem;
+  }
+  .intro {
+    font-size: 1.1rem;
+    color: var(--sl-color-gray-2);
+    max-width: 34em;
+    margin: 0;
+  }
+
+  .travels {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
+    gap: clamp(2.5rem, 6vw, 5rem);
+    align-items: center;
+  }
+  .route {
+    list-style: none;
+    margin: 2.2rem 0 0;
+    padding: 0;
+  }
+  .route li {
+    position: relative;
+    display: grid;
+    gap: 0.15rem;
+    padding: 0 0 1.6rem 2.4rem;
+    margin: 0;
+  }
+  .route li::before {
+    content: "";
+    position: absolute;
+    left: 8px;
+    top: 1.4rem;
+    bottom: 0.2rem;
+    width: 2px;
+    background: var(--sl-color-gray-5);
+  }
+  .route li.last {
+    padding-bottom: 0;
+  }
+  .route li.last::before {
+    display: none;
+  }
+  .pin {
+    position: absolute;
+    left: 0;
+    top: 0.25rem;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 3px solid var(--sl-color-gray-4);
+    background: var(--sl-color-black);
+  }
+  .route li.last .pin {
+    border-color: var(--sl-color-accent);
+    background: var(--sl-color-accent);
+  }
+  .route strong {
+    font-size: 1.1rem;
+    color: var(--sl-color-white);
+  }
+  .text {
+    color: var(--sl-color-gray-2);
+  }
+  .where {
+    font-size: var(--sl-text-sm);
+    font-weight: 600;
+    color: var(--sl-color-accent);
+  }
+  .art {
+    width: 100%;
+    height: auto;
+    border-radius: 28px;
+    box-shadow: 0 30px 60px -34px rgb(20 18 40 / 0.6);
+  }
+
+  .keys {
+    display: grid;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+    gap: clamp(2rem, 6vw, 5rem);
+  }
+  .more {
+    display: inline-block;
+    margin-top: 1.4rem;
+    font-weight: 600;
+    color: var(--sl-color-accent);
+  }
+  .keys ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 1.6rem;
+  }
+  .keys li {
+    display: grid;
+    gap: 0.3rem;
+    margin: 0;
+    padding-left: 1.1rem;
+    border-left: 3px solid var(--tp-wax);
+  }
+  .keys strong {
+    font-size: 1.1rem;
+    color: var(--sl-color-white);
+  }
+  .keys span {
+    color: var(--sl-color-gray-2);
+  }
+
+  .dest ul {
+    list-style: none;
+    margin: 1.6rem 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    border-top: 1px solid var(--sl-color-gray-5);
+  }
+  .dest li {
+    display: grid;
+    gap: 0.25rem;
+    margin: 0;
+    padding: 1rem 1.2rem 0 0;
+  }
+  .dest li + li {
+    padding-left: 1.2rem;
+    border-left: 1px solid var(--sl-color-gray-6);
+  }
+  .dest strong {
+    font-size: 1.1rem;
+    color: var(--sl-color-white);
+  }
+  .dest span {
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+
+  .start {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem 3rem;
+  }
+  .start p {
+    margin: 0;
+    color: var(--sl-color-gray-2);
+    max-width: 36em;
+  }
+
+  @media (max-width: 50rem) {
+    .travels,
+    .keys {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .dest ul {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .dest li,
+    .dest li + li {
+      padding: 1rem 0.8rem 0.8rem 0;
+      border-left: 0;
+      border-bottom: 1px solid var(--sl-color-gray-6);
+    }
+  }
+</style>

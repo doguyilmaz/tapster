@@ -156,26 +156,45 @@ jobs:
   masked:
     runs-on: macos-15
     permissions: { contents: read }
+    env: { TAPSTER_APP_ID: "12345", TAPSTER_APP_PRIVATE_KEY: "${{ secrets.CI_CANARY_APP_KEY }}", GITHUB_TOKEN: "${{ github.token }}" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with: { bun-version: 1.4.3 }
       - name: trust the canary certificate so the keychain and codesign paths run
         run: sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain tests/leak/canary-cert.pem
-      - name: one fake work item for sign, replaced by fetch when the CI App can read the fixture
+      - name: stand in for api.github.com and uploads.github.com
+        run: |
+          d="$RUNNER_TEMP/stub" && mkdir -p "$d"
+          /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -keyout "$d/key.pem" -out "$d/cert.pem" -days 1 -subj "/CN=tapster leak stub" \
+            -addext "subjectAltName=DNS:api.github.com,DNS:uploads.github.com" 2>/dev/null
+          echo "127.0.0.1 api.github.com uploads.github.com" | sudo tee -a /etc/hosts >/dev/null
+          sudo nohup "$(command -v bun)" tests/leak/stub.ts "$d/cert.pem" "$d/key.pem" 443 > "$d/stub.log" 2>&1 &
+          for i in $(seq 1 40); do curl -sf --cacert "$d/cert.pem" https://api.github.com/__mode/ok >/dev/null && break; sleep 0.5; done
+          echo "NODE_EXTRA_CA_CERTS=$d/cert.pem" >> "$GITHUB_ENV"
+      - id: check
+        name: check through the stub, with the App key as a real secret
+        continue-on-error: true
+        uses: ./
+        with: { mode: check, template: 2, config: tests/leak/hub/stub.yml }
+      - name: fetch through the stub
+        continue-on-error: true
+        uses: ./
+        with: { mode: fetch, template: 2, config: tests/leak/hub/stub.yml, work: "${{ steps.check.outputs.work }}" }
+      - name: sign (nothing to sign)
+        continue-on-error: true
+        uses: ./
+        with: { mode: sign, template: 2, config: tests/leak/hub/stub.yml }
+      - name: publish through the stub
+        continue-on-error: true
+        uses: ./
+        with: { mode: publish, template: 2, config: tests/leak/hub/stub.yml }
+      - name: one fake work item for sign
         run: |
           mkdir -p "$RUNNER_TEMP/tapster/fixture/v0.0.1/bin/a"
           printf 'int main(void){return 0;}\n' > "$RUNNER_TEMP/m.c" && clang -o "$RUNNER_TEMP/tapster/fixture/v0.0.1/bin/a/fixture" "$RUNNER_TEMP/m.c"
           printf '%s' '{"items":[{"package":"fixture","tag":"v0.0.1","releaseId":1,"resume":false,"before":[],"checksums":[],"archives":[{"asset":"a","platform":"darwin-arm64","dir":"'"$RUNNER_TEMP"'/tapster/fixture/v0.0.1/bin/a","binaries":["fixture"]}],"status":"fetched"}]}' > "$RUNNER_TEMP/tapster/manifest.json"
-      - id: check
-        continue-on-error: true
-        uses: ./
-        with: { mode: check, template: 2, config: tests/leak/hub/tapster.yml }
-        env: { TAPSTER_APP_ID: "${{ vars.CI_APP_ID }}", TAPSTER_APP_PRIVATE_KEY: "${{ secrets.CI_APP_PRIVATE_KEY }}", GITHUB_TOKEN: "${{ github.token }}", TAPSTER_TEAM_ID: CANARY0001 }
-      - name: fetch the fixture drafts (one good, one malformed, one malicious)
-        continue-on-error: true
-        uses: ./
-        with: { mode: fetch, template: 2, config: tests/leak/hub/tapster.yml, work: "${{ steps.check.outputs.work }}" }
-        env: { TAPSTER_APP_ID: "${{ vars.CI_APP_ID }}", TAPSTER_APP_PRIVATE_KEY: "${{ secrets.CI_APP_PRIVATE_KEY }}" }
       - name: sign (canary certificate, fails on purpose at the team check)
         continue-on-error: true
         uses: ./
@@ -187,8 +206,6 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.CI_CANARY_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.CI_CANARY_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.CI_CANARY_NOTARY_ISSUER_ID }}
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with: { bun-version: 1.4.3 }
       - name: three sealed app items for sparkle
         run: bun tests/leak/sparkle.ts "$RUNNER_TEMP"
       - name: sparkle (two canary keys, one app pinned to the other key)
@@ -300,7 +317,7 @@ jobs:
           EXPECT_STAGES: >-
             {"plain":["tapster: failed (openssl exited with", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
             "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "leakseed v1.0.0: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
-            "masked":["fixture v0.0.1: failed (", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
+            "masked":["fixture-linux v0.0.9: published", "fixture v0.0.1: failed (", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
             "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "leakseed v1.0.0: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
             "plain-linux":["linux: signed 1 checked package with key", "tapster: failed (gpg exited with"],
             "masked-linux":["linux: signed 1 checked package with key", "tapster: failed (gpg exited with"],

@@ -60,3 +60,10 @@ test("two packages cannot ship a binary with the same name", () => {
 `;
   expect(() => parseConfig(twice, "doguyilmaz")).toThrow(TapsterError);
 });
+
+test("scoop needs a Windows build and broken YAML names its line", async () => {
+  const { parseHub } = await import("../src/config");
+  const hub = "version: 1\ntap: o/tap\npackages:\n  - name: t\n    repo: o/t\n    binaries: [t]\n    assets: { darwin-arm64: t.tar.gz }\n    scoop: true\n";
+  expect(parseHub(hub, "o").invalid[0]?.reason).toBe("t: scoop needs a Windows asset");
+  expect(() => parseHub("version: 1\npackages: [\n  - a: b\n", "o")).toThrow(/tapster.yml is not valid YAML at line \d+/);
+});

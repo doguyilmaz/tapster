@@ -128,3 +128,8 @@ test("a universal app without Sparkle has no arch floor and no auto_updates", ()
   expect(out).toContain('  uninstall launchctl: "com.doguyilmaz.Battistics.PowerHelper",\n            quit:      "com.doguyilmaz.Battistics"\n');
   expect(() => renderAppCask({ pkg: apps[1], version: "1.4.1", sha256: "6".repeat(64), macos: "leopard", description: "x", homepage: "https://x.y" })).toThrow(/leopard/);
 });
+
+test("a tool with only Windows builds gets no cask", () => {
+  const winOnly = { ...aims, assets: { "windows-amd64": "aims_{version}_windows_amd64.zip" } };
+  expect(renderCask({ ...aimsInput, pkg: winOnly, downloads: [d("windows-amd64", "aims_0.1.5_windows_amd64.zip", "5")] })).toBeNull();
+});

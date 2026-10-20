@@ -2,7 +2,7 @@ import type { CodeItem } from "./bundle";
 import { type AppPackage, BUNDLE_ID } from "./config";
 import { TapsterError } from "./errors";
 
-const refuse = (what: string) => new TapsterError(what, "Set the identifier under code in tapster.yml, or fix the bundle's CFBundleIdentifier.");
+const refuse = (what: string) => new TapsterError(what, "Set the identifier under code in tapster.yml or fix the bundle's CFBundleIdentifier.");
 
 export function identifierFor(item: CodeItem, pkg: AppPackage): string {
   if (item.path === ".") {

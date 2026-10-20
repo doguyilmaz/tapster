@@ -9,6 +9,7 @@ import { currentRepo, userGitHub } from "./gh";
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
 import { fillWorkflow, sparkleLabels } from "./init";
+import { releaseSecrets } from "./hubpr";
 import { everyFromFlow } from "./schedule";
 
 export type Check = { name: string; ok: boolean; fix: string; note?: string };
@@ -97,7 +98,7 @@ export function workflowCheck(text: string, me: { version: string; sha: string |
   const pin = PIN.exec(text);
   if (!pin) return bad(name, "The workflow does not pin tapster. Run tapster init --workflow.");
   if (pin[1] !== me.sha) {
-    return ok(name, `the hub runs tapster ${pin[2]} (${pin[1]!.slice(0, 7)}) and this is tapster ${me.version}; tapster init --workflow moves the hub to this one, and the tapster that wrote the workflow checks it byte for byte`);
+    return ok(name, `the hub runs tapster ${pin[2]} (${pin[1]!.slice(0, 7)}) and this is tapster ${me.version}; tapster init --workflow moves the hub to this one. The tapster that wrote the workflow checks it byte for byte`);
   }
   const labels = [...text.matchAll(/SPARKLE_KEY_([A-Z0-9]+): "/g)].map((m) => m[1]!.toLowerCase());
   const expected = fillWorkflow(hubWorkflow, pinsJson, { sha: pin[1]!, tag: pin[2]! }, labels, everyFromFlow(text) ?? 10);
@@ -228,7 +229,8 @@ async function apiChecks(gh: GitHub, hub: string, owner: string, config: HubConf
       const note = p.protection === "dependabot" ? `branches named dependabot/... are open on ${p.repo}, so a stolen App key could run its workflows on code of its own there` : undefined;
       checks.push(problems.length ? bad(`${p.repo} is protected`, `${problems.join("; ")}. Run tapster add in a clone of ${p.repo}.`) : ok(`${p.repo} is protected`, note));
     }
-    const leftovers = (await list<{ name: string }>(gh, `/repos/${p.repo}/actions/secrets?per_page=100`, "secrets")).map((x) => x.name).filter((n) => /^(HOMEBREW_TAP_|MACOS_)/.test(n));
+    const names = (await list<{ name: string }>(gh, `/repos/${p.repo}/actions/secrets?per_page=100`, "secrets")).map((x) => x.name);
+    const leftovers = releaseSecrets(names);
     checks.push(leftovers.length ? bad(`${p.repo} holds no release secrets`, `Delete ${leftovers.join(", ")}: gh secret delete <name> --repo ${p.repo}`) : ok(`${p.repo} holds no release secrets`));
   }
   return checks;
@@ -238,7 +240,7 @@ async function appNote(gh: GitHub, hub: string, repos: string[]): Promise<string
   const vars = await gh.json<{ variables: { name: string; value: string }[] }>("GET", `/repos/${hub}/environments/tapster/variables`).catch(() => null);
   const slug = vars?.variables.find((v) => v.name === "TAPSTER_APP_SLUG")?.value;
   if (!slug || repos.length === 0) return null;
-  return `note the App must be installed on ${repos.join(", ")} and not on ${hub}; GitHub shows its repositories only to the App itself, so check them at https://github.com/apps/${slug}/installations/new (the hub's check job also reports both)`;
+  return `note: the App must be installed on ${repos.join(", ")} and not on ${hub}; GitHub shows its repositories only to the App itself, so check them at https://github.com/apps/${slug}/installations/new (the hub's check job also reports both)`;
 }
 
 export function configChecks(text: string | null, owner: string): { checks: Check[]; config: HubConfig | null } {

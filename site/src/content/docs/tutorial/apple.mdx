@@ -1,0 +1,81 @@
+---
+title: "Get your Apple credentials"
+description: "Export a Developer ID certificate and create an App Store Connect API key for notarization."
+sidebar:
+  order: 2
+  label: "2. Get your Apple credentials"
+---
+import { Steps } from "@astrojs/starlight/components";
+import TutorialProgress from "../../../components/TutorialProgress.astro";
+
+<TutorialProgress step={2} />
+
+macOS opens downloaded software without a warning only when it is signed with a Developer ID certificate and notarized
+by Apple. Your hub does both, so it needs two things from your Apple Developer account:
+
+<Steps>
+
+1. a **Developer ID Application certificate**, exported as a `.p12` file;
+2. an **App Store Connect API key**, a `.p8` file, which lets the hub send builds to Apple for notarization.
+
+</Steps>
+
+:::note
+Publishing only Linux or Windows builds? Skip this step. In the next one, answer `n` when tapster asks about macOS. You
+can add these later with `tapster init --rotate certificate` and `tapster init --rotate notary`.
+:::
+
+## 1. Get a Developer ID Application certificate
+
+If you have one, it is in Keychain Access under **login**, **My Certificates**, named
+`Developer ID Application: Your Name (TEAMID)`. Go to part 2.
+
+If you have none, the account holder of your Apple Developer team can create one in Xcode:
+
+<Steps>
+
+1. Open **Xcode**, then **Settings**, then **Accounts**.
+2. Select your Apple ID and your team, then click **Manage Certificates**.
+3. Click **+** and choose **Developer ID Application**.
+
+</Steps>
+
+The certificate and its private key are now in your login keychain.
+
+## 2. Export it as a .p12 file
+
+<Steps>
+
+1. Open **Keychain Access** and select **login**, then **My Certificates**.
+2. Right-click `Developer ID Application: Your Name (TEAMID)` and choose **Export**.
+3. Choose the format **Personal Information Exchange (.p12)** and save it, for example as `developer-id.p12`.
+4. Set a password. tapster asks for it in the next step.
+
+</Steps>
+
+:::tip[You should see]{icon="approve-check-circle"}
+A `.p12` file. If the certificate shows up under **Certificates** but not under **My Certificates**, this Mac does not
+have its private key. Export it on the Mac that created it.
+:::
+
+## 3. Create an App Store Connect API key
+
+<Steps>
+
+1. Open [App Store Connect](https://appstoreconnect.apple.com), then **Users and Access**, then **Integrations**.
+2. Choose **App Store Connect API** and the **Team Keys** tab. Click **+**.
+3. Name the key `tapster` and give it the **Developer** access. Click **Generate**.
+4. Click **Download** next to the new key. Apple offers the download only once.
+5. Write down the **Key ID** from the key's row (10 characters) and the **Issuer ID** shown above the list.
+
+</Steps>
+
+:::tip[You should see]{icon="approve-check-circle"}
+A file named `AuthKey_<KEYID>.p8`, a Key ID such as `2X9R4HXF34` and an Issuer ID such as
+`57246542-96fe-1a63-e053-0824d011072a`.
+:::
+
+:::note[Where your keys go]{icon="padlock"}
+Keep both files on your Mac for the next step. tapster reads each one once and stores it as a secret of your own hub.
+They go nowhere else. Keep a backup somewhere offline: GitHub never shows a secret again.
+:::

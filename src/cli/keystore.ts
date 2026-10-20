@@ -123,7 +123,7 @@ export async function previousKey(store: Store, ref: KeyRef): Promise<string | n
   if (value !== null || !(await store.exists(ref))) return value;
   throw new TapsterError(
     "the previous key is in your keychain, but tapster could not read it",
-    "Choose Allow when macOS asks, and run this where you can see that question (not over SSH). Nothing was changed.",
+    "Choose Allow when macOS asks. Run this where you can see that question (not over SSH). Nothing was changed.",
   );
 }
 
@@ -131,7 +131,7 @@ export function requireStore(what: string): Store {
   const store = localStore();
   if (store) return store;
   throw new TapsterError(
-    `tapster keeps a copy of ${what} in your keychain, and this system has none it can use`,
-    "Run this on macOS, or on Linux with secret-tool (libsecret-tools) installed, so the key is never kept only in GitHub, which never gives secrets back.",
+    `tapster keeps a copy of ${what} in your keychain, but this system has none it can use`,
+    "Run this on macOS or on Linux with secret-tool (libsecret-tools) installed. The key must never live only in GitHub, which never gives secrets back.",
   );
 }

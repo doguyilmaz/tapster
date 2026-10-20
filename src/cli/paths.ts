@@ -5,7 +5,7 @@ export function cleanPath(input: string, home = process.env.HOME ?? ""): string 
   let p = input.trim();
   const quoted = p.length > 1 && (p[0] === "'" || p[0] === '"') && p.at(-1) === p[0];
   p = quoted ? p.slice(1, -1) : p.replace(/\\(.)/g, "$1");
-  if (!p) throw new TapsterError("no path was given", "Type the path, or drag the file into the terminal.");
+  if (!p) throw new TapsterError("no path was given", "Type the path or drag the file into the terminal.");
   return p.replace(/^~(?=\/|$)/, home);
 }
 

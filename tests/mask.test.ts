@@ -51,3 +51,14 @@ test("outside GitHub Actions nothing is printed when a value is registered", () 
   expect(writes.join("")).not.toContain("cli-only-secret-value");
   expect(scrub("x cli-only-secret-value")).toBe("x ***");
 });
+
+test("a missing workflow token points at the workflow, not the environment", () => {
+  const saved = process.env.GITHUB_TOKEN;
+  delete process.env.GITHUB_TOKEN;
+  try {
+    expect(() => readSecret("GITHUB_TOKEN")).toThrow(expect.objectContaining({ fix: expect.stringContaining("tapster init --workflow") }));
+    expect(() => readSecret("MACOS_SIGN_P12")).toThrow(expect.objectContaining({ fix: expect.stringContaining('"tapster" environment') }));
+  } finally {
+    if (saved !== undefined) process.env.GITHUB_TOKEN = saved;
+  }
+});

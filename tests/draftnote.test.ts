@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { judge, noteText, withNote } from "../src/draftnote";
+import { judge, noteText, waitingSince, withNote } from "../src/draftnote";
 
 test("the note goes on top and leaves the owner's text alone", () => {
   const body = "## Changes\n- faster\n";
@@ -57,4 +57,12 @@ test("writing the note keeps the draft's tag, which GitHub drops from a body-onl
   const release = { id: 7, tag_name: "v1.2.3", body: "notes" } as never;
   await writeNote(gh, "o/p", release, withNote("notes", "x"));
   expect(sent).toEqual([{ body: withNote("notes", "x"), tag_name: "v1.2.3" }]);
+});
+
+test("a draft waits an hour from its last upload, not from the date of its commit", () => {
+  const asset = (created_at: string) => ({ id: 1, name: "a", size: 1, state: "uploaded", digest: null, browser_download_url: "", created_at });
+  const release = { created_at: "2026-10-01T00:00:00Z", assets: [asset("2026-10-19T11:40:00Z"), asset("2026-10-19T11:50:00Z")] };
+  expect(waitingSince(release)).toBe("2026-10-19T11:50:00Z");
+  expect(waitingSince({ created_at: "2026-10-01T00:00:00Z", assets: [] })).toBe("2026-10-01T00:00:00Z");
+  expect(judge({ kind: "waiting", since: waitingSince(release) }, Date.parse("2026-10-19T12:00:00Z"))).toBe("waiting");
 });

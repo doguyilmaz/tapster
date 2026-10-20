@@ -108,3 +108,9 @@ test("a rotation names the next key and its public half together", () => {
   expect(p.sparkle!.next_key).toBe("newer");
   expect(() => parseConfig(rot.replace(", next_key: newer", ""), "o")).toThrow(/next_key and next_public_key/);
 });
+
+test("a DMG name with a placeholder other than {version} is refused before anything is published", async () => {
+  const { parseHub } = await import("../src/config");
+  const { invalid } = parseHub(app.replace('name: "HafifPix-{version}.dmg"', 'name: "HafifPix-{tag}.dmg"'), "o");
+  expect(invalid[0]?.reason).toBe("hafifpix: HafifPix-{tag}.dmg uses a placeholder other than {version}");
+});

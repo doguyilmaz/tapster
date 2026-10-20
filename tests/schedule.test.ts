@@ -26,3 +26,14 @@ test("the hub workflow gets the schedule it is asked for", async () => {
   expect(everyFromFlow(fillWorkflow(template, pins, tapster, [], 60))).toBe(60);
   expect(fillWorkflow(template, pins, tapster)).not.toContain("__");
 });
+
+test("the interval error lists every interval tapster accepts", () => {
+  expect(cronFor(6)).toBe("7-59/6 * * * *");
+  expect(cronFor(12)).toBe("7-59/12 * * * *");
+  expect(() => cronFor(7)).toThrow(TapsterError);
+  try {
+    cronFor(7);
+  } catch (e) {
+    expect((e as TapsterError).fix).toBe("Use 5, 6, 10, 12, 15, 20 or 30 minutes. Longer intervals must be 60 minutes times a divisor of 24.");
+  }
+});

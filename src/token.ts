@@ -27,7 +27,7 @@ export async function installationToken(
   const app = new GitHub(appJwt(appId, pem), fetchImpl);
   const installation = await app.json<{ id: number }>("GET", `/repos/${repo}/installation`).catch((e) => {
     if (e instanceof GitHubError && e.status === 404) {
-      throw new TapsterError(`the hub's App is not installed on ${repo}`, `Run tapster add in a clone of ${repo}; it opens the App's install page with the project selected.`);
+      throw new TapsterError(`the hub's App is not installed on ${repo}`, `Run tapster add in a clone of ${repo}; it prints the App's install link with the project selected.`);
     }
     throw e;
   });

@@ -1,0 +1,139 @@
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/geist.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/geist-mono.woff2") format("woff2");
+}
+
+html {
+  scrollbar-gutter: stable;
+}
+
+:root {
+  --sl-font: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --sl-font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sl-text-h1: 2.5rem;
+  --sl-text-h2: 1.6rem;
+  --sl-text-h3: 1.25rem;
+  --sl-content-width: 46rem;
+  --tp-wax: #d0453a;
+  --tp-navy: #26315f;
+  --tp-orange: #f2891f;
+
+  --sl-color-accent-low: #3a1f0b;
+  --sl-color-accent: #f2891f;
+  --sl-color-accent-high: #ffd2a6;
+  --sl-color-white: #faf9f7;
+  --sl-color-gray-1: #ecebe8;
+  --sl-color-gray-2: #c9c6c0;
+  --sl-color-gray-3: #9c9890;
+  --sl-color-gray-4: #6f6b64;
+  --sl-color-gray-5: #4a4742;
+  --sl-color-gray-6: #2d2b28;
+  --sl-color-black: #1c1b19;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #fde6cf;
+  --sl-color-accent: #b9560a;
+  --sl-color-accent-high: #6e3105;
+  --sl-color-white: #1c1b19;
+  --sl-color-gray-1: #2d2b28;
+  --sl-color-gray-2: #4a4742;
+  --sl-color-gray-3: #6f6b64;
+  --sl-color-gray-4: #9c9890;
+  --sl-color-gray-5: #c9c6c0;
+  --sl-color-gray-6: #ecebe8;
+  --sl-color-gray-7: #f6f5f3;
+  --sl-color-black: #ffffff;
+}
+
+body {
+  font-feature-settings: "ss01", "cv11";
+}
+
+h1,
+h2,
+h3,
+.sl-markdown-content :is(h1, h2, h3) {
+  letter-spacing: -0.02em;
+}
+
+header.header::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: repeating-linear-gradient(-45deg, var(--tp-wax) 0 10px, transparent 10px 15px, var(--tp-navy) 15px 25px, transparent 25px 30px);
+}
+
+:root[data-theme="dark"] header.header::before {
+  background: repeating-linear-gradient(-45deg, var(--tp-wax) 0 10px, transparent 10px 15px, #8a9be6 15px 25px, transparent 25px 30px);
+}
+
+.site-title {
+  color: var(--sl-color-white);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.sl-link-button.primary {
+  background: var(--tp-orange);
+  border-color: var(--tp-orange);
+  color: #1c1b19;
+  font-weight: 600;
+}
+
+.sl-link-button.primary:hover {
+  background: #f79a3c;
+  border-color: #f79a3c;
+  color: #1c1b19;
+}
+
+.site-title img {
+  border-radius: 22%;
+}
+
+.sl-markdown-content code:not(pre code) {
+  border-radius: 5px;
+  padding: 0.08em 0.36em;
+}
+
+.sl-markdown-content .starlight-aside {
+  border-radius: 0 8px 8px 0;
+}
+
+:root {
+  --sl-color-purple-low: #12301f;
+  --sl-color-purple: #3fbf7f;
+  --sl-color-purple-high: #c9f2db;
+}
+
+:root[data-theme="light"] {
+  --sl-color-purple-low: #e6f6ec;
+  --sl-color-purple: #1f8a55;
+  --sl-color-purple-high: #0f4d2e;
+}
+
+.main-pane:has(.tp) .pagination-links a[rel="next"] {
+  border-color: var(--tp-orange);
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-white);
+}
+
+.main-pane:has(.tp) .pagination-links a[rel="next"] .link-title {
+  color: var(--sl-color-accent-high);
+}
+
+.main-pane:has(.tp) .pagination-links a[rel="next"]:hover {
+  border-color: var(--sl-color-accent-high);
+}
