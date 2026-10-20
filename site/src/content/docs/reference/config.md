@@ -65,7 +65,51 @@ For `kind: go` and `kind: bun`.
 | `scoop` | `false` | Write a Scoop manifest. Needs a `windows-*` asset. |
 | `entitlements` | none | Extra signing entitlements, written in full: `com.apple.security.cs.` followed by `allow-jit`, `allow-unsigned-executable-memory`, `disable-executable-page-protection`, `allow-dyld-environment-variables` or `disable-library-validation`. Bun tools get `allow-jit` by themselves. |
 | `linux` | `false` | Build `.deb` and `.rpm` packages. Needs a `linux-*` asset and the top-level `linux`. See [apt and dnf](/guides/linux/). |
-| `cask` | none | `uninstall` (`launchctl`, `quit`), `zap` (`trash` paths starting with `~/`) and `caveats` for the cask. |
+| `app` | none | An app at the top of every macOS archive, see [An app in a tool's archive](#an-app-in-a-tools-archive). |
+| `cask` | none | `uninstall` (`launchctl`, `quit`), `zap` (`trash` paths starting with `~/`), `caveats` and `postflight` for the cask, see [A command after install](#a-command-after-install). |
+
+### An app in a tool's archive
+
+Some tools ship an app beside the binary, so macOS shows them with a name and an icon in Login Items, notifications
+and privacy settings. Name it under `app`:
+
+```yaml
+version: 1
+tap: you/tap
+packages:
+  - name: mytool
+    repo: you/mytool
+    binaries: [mytool]
+    assets:
+      darwin-universal: "mytool_{version}_darwin_universal.tar.gz"
+    app:
+      name: MyTool.app
+      bundle_id: com.you.mytool
+      binaries: [Contents/MacOS/mytool]
+```
+
+| Key | Default | What it is |
+| --- | --- | --- |
+| `app.name` | required | The app's folder at the top of the archive. |
+| `app.bundle_id` | required | Must equal the app's `CFBundleIdentifier`. Nested code is identified below it. |
+| `app.binaries` | none | Paths inside the app that the cask links as commands. A command linked from the app replaces the archive's binary of the same name. |
+
+The hub checks the app as it checks a Mac app, signs it inside out with the hardened runtime, notarizes it with the
+binaries and staples it. The app's main executable gets the tool's `entitlements`. The archive must hold no other
+copy of the app, its symlinks must stay inside it and the app may not carry an update feed: Homebrew updates the
+tool. A tool with an app has macOS archives only, since the cask's `app` works only on macOS.
+
+### A command after install
+
+```yaml
+    cask:
+      postflight: { binary: mytool, args: [setup, --quiet] }
+```
+
+After every install and upgrade Homebrew runs the command, one the cask links (one of `binaries` or `app.binaries`;
+for a Mac app, one of `cask.binaries`), with up to 10 arguments of letters, digits and `._:=@%+,/-`. A failure does not
+stop the install. Homebrew runs it in its sandbox: no network, no access to your home folder and a temporary `HOME`.
+The cask renders it as `postflight_steps`, which needs Homebrew 7 or newer.
 
 ## Mac apps
 
@@ -80,7 +124,7 @@ For `kind: app`. See [Mac apps with Sparkle](/guides/sparkle/).
 | `sparkle` | none | `key` (the label of the hub secret `SPARKLE_KEY_<LABEL>`), `public_key`, `feed` (default `appcast.xml`) and, during a key change, `next_key` and `next_public_key`. |
 | `code` | none | Path inside the app to `{ identifier, entitlements }` for nested code. `{team}` in an entitlement becomes your Team ID. Entitlements not listed here are dropped. |
 | `carry` | none | File name to `sha256:<digest>` for files every release keeps unchanged. |
-| `cask` | none | As for tools, plus `binaries` (commands inside the app to link) and `auto_updates`. |
+| `cask` | none | As for tools, plus `binaries` (commands inside the app to link) and `auto_updates`. A `postflight` command must be one of `binaries`. |
 
 ## Platforms
 

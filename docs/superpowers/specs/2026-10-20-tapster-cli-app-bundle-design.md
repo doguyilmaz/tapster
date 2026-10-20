@@ -93,35 +93,45 @@ archive covers the unsigned app, checked in fetch.
 ### Cask
 
 ```ruby
+  depends_on :macos
+
   app "ebb.app"
   binary "#{appdir}/ebb.app/Contents/MacOS/ebb"
 ```
 
 `app` comes first, then a `binary` line for each of `binaries` whose name no app binary takes, then the app binaries.
 A command linked from the app takes the name, because it runs with the app's identity: ebb's service must run from
-`ebb.app`.
+`ebb.app`. Homebrew 7's style requires `depends_on :macos` beside `app`.
 
 ## 2. A post-install command
 
-`cask.postflight: { binary, args }` for both kinds renders:
+Homebrew 7 deprecates `postflight do ... end` blocks (Ruby, unsandboxed) for declarative `postflight_steps`, which it
+runs in its sandbox: no network, the home folder unreadable and `HOME` a temporary folder. `brew style` rejects the
+old block, so tapster renders the new one. `cask.postflight: { binary, args }` for both kinds renders:
 
 ```ruby
-  postflight do
-    system_command "#{HOMEBREW_PREFIX}/bin/ebb",
-                   args:         ["daemon", "restore"],
-                   must_succeed: false
+  postflight_steps do
+    run "bin/ebb",
+        base:         :homebrew_prefix,
+        args:         ["daemon", "restore"],
+        must_succeed: false
   end
 ```
 
 - `binary` must be the name of a command the cask links: one of `binaries` or `app.binaries` for a tool,
   `cask.binaries` for an app. So the hook runs only code the hub checked and signed (or, on Linux, attested).
-- `args`: at most 10, each 1 to 100 of `A-Z a-z 0-9 . _ : = @ % + , / -`. `system_command` takes an argument list, so
-  no shell reads them and the Ruby escaper writes them as plain strings.
+- `args`: at most 10 of `A-Z a-z 0-9 . _ : = @ % + , / -`, together short enough for one cask line (90 characters).
+  `run` takes an argument list, so no shell reads them and the Ruby escaper writes them as plain strings.
 - `must_succeed: false` is fixed: a hook never fails an install.
-- No other hook, no `sudo`, no free text and never Ruby from the config.
+- No other step, no `sudo`, no writable paths, no network, no free text and never Ruby from the config.
 
 The entry sits in `tapster.yml` on the hub's protected `main`, so only the owner can change the command. The render
 job holds no key.
+
+**Consequence for ebb.** `ebb daemon restore` reads `~/.local/state/ebb` and writes `~/Library/LaunchAgents`. In
+Homebrew 7's sandbox it sees an empty temporary home and does nothing, so the hook no longer brings the service back
+after an upgrade. That is true for any tap, with or without tapster. ebb should restore the service itself the next
+time it runs (it knows the person wanted it on) or ask the person to run `ebb daemon install` after an upgrade.
 
 ## 3. `tapster add` for a GoReleaser project
 
@@ -134,13 +144,15 @@ Before `homebrew_casks` is removed, add reads its first entry and carries into t
 | `uninstall.launchctl`, `uninstall.quit` | `cask.uninstall` |
 | `zap.trash` | `cask.zap` |
 | `hooks.post.install` of the form `system_command "#{HOMEBREW_PREFIX}/bin/NAME", args: [...], must_succeed: false` | `cask.postflight` |
+| `caveats` | `cask.caveats` |
 
 The bundle id comes from an `Info.plist` in the project whose `CFBundleExecutable` or `CFBundleName` names the app.
 When none is found the entry says `<bundle id>` and add prints it for the owner to complete. Anything else in the
 cask entry (other custom lines, other hooks) is listed as not carried. Without Apple credentials in the hub the `app`
 block is left out, as the macOS archives are.
 
-A release workflow step that moves a branch with the workflow's token is reported, with a link to section 4.
+A release workflow step that moves a branch with the workflow's token is reported, with a link to section 4. A carried
+hook is reported with a reminder that it runs in Homebrew's sandbox.
 
 The project keeps building the app. A build hook that signs or notarizes it with the old secrets must sign ad hoc
 instead (`codesign --force --sign -`); the hub signs it with the Developer ID.
@@ -149,8 +161,8 @@ instead (`codesign --force --sign -`); the hub signs it with the Developer ID.
 
 No new exception is needed. Recommended for ebb:
 
-1. Run `tapster add --auto-tag`. It makes the deploy key `tapster tags`, keeps its private half in the project's
-   `release` environment, which only `main` may use, and lets deploy keys pass the branch rules.
+1. Run `tapster add --auto-tag`. It makes the deploy key `tapster tags` and lets deploy keys pass the branch rules.
+   Its private half lives in the project's `release` environment, which only `main` may use.
 2. Replace the PATCH step with a workflow that reacts to the hub's publication:
 
 ```yaml
@@ -184,7 +196,7 @@ jobs:
 
 Why two jobs: the hub publishes with its App token, so `release: published` starts a run, but that run's ref is the
 tag and the `release` environment admits only `main`. `workflow_dispatch` is one of the two events the workflow token
-may start, and that run is on `main`. The move job reads the latest published release itself and takes nothing from
+may start; that run is on `main`. The move job reads the latest published release itself and takes nothing from
 the event, so a stray dispatch moves the branch only to what is already published. The page still never runs ahead of
 the latest release, now the one the hub published.
 
@@ -212,6 +224,9 @@ Cloudflare token in the project.
 - A tool with an app and Linux builds: rendering `app` inside `on_macos` needs a check against `brew style` first.
 - Per-path identifiers and entitlements for code inside a tool's app (`code` of `kind: app`): left out until a project
   needs them.
+- `postflight_steps` needs Homebrew 7. A user on an older Homebrew with auto-update off cannot load such a cask.
+- Whether `writable_paths` for a hook (Homebrew's way to let a step write in the home folder) is worth a narrow
+  config key. Not added: ebb would still see a temporary `HOME` and could not reach launchd reliably from the sandbox.
 
 ## Testing
 
