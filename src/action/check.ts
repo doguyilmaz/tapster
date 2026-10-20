@@ -8,7 +8,7 @@ import { GitHub, type Release } from "../github";
 import { readSecret, requireVar } from "../mask";
 import { type Note, type WorkItem, planPackage } from "../plan";
 import { noteOutcome, waitingSince, withNote } from "../draftnote";
-import { concern, failure, record, warn } from "../report";
+import { concern, failure, reached, record, warn } from "../report";
 import { protectionProblems } from "../rulesets";
 import { GitHubError, TapsterError } from "../errors";
 import { STATE_PATH, type State, parseState, recordedChecksums } from "../state";
@@ -167,6 +167,7 @@ export async function check(ctx: Context, token: string): Promise<void> {
     let tok: InstallationToken | undefined;
     try {
       tok = await installationToken(appId, pem, pkg.repo, { contents: "write", attestations: "read" });
+      reached(pkg.name, true);
       const gh = new GitHub(tok.token);
       const repo = await gh.getRepo(pkg.repo);
       await protectionGate(gh, pkg, repo.default_branch);
@@ -203,6 +204,7 @@ export async function check(ctx: Context, token: string): Promise<void> {
       const feed = isApp(pkg) ? feedWarning(await latestRelease(gh, pkg.repo), state, pkg) : null;
       if (feed) concern(pkg.name, feed.reason, feed.fix);
     } catch (e) {
+      if (!tok) reached(pkg.name, false);
       failure(pkg.name, e);
     } finally {
       await tok?.revoke();

@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { hubPin, reportNote, tapsterUpdate } from "../src/action/check";
 import { GitHubError } from "../src/errors";
 import type { GitHub } from "../src/github";
-import { failedCount, findings, resetReportForTests } from "../src/report";
+import { failedCount, findings, reached, resetReportForTests, writeReach } from "../src/report";
 
 function latest(answer: unknown) {
   const asked: string[] = [];
@@ -63,4 +63,20 @@ test("the running tapster comes from the pin in the hub workflow, since the Acti
   expect(hubPin(`uses: doguyilmaz/tapster@${sha} # v2.0.0-rc.1`)).toEqual({ version: "2.0.0-rc.1", sha });
   expect(hubPin(`uses: doguyilmaz/tapster@${sha} # main`)).toBeNull();
   expect(hubPin("uses: doguyilmaz/tapster@v1 # v1.2.3")).toBeNull();
+});
+
+test("the check job writes one notice that names each package with yes or no", () => {
+  resetReportForTests();
+  const out: string[] = [];
+  const write = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string) => (out.push(String(chunk)), true)) as typeof process.stdout.write;
+  try {
+    writeReach();
+    reached("aims", true);
+    reached("pix", false);
+    writeReach();
+  } finally {
+    process.stdout.write = write;
+  }
+  expect(out.join("").trim()).toBe("::notice title=tapster reach::aims: yes, pix: no");
 });

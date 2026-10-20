@@ -1,6 +1,7 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { parse } from "yaml";
 import { TapsterError } from "../../src/errors";
+import { REACH_TITLE, reachNote } from "../../src/reachnote";
 
 type Ruleset = { id: number; name: string; target: string; enforcement: string; conditions?: { ref_name?: { include?: string[]; exclude?: string[] } }; rules?: { type: string }[]; bypass_actors?: unknown[] };
 type Release = { id: number; tag_name: string; draft: boolean; prerelease: boolean; created_at: string; published_at: string | null; assets: { id: number; name: string }[]; body: string; html_url?: string };
@@ -81,7 +82,7 @@ export class FakeHub {
     return this.repos.get(full.toLowerCase());
   }
 
-  completeRun(full: string): FakeRun {
+  completeRun(full: string, o: { note?: boolean } = {}): FakeRun {
     const r = this.get(full)!;
     let run = r.runs.find((x) => !x.head_branch && x.status !== "completed");
     if (!run) {
@@ -95,6 +96,9 @@ export class FakeHub {
       ? [{ annotation_level: "failure", title: "", message: "tapster: the App is not installed on any of your repositories" }]
       : listed.filter((p) => !reached.has(p.repo.toLowerCase())).map((p) => ({ annotation_level: "failure", title: "", message: `${p.name}: the hub's App is not installed on ${p.repo}` }));
     const conclusion = annotations.length ? "failure" : "success";
+    if (this.installation && o.note !== false && listed.length) {
+      annotations.push({ annotation_level: "notice", title: REACH_TITLE, message: reachNote(listed.map((p) => ({ name: p.name, reached: reached.has(p.repo.toLowerCase()) }))) });
+    }
     const id = this.nextId++;
     Object.assign(run, { status: "completed", conclusion, jobs: [{ id, name: "check", status: "completed", conclusion, completed_at: new Date().toISOString(), html_url: `${run.html_url}/job/${id}`, annotations }] });
     return run;

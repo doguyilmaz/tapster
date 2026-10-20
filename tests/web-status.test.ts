@@ -6,6 +6,7 @@ import { withNote } from "../src/draftnote";
 import type { AddView, DiffView, FollowView, InspectView, ProjectStatus, ReachView, StatusView } from "../src/web/contract";
 import { setupProblems } from "../src/web/api/status";
 import { type HubCheck, reachFromCheck } from "../src/web/api/reach";
+import { reachNote, readReachNote } from "../src/reachnote";
 import { adaptGoreleaser, adaptReleaseWorkflow, bunWorkflow } from "../src/cli/add";
 import { listAims, sampleHome } from "../scripts/demo";
 import pins from "../templates/pins.json";
@@ -87,19 +88,28 @@ test("GitHub refuses to list App installations to the gh sign-in, as FakeHub doe
   expect(((await res.json()) as { message: string }).message).toBe("You must authenticate with an access token authorized to a GitHub App in order to list installations");
 });
 
-const check = (over: Partial<HubCheck> = {}): HubCheck => ({ conclusion: "failure", created: "2026-10-20T10:00:00Z", at: "2026-10-20T10:01:00Z", url: "u", listed: ["octo/aims"], failures: [], ...over });
+const check = (over: Partial<HubCheck> = {}): HubCheck => ({ conclusion: "failure", created: "2026-10-20T10:00:00Z", at: "2026-10-20T10:01:00Z", url: "u", listed: ["octo/aims"], failures: [], reached: null, ...over });
 
-test("the hub's last check says per project whether its App reached it", () => {
+test("the check job notes per package, by name only, whether the App's token was minted", () => {
+  const note = reachNote([{ name: "aims", reached: true }, { name: "pix", reached: false }]);
+  expect(note).toBe("aims: yes, pix: no");
+  expect(readReachNote(note)).toEqual({ aims: true, pix: false });
+  expect(readReachNote("aims: maybe, x: yes; rm -rf /")).toEqual({});
+});
+
+test("only the hub's note proves that its App reached a project; other failures prove nothing", () => {
   expect(reachFromCheck("aims", "octo/aims", null, false)).toEqual({ reaches: null, how: null, reason: "the hub has not checked it yet" });
-  expect(reachFromCheck("aims", "octo/aims", check({ conclusion: "success" }), false)).toEqual({ reaches: true, how: "run", reason: null });
-  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["aims: the hub's App is not installed on octo/aims"] }), true)).toEqual({ reaches: false, how: "run", reason: "the hub's App is not installed on octo/aims" });
+  expect(reachFromCheck("aims", "octo/aims", check({ reached: { aims: true } }), false)).toEqual({ reaches: true, how: "run", reason: null });
+  expect(reachFromCheck("aims", "octo/aims", check({ reached: { aims: false }, failures: ["aims: the hub's App is not installed on octo/aims"] }), true)).toEqual({ reaches: false, how: "run", reason: "the hub's App is not installed on octo/aims" });
+  expect(reachFromCheck("aims", "octo/aims", check({ reached: { aims: false }, failures: ["aims: unexpected TypeError"] }), false)).toEqual({ reaches: false, how: "run", reason: "unexpected TypeError" });
+  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["aims: the hub's App is not installed on octo/aims"] }), false)).toMatchObject({ reaches: false });
   expect(reachFromCheck("aims", "octo/aims", check({ failures: ["tapster: the App is not installed on any of your repositories"] }), false)).toMatchObject({ reaches: false });
-  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["aims: octo/aims is not protected against a stolen App key"] }), false)).toEqual({ reaches: true, how: "run", reason: null });
+  expect(reachFromCheck("aims", "octo/aims", check({ conclusion: "success" }), false)).toEqual({ reaches: null, how: null, reason: "the hub's last check did not say" });
+  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["aims: unexpected TypeError"] }), false).reaches).toBeNull();
+  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["aims: kind: Invalid option"] }), false).reaches).toBeNull();
+  expect(reachFromCheck("aims", "octo/aims", check({ conclusion: "success", reached: { pix: true } }), false)).toEqual({ reaches: null, how: null, reason: "the hub's last check did not include aims" });
   expect(reachFromCheck("aims", "octo/aims", check({ failures: ["tapster: the App is installed on the hub"] }), false)).toEqual({ reaches: null, how: null, reason: "the App is installed on the hub" });
-  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["pix: the hub's App is not installed on octo/pix"] }), false)).toEqual({ reaches: true, how: "run", reason: null });
-  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["Process completed with exit code 1."] }), false).reaches).toBeNull();
-  expect(reachFromCheck("aims", "octo/aims", check({ failures: Array.from({ length: 10 }, (_, i) => `p${i}: x`) }), false).reaches).toBeNull();
-  expect(reachFromCheck("aims", "octo/aims", check({ conclusion: "success", listed: [] }), false)).toEqual({ reaches: null, how: null, reason: "aims was not in tapster.yml at the hub's last check" });
+  expect(reachFromCheck("aims", "octo/aims", check({ reached: { aims: true }, listed: [] }), false)).toEqual({ reaches: null, how: null, reason: "aims was not in tapster.yml at the hub's last check" });
   expect(reachFromCheck("aims", "octo/aims", null, true)).toEqual({ reaches: true, how: "release", reason: null });
 });
 
@@ -124,6 +134,14 @@ test("Check again starts one hub run, follows it and shows its verdict with its 
   expect((await call("POST", "/api/hub/run", { hub: HUB })).data).toEqual({ started: true });
   expect((await call("POST", "/api/hub/run", { hub: HUB })).data).toEqual({ started: false });
   fake.completeRun(HUB);
+});
+
+test("a hub whose check job writes no reach note leaves the App's reach open even after a passing run", async () => {
+  fake.installation = { id: 9, repos: ["octo/ebb", "octo/aims"] };
+  fake.completeRun(HUB, { note: false });
+  expect((await call("GET", `/api/projects/reach?hub=${HUB}&repo=octo/aims`)).data).toMatchObject({ reaches: null, reason: "the hub's last check did not say" });
+  fake.completeRun(HUB);
+  expect((await call("GET", `/api/projects/reach?hub=${HUB}&repo=octo/aims`)).data).toMatchObject({ reaches: true, how: "run" });
 });
 
 test("right after creating the App, the session's key answers at once", async () => {

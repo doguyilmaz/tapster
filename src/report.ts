@@ -1,12 +1,20 @@
 import * as core from "@actions/core";
 import { TapsterError } from "./errors";
 import { scrub } from "./mask";
+import { REACH_TITLE, reachNote } from "./reachnote";
 
 export type Row = { item: string; result: "published" | "rendered" | "skipped" | "failed" | "waiting"; detail: string };
 export type Finding = { item: string; reason: string; fix: string };
 
 const rows: Row[] = [];
 const found: Finding[] = [];
+const reach: { name: string; reached: boolean }[] = [];
+
+export const reached = (name: string, yes: boolean): void => void reach.push({ name: oneLine(scrub(name)), reached: yes });
+
+export function writeReach(): void {
+  if (reach.length) core.notice(reachNote(reach), { title: REACH_TITLE });
+}
 
 const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ");
 export const info = (msg: string) => core.info(oneLine(scrub(msg)));
@@ -63,4 +71,5 @@ export const rowsForTests = () => rows;
 export const resetReportForTests = () => {
   rows.length = 0;
   found.length = 0;
+  reach.length = 0;
 };

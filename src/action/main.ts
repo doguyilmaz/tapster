@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
 import { TapsterError } from "../errors";
 import { register } from "../mask";
-import { failedCount, failure, findings, writeSummary } from "../report";
+import { failedCount, failure, findings, writeReach, writeSummary } from "../report";
 import { check } from "./check";
 import { cleanupMode } from "./cleanup";
 import { loadContext } from "./context";
@@ -51,6 +51,7 @@ try {
   failure("tapster", e);
 } finally {
   await writeSummary();
+  if (mode === "check") writeReach();
   if (mode === "check") await checkOutputs(findings(), guarded ? { name: process.env.GITHUB_REPOSITORY ?? "", token } : null);
   if (failedCount() > 0) core.setFailed("tapster: some items failed; see the summary");
 }

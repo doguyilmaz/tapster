@@ -3,28 +3,30 @@ import { TapsterError } from "../../errors";
 import type { GitHub } from "../../github";
 import { readHubFile } from "../../hubcommit";
 import { type State, emptyState, parseState } from "../../state";
+import { REACH_TITLE, readReachNote } from "../../reachnote";
 import { installationRepos } from "../../token";
 import { entriesIn, hubEntries } from "../../cli/hubpr";
 import type { ReachView } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
 import { checkHub, hubRunList, me, startHubRun } from "./hub";
 
-export type HubCheck = { conclusion: string | null; created: string; at: string | null; url: string; listed: string[]; failures: string[] };
+export type HubCheck = { conclusion: string | null; created: string; at: string | null; url: string; listed: string[]; failures: string[]; reached: Record<string, boolean> | null };
 export type HubChecks = { done: HubCheck | null; running: string | null; direct: Set<string> | null };
 
 const NOT_INSTALLED = /App is not installed on /;
 
 export function reachFromCheck(name: string, repo: string, check: HubCheck | null, published: boolean): Pick<ReachView, "reaches" | "how" | "reason"> {
-  let reason = check ? `the hub's last check stopped before it reached ${name}` : "the hub has not checked it yet";
+  let reason = check ? "the hub's last check did not say" : "the hub has not checked it yet";
   if (check && !check.listed.includes(repo.toLowerCase())) reason = `${name} was not in tapster.yml at the hub's last check`;
   else if (check) {
+    const said = check.reached?.[name];
+    if (said === true) return { reaches: true, how: "run", reason: null };
     const mine = check.failures.filter((m) => m.startsWith(`${name}: `)).map((m) => m.slice(name.length + 2));
     const missing = mine.find((m) => NOT_INSTALLED.test(m)) ?? check.failures.find((m) => /^tapster: the App is not installed on any/.test(m))?.slice("tapster: ".length);
-    if (missing) return { reaches: false, how: "run", reason: missing };
+    if (said === false || missing) return { reaches: false, how: "run", reason: missing ?? mine[0] ?? `the hub's App could not reach ${repo}` };
     const hub = check.failures.find((m) => /^(tapster|hub): /.test(m));
-    const others = !hub && check.failures.length < 10 && check.failures.some((m) => /^[a-z0-9][a-z0-9-]*: /.test(m));
-    if (check.conclusion === "success" || mine.length || others) return { reaches: true, how: "run", reason: null };
     if (hub) reason = hub.replace(/^(tapster|hub): /, "");
+    else if (check.reached) reason = `the hub's last check did not include ${name}`;
   }
   return published ? { reaches: true, how: "release", reason: null } : { reaches: null, how: null, reason };
 }
@@ -41,7 +43,7 @@ export async function hubChecks(s: Session, gh: GitHub, hub: string): Promise<Hu
   const jobs = await gh.json<{ jobs: Job[] }>("GET", `/repos/${hub}/actions/runs/${last.id}/jobs?per_page=50`).then((r) => r.jobs, () => [] as Job[]);
   const job = jobs.find((j) => j.name === "check");
   const [notes, config, issues] = await Promise.all([
-    job ? gh.json<{ annotation_level: string; message: string }[]>("GET", `/repos/${hub}/check-runs/${job.id}/annotations?per_page=100`).catch(() => []) : Promise.resolve([]),
+    job ? gh.json<{ annotation_level: string; title: string | null; message: string }[]>("GET", `/repos/${hub}/check-runs/${job.id}/annotations?per_page=100`).catch(() => []) : Promise.resolve([]),
     readHubFile(gh, hub, "tapster.yml", last.head_sha).catch(() => null),
     gh.json<{ title: string; body: string | null; updated_at: string; user: { login: string } | null }[]>("GET", `/repos/${hub}/issues?state=open&creator=${encodeURIComponent("github-actions[bot]")}&per_page=20`).catch(() => []),
   ]);
@@ -55,6 +57,7 @@ export async function hubChecks(s: Session, gh: GitHub, hub: string): Promise<Hu
       url: job?.html_url ?? last.html_url,
       listed: entriesIn(config, hub.split("/")[0]!).map((e) => e.repo.toLowerCase()),
       failures: [...notes.filter((n) => n.annotation_level === "failure").map((n) => n.message), ...lines],
+      reached: ((note) => (note ? readReachNote(note.message) : null))(notes.find((n) => n.annotation_level === "notice" && n.title === REACH_TITLE)),
     },
     running,
     direct,
