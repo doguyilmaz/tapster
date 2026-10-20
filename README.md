@@ -67,7 +67,7 @@ jobs:
   guide:
     runs-on: ubuntu-24.04
     steps:
-      - uses: doguyilmaz/tapster@v1.1.0
+      - uses: doguyilmaz/tapster@v1.2.0
 ```
 
 To move a hub to a newer release, see [Upgrade tapster](https://tapster.doguyilmaz.com/guides/upgrade/).
