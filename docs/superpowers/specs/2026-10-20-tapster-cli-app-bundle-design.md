@@ -45,6 +45,7 @@ A `go` or `bun` package may name one app that sits at the top of every macOS arc
 - `app.bundle_id`: must equal the app's `CFBundleIdentifier`. It pins the identity the hub signs, so neither the
   project nor a stolen App key can choose it.
 - `app.binaries`: paths inside the app that the cask links into the PATH, default none.
+- `app.entitlements`: entitlements for the app's main executable, from the list `entitlements` allows, default none.
 
 The config refuses: `app` without a `darwin-*` asset; `app` with a `linux-*` asset (the cask's `app` stanza is
 macOS only; see open questions); a `binaries` entry inside the app (the hub signs the bundle as a whole); a bundle id
@@ -74,8 +75,9 @@ For each macOS archive, after the checksum and attestation checks of today:
 1. Sign and verify the listed binaries, as today.
 2. Sign the app inside out with the code of `kind: app` (`findCode`, `signApp`): nested code first, the bundle last,
    each with `--options runtime --timestamp`. Bundles keep their `CFBundleIdentifier`; loose Mach-O files get
-   `<bundle_id>.<file name>`. The bundle's main executable gets the tool's entitlements (the preset of its kind plus
-   `entitlements`); other code gets none. Entitlements the build put in are dropped and reported, as for apps.
+   `<bundle_id>.<file name>`. The bundle's main executable gets `app.entitlements` only, never the tool's preset or
+   `entitlements`, so an app the user grants Full Disk Access cannot inherit a library validation exception; other
+   code gets none. Entitlements the build put in are dropped and reported, as for apps.
 3. Verify with `verifyApp`: `codesign --verify --strict --deep`, then every piece is a Developer ID signature of the
    configured team with the hardened runtime and the planned identifier.
 4. Notarize the binaries and the app in the one `notarytool` submission per release of today. The folders are copied
@@ -233,6 +235,6 @@ Cloudflare token in the project.
 - Render: ebb's cask as a golden file, which CI checks with `brew style` and `brew audit`.
 - Fetch: an ebb-like archive unpacks; an unlisted Mach-O outside the app, a missing app, a second spelling of the
   app folder and a symlink out of the app are refused; the app checks without the version check.
-- Sign and publish, on macOS: the app is signed ad hoc under the configured identifier with the tool's entitlements,
+- Sign and publish, on macOS: the app is signed ad hoc under the configured identifier with `app.entitlements`,
   repacked, unpacked again and passes `codesign --verify --strict --deep`; the other entries keep their bytes.
 - add: ebb's `.goreleaser.yaml` gives the entry above; the branch move step is reported.

@@ -54,7 +54,10 @@ const cliPkg = z
     ...common,
     kind: z.enum(["go", "bun"]),
     binaries: z.array(relPath).min(1),
-    app: z.object({ name: z.string().regex(APP), bundle_id: z.string().regex(BUNDLE_ID), binaries: z.array(relPath).default([]) }).strict().optional(),
+    app: z
+      .object({ name: z.string().regex(APP), bundle_id: z.string().regex(BUNDLE_ID), binaries: z.array(relPath).default([]), entitlements: z.array(z.enum(ENTITLEMENTS)).default([]) })
+      .strict()
+      .optional(),
     completions: z.object({ bash: relPath.optional(), zsh: relPath.optional(), fish: relPath.optional() }).strict().optional(),
     scoop: z.boolean().default(false),
     entitlements: z.array(z.enum(ENTITLEMENTS)).default([]),

@@ -72,7 +72,7 @@ test("GoReleaser's app, linked command, uninstall, zap and hook reach the hub en
   const { config, invalid } = parseHub(hubEntry(c.lines), "o");
   expect(invalid).toEqual([]);
   const p = config.packages[0] as CliPackage;
-  expect(p.app).toEqual({ name: "ebb.app", bundle_id: "com.o.ebb", binaries: ["Contents/MacOS/ebb"] });
+  expect(p.app).toEqual({ name: "ebb.app", bundle_id: "com.o.ebb", binaries: ["Contents/MacOS/ebb"], entitlements: [] });
   expect(p.cask).toEqual({
     uninstall: { launchctl: ["com.o.ebb"] },
     zap: { trash: ["~/.config/ebb", "~/.local/state/ebb"] },
@@ -100,6 +100,14 @@ test("Homebrew parts tapster does not render are named, not carried", () => {
   const c = goreleaserCask(odd, ids("com.o.ebb"));
   expect(c.carried).not.toContain("post-install command");
   expect(c.notes.at(-1)).toBe('not carried from GoReleaser\'s Homebrew section: conflicts, uninstall.delete, custom_block: depends_on macos: ">= :ventura", hooks.post.install');
+});
+
+test("names from the project's GoReleaser file reach the terminal without control characters", () => {
+  const planted = goreleaser.replace('app "ebb.app"', 'app "ebb.app"\n      caveats "\u001b]8;;https://x.y\u0007\u001b[2Jhi\u009b"').replace("    license: MIT\n", '    license: MIT\n    "\\e[31mred": 1\n');
+  const note = goreleaserCask(planted, ids("com.o.ebb")).notes.at(-1)!;
+  expect(note).toContain("custom_block: caveats");
+  expect(note).toContain("[31mred");
+  expect(note).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
 });
 
 test("the bundle id comes from the Info.plist that names the app", () => {

@@ -22,9 +22,9 @@ export async function readEntitlements(path: string): Promise<Entitlements> {
 export type SignedApp = { items: string[]; identifiers: string[]; dropped: string[] };
 export type Bundle = Pick<AppPackage, "bundle_id" | "code">;
 
-export const toolBundle = (app: ToolApp, keys: string[]): Bundle => ({
+export const toolBundle = (app: ToolApp): Bundle => ({
   bundle_id: app.bundle_id,
-  code: keys.length ? { ".": { entitlements: Object.fromEntries(keys.map((k) => [k, true])) } } : {},
+  code: app.entitlements.length ? { ".": { entitlements: Object.fromEntries(app.entitlements.map((k) => [k, true])) } } : {},
 });
 
 export function checkPlan(items: CodeItem[], pkg: Bundle): string[] {
@@ -67,10 +67,10 @@ export async function signApp(kc: Keychain, appDir: string, pkg: Bundle, team: s
   return { items: items.map((i) => i.path), identifiers, dropped };
 }
 
-export async function stapleApp(app: string): Promise<void> {
-  await run("xcrun", ["stapler", "staple", app]);
-  await run("xcrun", ["stapler", "validate", app]);
-  const assessed = await run("spctl", ["-a", "-t", "execute", "-vv", app], { allowFail: true });
+export async function stapleApp(app: string, exec = run): Promise<void> {
+  await exec("xcrun", ["stapler", "staple", app]);
+  await exec("xcrun", ["stapler", "validate", app]);
+  const assessed = await exec("spctl", ["-a", "-t", "execute", "-vv", app], { allowFail: true });
   if (assessed.code !== 0 || !assessed.stderr.includes("Notarized Developer ID")) {
     throw new TapsterError(`${basename(app)} is not accepted by Gatekeeper after notarization`, "Check the notarization log in App Store Connect.");
   }

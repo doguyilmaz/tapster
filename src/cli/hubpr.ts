@@ -221,7 +221,7 @@ export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { l
     carried.push(...[launchctl.length || quit.length ? "uninstall" : "", trash.length ? "zap" : "", postflight ? "post-install command" : "", caveats ? "caveats" : ""].filter(Boolean));
   }
   if (postflight) notes.push(`Homebrew runs the post-install command in its sandbox, without network or your home folder; check that ${[postflight.binary, ...postflight.args].join(" ")} works there`);
-  if (skipped.length) notes.push(`not carried from GoReleaser's Homebrew section: ${skipped.join(", ")}`);
+  if (skipped.length) notes.push(`not carried from GoReleaser's Homebrew section: ${skipped.join(", ").replace(/[\u0000-\u001f\u007f-\u009f]/g, "")}`);
   return { lines, description: str(c.description), carried, notes };
 }
 

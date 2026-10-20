@@ -93,9 +93,10 @@ packages:
 | `app.name` | required | The app's folder at the top of the archive. |
 | `app.bundle_id` | required | Must equal the app's `CFBundleIdentifier`. Nested code is identified below it. |
 | `app.binaries` | none | Paths inside the app that the cask links as commands. A command linked from the app replaces the archive's binary of the same name. |
+| `app.entitlements` | none | Entitlements for the app's main executable, from the same list as `entitlements`. The app gets none of the tool's, not even the Bun preset. |
 
 The hub checks the app as it checks a Mac app, signs it inside out with the hardened runtime, notarizes it with the
-binaries and staples it. The app's main executable gets the tool's `entitlements`. The archive must hold no other
+binaries and staples it. Other code in the app gets no entitlements. The archive must hold no other
 copy of the app, its symlinks must stay inside it and the app may not carry an update feed: Homebrew updates the
 tool. A tool with an app has macOS archives only, since the cask's `app` works only on macOS.
 

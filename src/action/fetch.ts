@@ -1,8 +1,8 @@
 import * as core from "@actions/core";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, posix } from "node:path";
+import { dirname, join } from "node:path";
 import { type ReadPlist, appFacts, carryCheck, checkArchiveRoot, checkToolApp, systemPlist } from "../appcheck";
-import { isMachO, readTarGz } from "../archive";
+import { isMachO, readTarGz, resolveSymlinks } from "../archive";
 import { verifyAttestation } from "../attest";
 import { macCodeIn } from "../maccode";
 import { parseChecksums, sha256 } from "../checksums";
@@ -33,10 +33,9 @@ export async function unpackTool(pkg: CliPackage, all: PackageConfig[], name: st
   if (app) {
     const twin = entries.map((e) => e.name.split("/")[0]!).find((top) => top !== app.name && top.toLowerCase() === app.name.toLowerCase());
     if (twin) throw new TapsterError(`${name} holds both ${app.name} and ${twin}, which macOS treats as one folder`, "Pack the app once, under the name in tapster.yml.");
-    for (const e of entries) {
-      if (e.type !== "symlink" || !inApp(e.name)) continue;
-      if (!posix.normalize(posix.join(posix.dirname(e.name), e.linkname!)).startsWith(`${app.name}/`)) {
-        throw new TapsterError(`${name} has a symlink ${e.name} that leaves ${app.name}`, "Keep the app's symlinks inside the app.");
+    for (const [link, target] of resolveSymlinks(entries)) {
+      if (inApp(link) && !target.toLowerCase().startsWith(`${app.name.toLowerCase()}/`)) {
+        throw new TapsterError(`${name} has a symlink ${link} that leaves ${app.name}`, "Keep the app's symlinks inside the app.");
       }
     }
   }

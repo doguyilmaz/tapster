@@ -6,7 +6,8 @@ import { unpackTool } from "../src/action/fetch";
 import { repackTool } from "../src/action/publish";
 import { checkToolApp } from "../src/appcheck";
 import { type TarEntry, readTarGz, writeTarGz } from "../src/archive";
-import { signApp, toolBundle } from "../src/appsign";
+import { signApp, stapleApp, toolBundle } from "../src/appsign";
+import { signTool, toolSteps } from "../src/action/sign";
 import { type CliPackage, parseConfig } from "../src/config";
 import { writeTree } from "../src/extract";
 import { parsePlist } from "../src/plist";
@@ -72,6 +73,7 @@ test.each([
   ["the app folder in a second spelling", tree({ "EBB.app/Contents/Resources/en.lproj/InfoPlist.strings": "x" }), /EBB.app/],
   ["a symlink out of the app", tree({}, [link("ebb.app/Contents/Resources/tool", "../../../ebb")]), /leaves ebb.app/],
   ["a symlink to the app's own folder", tree({}, [link("ebb.app/Contents/Resources/up", "../..")]), /leaves ebb.app/],
+  ["a symlink that leaves the app through another one", tree({}, [link("ebb.app/Contents/Resources/deep/l", "../../../Contents"), link("ebb.app/Contents/Resources/deep/x", "l/../../ebb")]), /x that leaves ebb.app/],
   ["another bundle id", tree({ "ebb.app/Contents/Info.plist": plist({ ...info, CFBundleIdentifier: "com.o.Battistics" }) }), /com.o.Battistics, not com.o.ebb/],
   ["an update feed of its own", tree({ "ebb.app/Contents/Info.plist": plist({ ...info, SUFeedURL: "https://x.y/appcast.xml" }) }), /SUFeedURL/],
   ["a nested bundle outside the bundle id", tree({ "ebb.app/Contents/Helpers/H.app/Contents/Info.plist": plist({ CFBundleIdentifier: "com.o.Battistics.H" }) }), /com.o.Battistics.H/],
@@ -88,12 +90,43 @@ test("the app checks read the configured identity, not the archive's", async () 
   await expect(checkToolApp(join(dir, "ebb.app"), { ...ebb.app!, binaries: ["Contents/MacOS/missing"] }, cfg.packages, agree)).rejects.toThrow(/Contents\/MacOS\/missing/);
 });
 
-test("a tool's app is signed as its bundle id, with the tool's entitlements on its main executable only", () => {
-  expect(toolBundle(ebb.app!, [])).toEqual({ bundle_id: "com.o.ebb", code: {} });
-  expect(toolBundle(ebb.app!, ["com.apple.security.cs.allow-jit"])).toEqual({
+test("a tool's app is signed as its bundle id, with its own entitlements on its main executable only", () => {
+  expect(toolBundle(ebb.app!)).toEqual({ bundle_id: "com.o.ebb", code: {} });
+  expect(toolBundle({ ...ebb.app!, entitlements: ["com.apple.security.cs.allow-jit"] })).toEqual({
     bundle_id: "com.o.ebb",
     code: { ".": { entitlements: { "com.apple.security.cs.allow-jit": true } } },
   });
+});
+
+test("a tool's binaries and app are signed, verified, notarized together and the app stapled, in that order", async () => {
+  process.env.RUNNER_TEMP = mkdtempSync(join(tmpdir(), "rt-"));
+  const calls: string[] = [];
+  const log = (step: string) => async (...args: unknown[]) => {
+    calls.push(`${step} ${args.filter((a) => typeof a === "string" && a.includes("/")).join(" ")}`);
+    return { items: ["."], identifiers: ["com.o.ebb"], dropped: [] } as never;
+  };
+  const steps = Object.fromEntries(Object.keys(toolSteps).map((k) => [k, log(k)])) as unknown as typeof toolSteps;
+  const kc = { path: "", identity: "-", teamId: "TEAM000001", close: async () => {} };
+  const item = { package: "ebb", tag: "v1.2.0", releaseId: 1, resume: false, before: [], checksums: [], status: "fetched" as const, archives: [{ asset: ARCHIVE, platform: "darwin-universal" as const, dir: "/w/a", binaries: ["ebb"], app: "ebb.app" }] };
+  await signTool(kc, { p8Path: "/k.p8", keyId: "K", issuer: "I" }, "TEAM000001", ebb, item, steps);
+  const root = join(process.env.RUNNER_TEMP, "tapster/ebb/v1.2.0/notary");
+  expect(calls).toEqual([
+    "signFile /w/a/ebb",
+    "verifySigned /w/a/ebb",
+    "signApp /w/a/ebb.app",
+    "verifyApp /w/a/ebb.app",
+    `copy /w/a ${root}/${ARCHIVE}`,
+    `zipForNotary ${root} ${root}.zip`,
+    `notarize ${root}.zip`,
+    "stapleApp /w/a/ebb.app",
+  ]);
+});
+
+test("a stapled app that Gatekeeper does not report as notarized is refused", async () => {
+  const exec = (spctl: { code: number; stderr: string }) => async (cmd: string) => ({ ...(cmd === "spctl" ? spctl : { code: 0, stderr: "" }), stdout: "", bytes: Buffer.alloc(0) });
+  await expect(stapleApp("/w/a/ebb.app", exec({ code: 0, stderr: "/w/a/ebb.app: accepted\nsource=Notarized Developer ID\n" }))).resolves.toBeUndefined();
+  await expect(stapleApp("/w/a/ebb.app", exec({ code: 0, stderr: "/w/a/ebb.app: accepted\nsource=Developer ID\n" }))).rejects.toThrow(/not accepted by Gatekeeper/);
+  await expect(stapleApp("/w/a/ebb.app", exec({ code: 3, stderr: "source=Notarized Developer ID\n" }))).rejects.toThrow(/not accepted by Gatekeeper/);
 });
 
 const sh = (args: string[]) => {
@@ -111,7 +144,7 @@ test.skipIf(process.platform !== "darwin")("the signed app goes back into the ar
   const dir = mkdtempSync(join(tmpdir(), "tool-"));
   const unpacked = await unpackTool(ebb, cfg.packages, ARCHIVE, original, dir, agree);
   const app = join(dir, "ebb.app");
-  const signed = await signApp({ path: "", identity: "-", teamId: "", close: async () => {} }, app, toolBundle(ebb.app!, ["com.apple.security.cs.allow-jit"]), "TEAM000001");
+  const signed = await signApp({ path: "", identity: "-", teamId: "", close: async () => {} }, app, toolBundle({ ...ebb.app!, entitlements: ["com.apple.security.cs.allow-jit"] }), "TEAM000001");
   expect(signed.identifiers).toEqual(["com.o.ebb"]);
   expect(sh(["/usr/bin/codesign", "-dv", app])).toContain("Identifier=com.o.ebb");
   expect(sh(["/usr/bin/codesign", "-d", "--entitlements", "-", "--xml", app])).toContain("com.apple.security.cs.allow-jit");

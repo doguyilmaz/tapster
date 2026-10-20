@@ -21,11 +21,18 @@ packages:
 test("a tool may carry an app and a post-install command", () => {
   const p = parseConfig(ebb, "o").packages[0] as CliPackage;
   expect(p.kind).toBe("go");
-  expect(p.app).toEqual({ name: "ebb.app", bundle_id: "com.o.ebb", binaries: ["Contents/MacOS/ebb"] });
+  expect(p.app).toEqual({ name: "ebb.app", bundle_id: "com.o.ebb", binaries: ["Contents/MacOS/ebb"], entitlements: [] });
   expect(p.cask.postflight).toEqual({ binary: "ebb", args: ["daemon", "restore"] });
   const bare = parseConfig(ebb.replace("      binaries: [Contents/MacOS/ebb]\n", "").replace("args: [daemon, restore] }", "}"), "o").packages[0] as CliPackage;
   expect(bare.app!.binaries).toEqual([]);
   expect(bare.cask.postflight).toEqual({ binary: "ebb", args: [] });
+});
+
+test("the app gets its own entitlements, not the tool's", () => {
+  const jit = parseConfig(ebb.replace("    app:\n", "    entitlements: [com.apple.security.cs.disable-library-validation]\n    app:\n").replace("binaries: [Contents/MacOS/ebb]", "binaries: [Contents/MacOS/ebb]\n      entitlements: [com.apple.security.cs.allow-jit]"), "o").packages[0] as CliPackage;
+  expect(jit.entitlements).toEqual(["com.apple.security.cs.disable-library-validation"]);
+  expect(jit.app!.entitlements).toEqual(["com.apple.security.cs.allow-jit"]);
+  expect(() => parseConfig(ebb.replace("binaries: [Contents/MacOS/ebb]", "binaries: [Contents/MacOS/ebb]\n      entitlements: [com.apple.security.get-task-allow]"), "o")).toThrow();
 });
 
 test.each([
