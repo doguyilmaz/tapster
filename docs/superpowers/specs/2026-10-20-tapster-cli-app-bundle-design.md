@@ -135,16 +135,15 @@ time it runs (it knows the person wanted it on) or ask the person to run `ebb da
 
 ## 3. `tapster add` for a GoReleaser project
 
-Before `homebrew_casks` is removed, add reads its first entry and carries into the hub entry what maps:
+add already carries the description, homepage, license, completions, `uninstall launchctl`, `zap trash` and caveats
+of GoReleaser's Homebrew section (`goreleaserCask`). The same function now also carries:
 
 | GoReleaser | Hub entry |
 | --- | --- |
 | `custom_block` line `app "X.app"` | `app.name` |
 | `binaries` under `#{appdir}/X.app/` | `app.binaries` |
-| `uninstall.launchctl`, `uninstall.quit` | `cask.uninstall` |
-| `zap.trash` | `cask.zap` |
+| `uninstall.quit` | `cask.uninstall.quit` |
 | `hooks.post.install` of the form `system_command "#{HOMEBREW_PREFIX}/bin/NAME", args: [...], must_succeed: false` | `cask.postflight` |
-| `caveats` | `cask.caveats` |
 
 The bundle id comes from an `Info.plist` in the project whose `CFBundleExecutable` or `CFBundleName` names the app.
 When none is found the entry says `<bundle id>` and add prints it for the owner to complete. Anything else in the
