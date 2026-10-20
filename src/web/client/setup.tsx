@@ -3,7 +3,7 @@ import type { AppStart, FilesView, HubView, InstallView, Problem as ProblemView 
 import { ApiError, get, post } from "./api";
 import { type Stop, type StopId, changedOnly, expiresSoon, firstOpen, lineDiff, macNeeded, stops } from "../steps";
 import { appResult, go, hub, hubError, hubLoading, hubName, loadHub, mac, macChoice, openStop, problemOf, say, setMac } from "./state";
-import { Badge, Busy, Cmd, Field, FileDrop, Icon, Note, Out, Password, Problem, Spinner } from "./ui";
+import { Badge, Busy, Cmd, Copy, Field, FileDrop, Icon, Note, Out, Password, Problem, Spinner } from "./ui";
 
 function Dot({ stop, index }: { stop: Stop; index: number }) {
   if (stop.state === "done") return <span class="dot"><Icon name="check" /></span>;
@@ -688,12 +688,83 @@ function Projects({ h }: { h: HubView }) {
   );
 }
 
+function SparkleKey({ h, label }: { h: HubView; label: string }) {
+  const [account, setAccount] = useState("ed25519");
+  const [read, setRead] = useState<{ publicKey: string; users: string[]; key: string } | null>(null);
+  const [shown, setShown] = useState(false);
+  const [busy, problem, run] = useAction();
+  if (!read) {
+    return (
+      <form
+        class="card pad stack tight"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void run(async () => setRead(await post("/api/hub/sparkle/read", { hub: h.name, label, account })));
+        }}
+      >
+        <strong>
+          Sparkle key <code>{label}</code>
+        </strong>
+        <p class="muted small">tapster reads it from your login keychain, where Sparkle's generate_keys keeps it. macOS asks you first; choose Allow.</p>
+        <div class="row" style="flex-wrap: nowrap; align-items: end">
+          <Field name={`account-${label}`} label="Keychain account" value={account} mono onInput={setAccount} />
+          <Busy busy={busy} class="btn primary" type="submit">
+            <Icon name="key" />
+            Read it from my keychain
+          </Busy>
+        </div>
+        <Problem problem={problem} />
+      </form>
+    );
+  }
+  const submit = (e: Event) => {
+    e.preventDefault();
+    const pasted = String(new FormData(e.currentTarget as HTMLFormElement).get("password") ?? "");
+    void run(async () => {
+      await post("/api/hub/sparkle/store", { hub: h.name, label, pasted });
+      savedFor(`sparkle-${label}`);
+      await loadHub();
+      say("ok", `Stored the Sparkle key ${label} in the hub.`);
+    });
+  };
+  return (
+    <div class="card pad stack tight">
+      <strong>
+        Sparkle key <code>{label}</code>
+      </strong>
+      <p class="muted small">
+        It signs updates for {read.users.join(", ")}. Its public key, <code>{read.publicKey}</code>, matches tapster.yml.
+      </p>
+      <div class="cmd">
+        <code>{shown ? read.key : "•".repeat(32)}</code>
+        <button type="button" class="btn quiet small" onClick={() => setShown(!shown)} aria-pressed={shown}>
+          {shown ? "Hide" : "Show"}
+        </button>
+        <Copy text={read.key} />
+      </div>
+      <Note tone="keys" title="Keep a copy outside your Mac">
+        <span>If this key is lost, installed copies of the app can never update again. Paste it below: your password manager offers to save it when you store the key. tapster checks that the pasted key is the right one.</span>
+      </Note>
+      <form class="secret" onSubmit={submit} autoComplete="on">
+        <Field name="username" label="Name in your password manager" value={`${h.name}: Sparkle key ${label}`} autoComplete="username" />
+        <Password name="password" label="Paste the key" hint="The key from the box above, pasted as it is." />
+        <Problem problem={problem} />
+        <div class="row">
+          <Busy busy={busy} class="btn primary" type="submit">
+            Store in the hub
+          </Busy>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function Extras({ h }: { h: HubView }) {
   const repo = h.name.split("/")[1]!;
   const missing = h.extras.sparkle.filter((s) => !s.stored);
   return (
     <div class="panel">
-      <Head title="Optional extras" lead="The hub works without these. For now each one runs in a terminal, in a clone of the hub, because it needs a tool on your computer: Wrangler for Cloudflare, gpg or your keychain." />
+      <Head title="Optional extras" lead="The hub works without these. The doorbell and the apt and dnf key run in a terminal for now, in a clone of the hub, because they need Wrangler or gpg on your computer." />
       <Cmd text={`gh repo clone ${h.name} && cd ${repo}`} />
       <section class="stack tight">
         <div class="spread">
@@ -724,10 +795,15 @@ function Extras({ h }: { h: HubView }) {
             <Badge tone={missing.length ? "warn" : "ok"}>{missing.length ? `${missing.length} missing` : "All stored"}</Badge>
           </div>
           <p class="muted">Each Mac app signs its update feed with a Sparkle key. tapster keeps it in your keychain and in the hub.</p>
-          {missing.map((s) => (
-            <Cmd key={s.label} text={`bunx @doguyilmaz/tapster init --sparkle ${s.label} --new`} />
-          ))}
-          {missing.length > 0 && <p class="faint small">Already have the key in your keychain? Use --account &lt;account&gt; instead of --new.</p>}
+          {missing[0] && <SparkleKey key={missing[0].label} h={h} label={missing[0].label} />}
+          {missing.length > 1 && <p class="muted small">Then: {missing.slice(1).map((s) => s.label).join(", ")}. One key at a time, so your password manager saves each under its own name.</p>}
+          <p class="faint small">
+            No key yet? Make one in a terminal with <code>bunx @doguyilmaz/tapster init --sparkle &lt;label&gt; --new</code>; see the{" "}
+            <a href="https://tapster.doguyilmaz.com/guides/sparkle/" target="_blank" rel="noopener noreferrer">
+              Sparkle guide
+            </a>
+            .
+          </p>
         </section>
       )}
     </div>

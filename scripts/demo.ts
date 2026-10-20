@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GitHub } from "../src/github";
 import { useGhWrite } from "../src/cli/gh";
+import { newSparkleKey } from "../src/cli/keystore";
 import { run } from "../src/run";
 import { setup } from "../src/web/start";
 import { FakeHub } from "../tests/helpers/fakehub";
@@ -36,7 +37,8 @@ export async function sampleHome(fake: FakeHub): Promise<string> {
   return home;
 }
 
-export async function demo(port: number, log: (line: string) => void): Promise<{ fake: FakeHub; home: string; done: Promise<void> }> {
+export async function demo(port: number, log: (line: string) => void): Promise<{ fake: FakeHub; home: string; done: Promise<void>; sparkle: { seed: string; publicKey: string } }> {
+  const sparkle = newSparkleKey();
   const fake = new FakeHub("octo");
   fake.repo("homebrew-tap", { files: new Map([["README.md", "# octo/tap\n"], [".github/workflows/tests.yml", "jobs:\n  t:\n    steps:\n      - uses: Homebrew/actions/setup-homebrew@master\n"]]) });
   const home = await sampleHome(fake);
@@ -51,8 +53,9 @@ export async function demo(port: number, log: (line: string) => void): Promise<{
     log,
     open: () => {},
     notary: async () => true,
+    keychain: async (account) => (account === "ed25519" ? sparkle.seed : null),
   });
-  return { fake, home, done };
+  return { fake, home, done, sparkle };
 }
 
 if (import.meta.main) {

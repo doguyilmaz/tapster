@@ -17,6 +17,7 @@ const deps: Deps = {
   log: (l) => logs.push(l),
   open: () => {},
   notary: async () => false,
+  keychain: async () => null,
 };
 
 function app(routes: Routes = {}) {

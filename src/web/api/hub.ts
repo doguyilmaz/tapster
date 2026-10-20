@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { parse } from "yaml";
 import { z } from "zod";
-import { isApp, macosCode, parseHub } from "../../config";
+import { type HubConfig, isApp, macosCode, parseHub } from "../../config";
 import { GitHubError, TapsterError } from "../../errors";
 import { foreignWrites } from "../../foreign";
 import { GitHub } from "../../github";
@@ -12,7 +12,10 @@ import { P12_LIMIT, P8_LIMIT, inspectP12, notaryKey, saveCertificate, saveNotary
 import { convertManifest, permissionLines } from "../../cli/appflow";
 import { doctorChecks, hubRulesetCheck, policyCheck } from "../../cli/doctor";
 import { appInstallation, appManifest, storeApp } from "../../cli/hubapp";
-import { FLOW, hubFiles, pinState, sparkleLabels, starterFiles } from "../../cli/hubfiles";
+import { FLOW, hubFiles, patchSparkleEnv, pinState, sparkleLabels, starterFiles } from "../../cli/hubfiles";
+import { keyPins } from "../../cli/init";
+import { setEnvSecret } from "../../cli/gh";
+import { decodeSparkleKey } from "../../sparkle-key";
 import { protectHub } from "../../cli/init";
 import { everyFromFlow } from "../../cli/schedule";
 import type { AccountView, AppStart, FilePlan, FilesView, HealthView, HubChoice, HubView, InstallView, OtherWorkflow } from "../contract";
@@ -374,6 +377,46 @@ async function createHub(c: Ctx) {
   }
 }
 
+const sparkleBody = z.object({ hub: z.string(), label: z.string().regex(/^[a-z0-9]{1,40}$/), account: z.string().regex(/^[A-Za-z0-9 ._@-]{1,64}$/) }).strict();
+
+async function sparkleConfig(gh: GitHub, hub: string, label: string): Promise<HubConfig> {
+  const text = await readHubFile(gh, hub, "tapster.yml", "main");
+  const config = text === null ? null : parseHub(text, hub.split("/")[0]!).config;
+  if (!config || !sparkleLabels(config).includes(label)) throw new TapsterError(`no app in ${hub}'s tapster.yml signs with the Sparkle key ${label}`, "Add the app with its sparkle section first.");
+  return config;
+}
+
+async function sparkleRead(c: Ctx) {
+  const body = await readJson(c.req, sparkleBody);
+  const { gh, hub } = await hubFrom(c, body.hub);
+  const config = await sparkleConfig(gh, hub, body.label);
+  const text = await c.s.deps.keychain(body.account);
+  if (text === null) throw new TapsterError(`your keychain gave no Sparkle key for the account ${body.account}`, "Choose Allow when macOS asks. generate_keys uses the account ed25519 unless you passed --account.");
+  const key = decodeSparkleKey(text);
+  const users = keyPins(config, body.label, key.publicKey);
+  c.s.sparkle.set(`${hub} ${body.label}`, { seed: text.trim(), at: Date.now() });
+  return { publicKey: key.publicKey, users, key: text.trim() };
+}
+
+async function sparkleStore(c: Ctx) {
+  const body = await readJson(c.req, z.object({ hub: z.string(), label: z.string().regex(/^[a-z0-9]{1,40}$/), pasted: z.string().max(400) }).strict());
+  const { gh, hub, login } = await hubFrom(c, body.hub);
+  const held = c.s.sparkle.get(`${hub} ${body.label}`);
+  if (!held || Date.now() - held.at > 30 * 60_000) throw new TapsterError("read the key from your keychain first", "Click Read it from my keychain again.");
+  if (body.pasted.trim() !== held.seed) throw new TapsterError("that is not the key shown above", "Paste the key itself, so the copy your password manager keeps is the right one.");
+  const config = await sparkleConfig(gh, hub, body.label);
+  await guardMain(gh, hub, login);
+  await setEnvSecret(hub, `SPARKLE_KEY_${body.label.toUpperCase()}`, held.seed);
+  const result = await commitToHub(gh, hub, `Pass the Sparkle key ${body.label} to the hub workflow`, async (read) => {
+    const flow = await read(FLOW);
+    if (flow === null) return [];
+    const next = patchSparkleEnv(flow, sparkleLabels(config));
+    return next === flow ? [] : [{ path: FLOW, content: next }];
+  });
+  c.s.sparkle.delete(`${hub} ${body.label}`);
+  return { stored: true, workflow: result };
+}
+
 async function health(c: Ctx): Promise<HealthView> {
   const { gh, hub } = await hubFrom(c, c.url.searchParams.get("hub"));
   const [{ checks, note }, runs] = await Promise.all([
@@ -411,5 +454,7 @@ export const hubRoutes: Routes = {
   "POST /api/hub/files": filesCommit,
   "GET /api/hub/health": health,
   "POST /api/hub/run": runHub,
+  "POST /api/hub/sparkle/read": sparkleRead,
+  "POST /api/hub/sparkle/store": sparkleStore,
 };
 

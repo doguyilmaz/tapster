@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { GitHub } from "../src/github";
 import { run } from "../src/run";
 import { useGhWrite } from "../src/cli/gh";
+import { newSparkleKey } from "../src/cli/keystore";
 import { appCallback } from "../src/web/api/hub";
 import type { AddView, FilesView, HubView, InspectView, ScanView } from "../src/web/contract";
 import { type Deps, handler, newSession } from "../src/web/server";
@@ -12,6 +13,7 @@ import { sampleHome } from "../scripts/demo";
 import { FakeHub } from "./helpers/fakehub";
 
 const fake = new FakeHub("octo");
+const sparkle = newSparkleKey();
 let home = "";
 let call: (method: string, path: string, body?: unknown) => Promise<{ status: number; data: Record<string, unknown> }>;
 let s: ReturnType<typeof newSession>;
@@ -29,6 +31,7 @@ beforeAll(async () => {
     log: () => {},
     open: () => {},
     notary: async () => false,
+    keychain: async (account) => (account === "ed25519" ? sparkle.seed : null),
   };
   s = newSession(deps, 8277);
   const handle = handler(s, routes(s, () => {}), (c) => appCallback(c));
@@ -235,4 +238,22 @@ test("a new tap starts empty, gets protected and receives tapster's README as it
   const files = fake.get("octo/homebrew-fresh")!.files!;
   expect(files.get("README.md")).toContain("brew trust octo/fresh");
   expect(files.has(".github/workflows/tapster.yml")).toBe(true);
+});
+
+test("a Sparkle key goes to the hub only after the user pasted the very key the keychain holds", async () => {
+  const hub = fake.get("octo/homebrew-tap")!;
+  const app = `  - { name: pix, repo: octo/pix, kind: app, app: Pix.app, bundle_id: com.octo.Pix, assets: { darwin-arm64: "Pix-{version}.app.tar.gz" }, dmg: { name: "Pix-{version}.dmg" }, sparkle: { key: pix, public_key: "${sparkle.publicKey}" } }\n`;
+  hub.files!.set("tapster.yml", `version: 1\ntap: octo/tap\npackages:\n${app}`);
+  const ask = { hub: "octo/homebrew-tap", label: "pix", account: "ed25519" };
+  expect((await call("POST", "/api/hub/sparkle/read", { ...ask, label: "other" })).status).toBe(400);
+  expect((await call("POST", "/api/hub/sparkle/read", { ...ask, account: "missing" })).status).toBe(400);
+  const read = (await call("POST", "/api/hub/sparkle/read", ask)).data as { publicKey: string; users: string[]; key: string };
+  expect(read).toEqual({ publicKey: sparkle.publicKey, users: ["pix"], key: sparkle.seed });
+  const wrong = await call("POST", "/api/hub/sparkle/store", { hub: "octo/homebrew-tap", label: "pix", pasted: "Z".repeat(44) });
+  expect(wrong.status).toBe(400);
+  expect(hub.env!.secrets.has("SPARKLE_KEY_PIX")).toBe(false);
+  expect((await call("POST", "/api/hub/sparkle/store", { hub: "octo/homebrew-tap", label: "pix", pasted: ` ${sparkle.seed}\n` })).data).toEqual({ stored: true, workflow: "committed" });
+  expect(hub.env!.secrets.has("SPARKLE_KEY_PIX")).toBe(true);
+  expect(hub.files!.get(".github/workflows/tapster.yml")).toContain('SPARKLE_KEY_PIX: "${{ secrets.SPARKLE_KEY_PIX }}"');
+  expect((await call("POST", "/api/hub/sparkle/store", { hub: "octo/homebrew-tap", label: "pix", pasted: sparkle.seed })).status).toBe(400);
 });

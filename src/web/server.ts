@@ -18,6 +18,7 @@ export type Deps = {
   log(line: string): void;
   open(url: string): void;
   notary(key: NotaryKey): Promise<boolean>;
+  keychain(account: string): Promise<string | null>;
 };
 
 export type Session = {
@@ -28,6 +29,7 @@ export type Session = {
   claimed: Set<string>;
   pending: Map<string, { hub: string; owner: string; at: number }>;
   apps: Map<string, { id: string; pem: string; slug: string }>;
+  sparkle: Map<string, { seed: string; at: number }>;
   touched: number;
   login: string | null;
   link(): string;
@@ -70,6 +72,7 @@ export function newSession(deps: Deps, port: number): Session {
     claimed: new Set(),
     pending: new Map(),
     apps: new Map(),
+    sparkle: new Map(),
     touched: Date.now(),
     login: null,
     link: () => {

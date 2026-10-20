@@ -4,6 +4,7 @@ import type { GitHub } from "../github";
 import { runPath } from "../run";
 import { TAPSTER } from "../version";
 import { verifyNotary } from "../cli/apple";
+import { requireStore } from "../cli/keystore";
 import { currentRepo, userGitHub } from "../cli/gh";
 import { hubRoutes, appCallback } from "./api/hub";
 import { projectRoutes } from "./api/projects";
@@ -66,6 +67,7 @@ export function realDeps(pin: string | null): Deps {
     log: (line) => console.log(line),
     open: openBrowser,
     notary: verifyNotary,
+    keychain: (account) => requireStore("the Sparkle key").read({ service: "https://sparkle-project.org", account, label: "Private key for signing Sparkle updates" }),
   };
 }
 
