@@ -62,8 +62,8 @@ homebrew_casks:
 ```
 
 The hub entry then has the app and the Linux archives. The hub renders the same blocks, see
-[With Linux builds](/reference/config/#with-linux-builds). tapster lists what it does not carry, such as other hooks or
-other lines of `custom_block`. A hook is carried only in this form:
+[With Linux builds](/reference/config/#with-linux-builds). tapster reads only lines right inside those blocks. It lists
+what it does not carry, such as other hooks, deeper lines or other lines of `custom_block`. A hook is carried only in this form:
 
 ```ruby
 system_command "#{HOMEBREW_PREFIX}/bin/mytool", args: ["setup"], must_succeed: false

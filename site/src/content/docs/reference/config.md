@@ -121,8 +121,8 @@ Linux archives as they are. The cask keeps the app on macOS and links the bare b
 ```
 
 `cask.uninstall` goes into `on_macos` with the app, because `launchctl` and `quit` exist only on macOS. Other
-binaries, completions, `zap`, `caveats` and `postflight` stay outside the blocks and apply to both. The cask has no
-`depends_on :macos`, so Homebrew on Linux installs it. A tool with an app and no `linux-*` assets gets the same cask
+binaries, completions, `zap`, `caveats` and `postflight` stay outside the blocks and apply to both, so
+`cask.postflight` must run one of `binaries`. The cask has no `depends_on :macos`, so Homebrew on Linux installs it. A tool with an app and no `linux-*` assets gets the same cask
 as before.
 
 ### A command after install

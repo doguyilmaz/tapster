@@ -213,7 +213,8 @@ Cloudflare token in the project.
 aims ships macOS, Linux and Windows archives and wants an app on macOS only. A tool with an app may map `linux-*`
 assets. Nothing changes for an entry without both.
 
-- **Config.** Each Linux asset must be a `.tar.gz` whose name does not contain `app.name`. The other refusals stay.
+- **Config.** Each Linux asset must be a `.tar.gz` whose name does not contain `app.name`. `cask.postflight` must
+  run one of `binaries`, because Linux links only those. The other refusals stay.
 - **Fetch.** The app rules apply to the macOS archives only. Each Linux archive must hold every entry of `binaries` as a
   plain file and nothing named `app.name` in any case. Its Mach-O check is the one of today.
 - **Sign and publish.** Only the macOS archives are unpacked, signed and repacked. The Linux archives keep their bytes.
@@ -259,7 +260,10 @@ Checked with Homebrew 7.0.10 on 2026-10-20:
   (CI) with an ad hoc signed app. `tests/brew/install.ts` repeats both in CI.
 
 `tapster add` reads the same layout from GoReleaser's `custom_block`: `app` and `binary "#{appdir}/..."` lines inside
-`on_macos` become `app`. `binary` lines inside `on_linux` need nothing, because the hub links `binaries` there.
+`on_macos` become `app`. A `binary` line inside `on_linux` that names a carried app command needs nothing, because
+the hub links `binaries` there. Lines deeper than right inside those blocks, an `app` inside `on_linux` and other
+`binary` lines are listed as not carried. A `custom_block` without a top-level `on_macos` or `on_linux` and any run
+without Apple credentials are read as before.
 
 ## Security
 
@@ -290,5 +294,6 @@ Checked with Homebrew 7.0.10 on 2026-10-20:
 - Sign and publish, on macOS: the app is signed ad hoc under the configured identifier with `app.entitlements`,
   repacked, unpacked again and passes `codesign --verify --strict --deep`; the other entries keep their bytes.
 - add: ebb's `.goreleaser.yaml` gives the entry above; the branch move step is reported.
-- Linux builds: ebb's and aims's casks stay byte for byte; an aims-like entry renders `tests/golden/aims-app.rb`, which
-  CI checks with `brew style` and `brew audit` and installs from a local tap on macOS and in Homebrew's Linux image.
+- Linux builds: ebb's and aims's casks stay byte for byte. An aims-like entry renders `tests/golden/aims-app.rb` and a
+  universal one with `launchctl` and `quit` renders `tests/golden/ebb-linux.rb`. CI checks both with `brew style` and
+  `brew audit` and installs the first from a local tap on macOS and in Homebrew's Linux image.
