@@ -67,7 +67,7 @@ export type AddOptionsView = { workflow: string; autoTag: boolean; dependabot: b
 
 export type AddView = { lines: string[]; pr: string | null; entry: string | null; installUrl: string; files: string[] };
 
-export type DiffView = { files: { path: string; diff: string; added: boolean }[] };
+export type DiffView = { files: { path: string; before: string | null; after: string | null }[] };
 
 export type HealthView = {
   checks: { name: string; ok: boolean; fix: string; note?: string }[];

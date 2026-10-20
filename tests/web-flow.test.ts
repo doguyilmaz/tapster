@@ -169,8 +169,10 @@ test("a project is inspected, added, diffed and committed, touching only tapster
   expect(added.pr).toContain("/pull/");
   expect(added.entry).toContain("protection: dependabot");
   expect(added.installUrl).toContain("repository_ids[]=");
-  const diff = (await call("POST", "/api/projects/diff", { path, files: added.files })).data as { files: { path: string; diff: string }[] };
-  expect(diff.files[0]!.diff).toContain("+  draft: true");
+  const diff = (await call("POST", "/api/projects/diff", { path, files: added.files })).data as { files: { path: string; before: string | null; after: string }[] };
+  expect(diff.files[0]!.before).toContain("brews:");
+  expect(diff.files[0]!.after).toContain("draft: true");
+  expect(diff.files[0]!.after).not.toContain("brews:");
   expect((await call("POST", "/api/projects/diff", { path, files: ["../../etc/passwd"] })).status).toBe(400);
   await run("git", ["-C", path, "config", "user.name", "Test"]);
   await run("git", ["-C", path, "config", "user.email", "t@example.com"]);
@@ -193,4 +195,20 @@ test("health runs doctor's checks and starts the hub on request", async () => {
   expect(health.checks.find((c) => c.name === "tapster.yml is valid")?.ok).toBe(true);
   expect((await call("POST", "/api/hub/run", { hub: "octo/homebrew-tap" })).data).toEqual({ started: true });
   expect(fake.get("octo/homebrew-tap")!.dispatches).toBe(1);
+});
+
+test("opening a clone never runs commands from its own git config", async () => {
+  const path = join(home, "Developer", "hafifpix");
+  const marker = join(home, "filter-ran");
+  await run("git", ["-C", path, "config", "filter.trap.clean", `touch ${marker}; cat`]);
+  await run("git", ["-C", path, "config", "core.fsmonitor", `touch ${marker}`]);
+  await Bun.write(join(path, ".gitattributes"), "* filter=trap\n");
+  await Bun.write(join(path, "src", "cli.ts"), "console.log('changed');\n");
+  await Bun.write(join(path, ".github", "workflows", "release.yml"), "name: mine\n");
+  const info = (await call("POST", "/api/projects/inspect", { hub: "octo/homebrew-tap", path })).data as unknown as InspectView;
+  expect(info.dirty).toEqual([".github/workflows/release.yml"]);
+  expect(info.releaseFlow).toBe("other");
+  await call("POST", "/api/projects/diff", { path, files: [".github/workflows/release.yml", "src/cli.ts"] });
+  await call("POST", "/api/projects/scan", { hub: "octo/homebrew-tap", extra: [] });
+  expect(existsSync(marker)).toBe(false);
 });

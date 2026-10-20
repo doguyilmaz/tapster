@@ -37,11 +37,29 @@ function cloneRepo(dir: string, login: string): string {
   return repo;
 }
 
-const SAFE_READ = ["-c", "core.fsmonitor=", "-c", "core.untrackedCache=false"];
-
 async function git(dir: string, args: string[], o: { user?: boolean; timeoutMs?: number } = {}) {
   const env: Record<string, string> = o.user ? { ...(process.env as Record<string, string>), GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes" } : { GIT_TERMINAL_PROMPT: "0" };
-  return runPath(TOOLS.git, "git", ["-C", dir, ...(o.user ? [] : SAFE_READ), ...args], { env, allowFail: true, timeoutMs: o.timeoutMs ?? 20_000, maxOutput: 4 << 20 });
+  return runPath(TOOLS.git, "git", ["-C", dir, ...args], { env, allowFail: true, timeoutMs: o.timeoutMs ?? 20_000, maxOutput: 4 << 20 });
+}
+
+// Reading a clone must not run its own config: status and diff would run clean filters and fsmonitor from .git/config.
+async function committed(dir: string, path: string): Promise<string | null> {
+  const res = await git(dir, ["cat-file", "-p", `HEAD:${path}`]);
+  return res.code === 0 ? res.stdout : null;
+}
+
+function branchOf(dir: string): string {
+  const head = readSmall(join(dir, ".git", "HEAD"), 4096)?.trim() ?? "";
+  return /^ref: refs\/heads\/(.+)$/.exec(head)?.[1] ?? "a detached HEAD";
+}
+
+async function changed(dir: string, paths: string[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const p of paths) {
+    const now = readSmall(join(dir, p));
+    if (now !== null && now !== (await committed(dir, p))) out.push(p);
+  }
+  return out;
 }
 
 const hubBody = { hub: z.string() };
@@ -107,8 +125,8 @@ async function inspect(c: Ctx): Promise<InspectView> {
   if (kind === null) throw new TapsterError(`tapster cannot publish ${repo} yet: it is ${why}`, "tapster publishes GoReleaser Go tools, Bun command line tools and Mac apps that update with Sparkle.");
   const workflows = kind === "go" ? goWorkflows(dir) : [];
   const release = readSmall(join(dir, ".github", "workflows", "release.yml"));
-  const status = await git(dir, ["status", "--porcelain=v1", "--untracked-files=normal"]);
-  const branch = (await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).stdout.trim();
+  const dirty = await changed(dir, [".github/workflows/release.yml", ".goreleaser.yaml", ".goreleaser.yml", ...workflows.map((w) => `.github/workflows/${w}`)]);
+  const branch = branchOf(dir);
   const [project, facts, config] = await Promise.all([gh.getRepo(repo), hubFacts(gh, hub).catch(() => null), readHubFile(gh, hub, "tapster.yml", "main").catch(() => null)]);
   const problems = await protectionProblems(gh, repo, project.default_branch, "admin").catch(() => ["unknown"]);
   const pulls = await gh.json<{ html_url: string }[]>("GET", `/repos/${hub}/pulls?state=open&head=${encodeURIComponent(`${login}:tapster-add-${name}`)}`).catch(() => []);
@@ -120,7 +138,7 @@ async function inspect(c: Ctx): Promise<InspectView> {
     name,
     kind,
     branch,
-    dirty: status.stdout.split("\n").filter(Boolean).map((l) => l.slice(3)).slice(0, 50),
+    dirty: [...new Set(dirty)],
     workflows,
     workflow: workflows.includes("release.yml") ? "release.yml" : (workflows[0] ?? null),
     releaseFlow: release === null ? "missing" : release.includes("Ring the tapster hub") ? "ours" : "other",
@@ -167,13 +185,7 @@ async function diff(c: Ctx): Promise<DiffView> {
   const dir = clonePath(body.path, c.s.deps.home);
   cloneRepo(dir, login);
   const out: DiffView["files"] = [];
-  for (const f of relFiles(body.files)) {
-    const tracked = (await git(dir, ["ls-files", "--error-unmatch", "--", f])).code === 0;
-    if (tracked) {
-      const d = await git(dir, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--", f]);
-      out.push({ path: f, diff: d.stdout, added: false });
-    } else out.push({ path: f, diff: readSmall(join(dir, f)) ?? "", added: true });
-  }
+  for (const f of relFiles(body.files)) out.push({ path: f, before: await committed(dir, f), after: readSmall(join(dir, f)) });
   return { files: out };
 }
 

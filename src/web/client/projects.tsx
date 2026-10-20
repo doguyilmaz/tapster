@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import type { AddView, DiffView, InspectView, LocalProject, Problem as ProblemView, ScanView } from "../contract";
 import { post } from "./api";
 import { hub, loadHub, problemOf, recall, remember, say, tilde } from "./state";
+import { changedOnly, lineDiff } from "./steps";
 import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner } from "./ui";
 
 const ROOTS_KEY = "tapster.roots";
@@ -191,25 +192,29 @@ function Switch({ checked, onChange, title, children }: { checked: boolean; onCh
 function Diff({ view }: { view: DiffView }) {
   return (
     <div class="stack tight files">
-      {view.files.map((f) => (
-        <details class="file" key={f.path} open>
-          <summary>
-            <Icon name="file" />
-            <code>{f.path}</code>
-            <Badge tone={f.added ? "next" : "warn"}>{f.added ? "New" : "Changed"}</Badge>
-          </summary>
-          <pre class="block diff">
-            {f.added
-              ? f.diff
-              : f.diff.split("\n").map((l, i) => (
-                  <span key={i} class={l.startsWith("@@") ? "hunk" : l.startsWith("+") && !l.startsWith("+++") ? "add" : l.startsWith("-") && !l.startsWith("---") ? "del" : "ctx"}>
-                    {l}
-                    {"\n"}
-                  </span>
-                ))}
-          </pre>
-        </details>
-      ))}
+      {view.files.map((f) => {
+        const lines = f.before === null ? null : changedOnly(lineDiff(f.before, f.after ?? ""));
+        return (
+          <details class="file" key={f.path} open>
+            <summary>
+              <Icon name="file" />
+              <code>{f.path}</code>
+              <Badge tone={f.before === null ? "next" : f.after === null ? "error" : "warn"}>{f.before === null ? "New" : f.after === null ? "Removed" : "Changed"}</Badge>
+            </summary>
+            <pre class="block diff">
+              {lines
+                ? lines.map((l, i) => (
+                    <span key={i} class={l.kind === "gap" ? "hunk" : l.kind}>
+                      {l.kind === "add" ? "+ " : l.kind === "del" ? "- " : l.kind === "gap" ? "@ " : "  "}
+                      {l.text}
+                      {"\n"}
+                    </span>
+                  ))
+                : f.after}
+            </pre>
+          </details>
+        );
+      })}
     </div>
   );
 }
@@ -258,7 +263,7 @@ function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: str
       onAdded();
       void loadHub();
     });
-  const relevant = info ? info.dirty.filter((f) => f.startsWith(".github/workflows/") || f.startsWith(".goreleaser")) : [];
+  const relevant = info?.dirty ?? [];
   const noWorkflow = info?.kind === "go" && info.workflows.length === 0;
   return (
     <>
