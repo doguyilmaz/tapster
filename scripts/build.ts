@@ -1,3 +1,4 @@
+import { basename, dirname } from "node:path";
 import type { BunPlugin } from "bun";
 import { clientBundle } from "../src/web/bundle";
 
@@ -10,14 +11,15 @@ const inline: BunPlugin = {
   },
 };
 const entry = "src/cli/main.ts";
+const cliOut = target ?? "dist/cli.js";
 const result =
   what === "cli"
-    ? await Bun.build({ entrypoints: [entry], target: "bun", minify: true, outdir: "dist", naming: "cli.js", plugins: [inline] })
+    ? await Bun.build({ entrypoints: [entry], target: "bun", minify: true, outdir: dirname(cliOut), naming: basename(cliOut), plugins: [inline] })
     : what === "compile" && target && outfile
       ? await Bun.build({ entrypoints: [entry], minify: true, plugins: [inline], compile: { target: target as never, outfile } } as Parameters<typeof Bun.build>[0])
       : null;
 if (!result) {
-  console.error("usage: bun scripts/build.ts cli | compile <bun-target> <outfile>");
+  console.error("usage: bun scripts/build.ts cli [outfile] | compile <bun-target> <outfile>");
   process.exit(2);
 }
 if (!result.success) {
