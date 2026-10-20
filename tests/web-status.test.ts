@@ -3,8 +3,9 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { useGhWrite } from "../src/cli/gh";
 import { withNote } from "../src/draftnote";
-import type { AddView, DiffView, FollowView, InspectView, ProjectStatus, StatusView } from "../src/web/contract";
+import type { AddView, DiffView, FollowView, InspectView, ProjectStatus, ReachView, StatusView } from "../src/web/contract";
 import { setupProblems } from "../src/web/api/status";
+import { type HubCheck, reachFromCheck } from "../src/web/api/reach";
 import { adaptGoreleaser, adaptReleaseWorkflow, bunWorkflow } from "../src/cli/add";
 import { listAims, sampleHome } from "../scripts/demo";
 import pins from "../templates/pins.json";
@@ -14,6 +15,7 @@ import { type Call, webApp } from "./helpers/web";
 const fake = new FakeHub("octo");
 let home = "";
 let call: Call;
+let app: ReturnType<typeof webApp>;
 const HUB = "octo/homebrew-tap";
 
 beforeAll(async () => {
@@ -23,7 +25,8 @@ beforeAll(async () => {
   listAims(fake);
   useGhWrite(fake.ghWrite);
   fake.installation = { id: 9, repos: ["octo/ebb"] };
-  ({ call } = webApp(fake, home));
+  app = webApp(fake, home);
+  call = app.call;
 });
 
 afterAll(() => {
@@ -61,7 +64,7 @@ test("aims' status comes from GitHub: each fact done or the next step", async ()
     setup: { ok: true, problems: [] },
     protection: { ok: true, off: false },
     entry: { state: "merged", pr: null },
-    app: { reaches: false },
+    app: { reaches: null, how: null, reason: "the hub has not checked it yet", running: false },
     release: { latest: { tag: "v0.2.1", byHub: false }, draft: null, highest: "v0.2.1", next: "v0.2.2", autoTag: false, head: { sha: repo.head, subject: "Release through the tapster hub" } },
     secrets: { names: ["HOMEBREW_TAP_GITHUB_TOKEN", "MACOS_SIGN_P12", "MACOS_SIGN_PASSWORD"], published: false },
   } satisfies Partial<Record<keyof ProjectStatus, unknown>>);
@@ -78,17 +81,58 @@ test("a listed repository GitHub does not show gets its reason while the others 
   expect(list.find((p) => p.name === "gone")!.unreadable).toStartWith("GitHub GET /repos/octo/gone returned 404.");
 });
 
-test("the App's reach flips once GitHub shows the installation and stays unknown when GitHub does not tell", async () => {
-  const reach = async () => (await call("GET", `/api/projects/reach?hub=${HUB}&repo=octo/aims`)).data;
-  expect(await reach()).toEqual({ reaches: false });
+test("GitHub refuses to list App installations to the gh sign-in, as FakeHub does", async () => {
+  const res = await fake.fetch("https://api.github.com/user/installations");
+  expect(res.status).toBe(403);
+  expect(((await res.json()) as { message: string }).message).toBe("You must authenticate with an access token authorized to a GitHub App in order to list installations");
+});
+
+const check = (over: Partial<HubCheck> = {}): HubCheck => ({ conclusion: "failure", created: "2026-10-20T10:00:00Z", at: "2026-10-20T10:01:00Z", url: "u", listed: ["octo/aims"], failures: [], ...over });
+
+test("the hub's last check says per project whether its App reached it", () => {
+  expect(reachFromCheck("aims", "octo/aims", null, false)).toEqual({ reaches: null, how: null, reason: "the hub has not checked it yet" });
+  expect(reachFromCheck("aims", "octo/aims", check({ conclusion: "success" }), false)).toEqual({ reaches: true, how: "run", reason: null });
+  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["aims: the hub's App is not installed on octo/aims"] }), true)).toEqual({ reaches: false, how: "run", reason: "the hub's App is not installed on octo/aims" });
+  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["tapster: the App is not installed on any of your repositories"] }), false)).toMatchObject({ reaches: false });
+  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["aims: octo/aims is not protected against a stolen App key"] }), false)).toEqual({ reaches: true, how: "run", reason: null });
+  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["tapster: the App is installed on the hub"] }), false)).toEqual({ reaches: null, how: null, reason: "the App is installed on the hub" });
+  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["pix: the hub's App is not installed on octo/pix"] }), false)).toEqual({ reaches: true, how: "run", reason: null });
+  expect(reachFromCheck("aims", "octo/aims", check({ failures: ["Process completed with exit code 1."] }), false).reaches).toBeNull();
+  expect(reachFromCheck("aims", "octo/aims", check({ failures: Array.from({ length: 10 }, (_, i) => `p${i}: x`) }), false).reaches).toBeNull();
+  expect(reachFromCheck("aims", "octo/aims", check({ conclusion: "success", listed: [] }), false)).toEqual({ reaches: null, how: null, reason: "aims was not in tapster.yml at the hub's last check" });
+  expect(reachFromCheck("aims", "octo/aims", null, true)).toEqual({ reaches: true, how: "release", reason: null });
+});
+
+test("Check again starts one hub run, follows it and shows its verdict with its time", async () => {
+  const reach = async () => (await call("GET", `/api/projects/reach?hub=${HUB}&repo=octo/aims`)).data as unknown as ReachView;
+  const ask = async () => (await call("POST", "/api/projects/check", { hub: HUB })).data as { started: boolean };
+  const hub = fake.get(HUB)!;
+  expect((await aims()).app).toMatchObject({ reaches: null, reason: "the hub has not checked it yet", running: false });
+  expect((await ask()).started).toBe(true);
+  expect((await ask()).started).toBe(false);
+  expect(hub.dispatches).toBe(1);
+  expect(await reach()).toMatchObject({ running: true, run: hub.runs[0]!.html_url });
+  const first = fake.completeRun(HUB);
+  expect(await reach()).toMatchObject({ reaches: false, how: "run", reason: "the hub's App is not installed on octo/aims", since: first.created_at, at: first.jobs![0]!.completed_at, running: false });
   fake.installation = { id: 9, repos: ["octo/ebb", "octo/aims"] };
-  expect(await reach()).toEqual({ reaches: true });
-  expect((await statuses("&repo=octo/aims"))[0]!.app.reaches).toBe(true);
-  fake.userInstallations = false;
-  expect(await reach()).toEqual({ reaches: null });
-  expect((await aims()).app.reaches).toBeNull();
-  fake.userInstallations = true;
+  expect((await ask()).started).toBe(true);
+  expect(hub.dispatches).toBe(2);
+  fake.completeRun(HUB);
+  expect(await reach()).toMatchObject({ reaches: true, how: "run", reason: null });
+  expect((await aims()).app.reaches).toBe(true);
   expect((await call("GET", `/api/projects/reach?hub=${HUB}&repo=nope`)).status).toBe(400);
+  expect((await call("POST", "/api/hub/run", { hub: HUB })).data).toEqual({ started: true });
+  expect((await call("POST", "/api/hub/run", { hub: HUB })).data).toEqual({ started: false });
+  fake.completeRun(HUB);
+});
+
+test("right after creating the App, the session's key answers at once", async () => {
+  app.s.apps.set(HUB, { id: "777", pem: fake.pem, slug: "tapster-octo-tap" });
+  fake.installation = { id: 9, repos: ["octo/ebb"] };
+  expect((await aims()).app).toMatchObject({ reaches: false, how: "key" });
+  fake.installation = { id: 9, repos: ["octo/ebb", "octo/aims"] };
+  expect((await call("GET", `/api/projects/reach?hub=${HUB}&repo=octo/aims`)).data).toMatchObject({ reaches: true, how: "key" });
+  app.s.apps.delete(HUB);
 });
 
 test("a project whose entry waits in a hub pull request is listed with the link; its setup says what main lacks", async () => {

@@ -48,7 +48,11 @@ export function projectSteps(s: ProjectStatus): ProjectStep[] {
     { id: "setup", state: s.setup.ok ? "done" : "open", label: "Set up the release workflow" },
     { id: "protect", state: s.protection.ok || s.protection.off ? "done" : "open", label: "Protect the repository" },
     { id: "entry", state: s.entry.state === "merged" ? "done" : "open", label: s.entry.state === "proposed" ? "Merge the hub entry" : "Propose the hub entry" },
-    { id: "app", state: s.app.reaches === false ? "open" : "done", label: "Install the App" },
+    s.app.reaches === true
+      ? { id: "app", state: "done", label: "Install the App" }
+      : s.app.running
+        ? { id: "app", state: "wait", label: "The hub checks its App" }
+        : { id: "app", state: "open", label: s.app.reaches === false ? "Install the App" : "Let the hub check its App" },
     release,
   ];
   if (s.secrets.names.length && s.secrets.published) steps.push({ id: "secrets", state: "open", label: `Delete ${plural(s.secrets.names.length, "old secret")}` });
@@ -64,7 +68,6 @@ export function canRelease(s: ProjectStatus): { ok: boolean; why: string | null 
   if (s.unreadable) return { ok: false, why: s.unreadable };
   if (s.release.autoTag) return { ok: false, why: "The release workflow tags each release by itself." };
   if (!s.setup.ok) return { ok: false, why: `First the release workflow on ${s.defaultBranch} must be tapster's.` };
-  if (s.app.reaches === false) return { ok: false, why: `First install the App on ${s.name}.` };
   if (!s.release.head) return { ok: false, why: `GitHub did not show the latest commit on ${s.defaultBranch}. Check again in a moment.` };
   return { ok: true, why: null };
 }

@@ -58,6 +58,7 @@ try {
   await page.waitFor("document.body.textContent.includes('git pull')");
   listAims(fake);
   fake.installation = { id: 9, repos: ["octo/ebb", "octo/aims"] };
+  fake.completeRun("octo/homebrew-tap");
   await page.clickText("Projects", "nav a");
   await page.waitFor("document.body.textContent.includes('Ready to add') && document.body.textContent.includes('Release v0.2.2')", 20000);
   await shot("projects");
@@ -70,9 +71,13 @@ try {
   await page.eval("document.querySelector('.sheet-back').click()");
   await page.clickText("octo/aims", ".item button.link");
   await page.waitFor("[...document.querySelectorAll('.sheet button')].some((b) => b.textContent.includes('Release v0.2.2'))", 20000);
+  fake.appKeyWorks = false;
+  await page.clickText("Refresh", ".sheet button");
+  await page.waitFor("document.body.textContent.includes('reached octo/aims')", 20000);
   await page.size(1280, 1100);
   await sheetShot("status", "The hub's App");
   await page.size(1280, 820);
+  fake.appKeyWorks = true;
   await page.eval("document.querySelector('.sheet-back').click()");
   await page.clickText("Health", "nav a");
   await page.waitFor("document.querySelector('.card.list')", 15000);

@@ -65,7 +65,8 @@ Click **Add to you/homebrew-tap**. tapster then:
    in a terminal. If the clone already has these files as committed, the sheet says **No changes** instead.
 2. Under **Hub entry**, click **Review and merge** and merge the pull request on the hub.
 3. Under **The hub's App**, click **Install the App** unless the App already reaches this project. GitHub preselects it;
-   keep **Only select repositories**. The step turns done by itself once GitHub shows the installation.
+   keep **Only select repositories**. GitHub shows an App's repositories only to the App itself, so when you come back to
+   the page tapster starts a hub run that checks it. The step turns done by itself when that run has reached the project.
 
 </Steps>
 
@@ -81,7 +82,8 @@ GitHub and shows as done or as the next step:
   If your clone has these changes but GitHub does not yet, the sheet offers to commit and push them.
 - **Protection**: tapster's rulesets protect the repository.
 - **Hub entry**: merged or waiting in a pull request with its link.
-- **The hub's App**: it reaches the project. If not, the sheet links to the install page.
+- **The hub's App**: what the hub's last check said about it, with the time of that check. **Check again** starts a hub
+  run that checks it; tapster starts one run at a time.
 - **Releases**: the latest release and whether the hub published it, a waiting draft with the hub's reason if it
   refuses it and the next release. See [Ship the first release](/tutorial/release/).
 

@@ -306,7 +306,7 @@ export type HubEntry = { name: string; repo: string; kind: "go" | "bun" | "app";
 
 const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 
-function rawEntries(text: string | null, owner: string): Omit<HubEntry, "state" | "pr">[] {
+export function entriesIn(text: string | null, owner: string): Omit<HubEntry, "state" | "pr">[] {
   let doc: unknown = null;
   try {
     doc = text ? parse(text) : null;
@@ -334,12 +334,12 @@ function rawEntries(text: string | null, owner: string): Omit<HubEntry, "state" 
 
 export async function hubEntries(gh: GitHub, hub: string): Promise<HubEntry[]> {
   const owner = hub.split("/")[0]!;
-  const out: HubEntry[] = rawEntries(await readHubFile(gh, hub, "tapster.yml", "main"), owner).map((e) => ({ ...e, state: "merged", pr: null }));
+  const out: HubEntry[] = entriesIn(await readHubFile(gh, hub, "tapster.yml", "main"), owner).map((e) => ({ ...e, state: "merged", pr: null }));
   const pulls = await gh.json<{ html_url: string; head: { ref: string } }[]>("GET", `/repos/${hub}/pulls?state=open&per_page=100`).catch(() => []);
   for (const p of pulls) {
     const name = /^tapster-add-([a-z0-9][a-z0-9-]*)$/.exec(p.head?.ref ?? "")?.[1];
     if (!name || out.some((e) => e.name === name)) continue;
-    const found = rawEntries(await readHubFile(gh, hub, "tapster.yml", p.head.ref).catch(() => null), owner).find((e) => e.name === name);
+    const found = entriesIn(await readHubFile(gh, hub, "tapster.yml", p.head.ref).catch(() => null), owner).find((e) => e.name === name);
     if (found && !out.some((e) => e.repo.toLowerCase() === found.repo.toLowerCase())) out.push({ ...found, state: "proposed", pr: p.html_url });
   }
   return out;

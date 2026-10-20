@@ -99,6 +99,7 @@ export async function demo(port: number, log: (line: string) => void): Promise<{
   const fake = new FakeHub("octo");
   fake.repo("homebrew-tap", { files: new Map([["README.md", "# octo/tap\n"], [".github/workflows/tests.yml", "jobs:\n  t:\n    steps:\n      - uses: Homebrew/actions/setup-homebrew@master\n"]]) });
   const home = await sampleHome(fake);
+  fake.runDelay = 2500;
   useGhWrite(fake.ghWrite);
   const pin = "0123456789abcdef0123456789abcdef01234567";
   const done = setup(["--port", String(port), "--no-open"], {

@@ -6,12 +6,13 @@ import type { GitHub } from "../../github";
 import { readHubFile } from "../../hubcommit";
 import { protectionProblems } from "../../rulesets";
 import { TAG, compareSemver, parseTag } from "../../semver";
-import { type State, emptyState, parseState } from "../../state";
+import type { State } from "../../state";
 import { type HubEntry, hubEntries, hubFacts, installLink, releaseSecrets, repoTags } from "../../cli/hubpr";
 import type { CommitView, FollowView, ProjectStatus, StatusView } from "../contract";
-import { type Ctx, type Routes, readJson } from "../server";
+import { type Ctx, type Routes, type Session, readJson } from "../server";
 import { highestTag, nextTag, tagProblem } from "../status";
 import { checkHub, me } from "./hub";
+import { type HubChecks, hubChecks, reachOf, reachRoutes, stateOf } from "./reach";
 
 const HOMEBREW_KEYS = ["notarize", "homebrew_casks", "brews", "scoops"];
 
@@ -39,40 +40,16 @@ export function setupProblems(o: { kind: string; branch: string; workflowName: s
   return out;
 }
 
-export async function appRepos(gh: GitHub, slug: string): Promise<Set<string> | null> {
-  try {
-    const list = await gh.json<{ installations: { id: number; app_slug: string }[] }>("GET", "/user/installations?per_page=100");
-    const inst = list.installations.find((i) => i.app_slug === slug);
-    const repos = new Set<string>();
-    if (!inst) return repos;
-    for (let page = 1; page <= 10; page++) {
-      const batch = await gh.json<{ repositories: { full_name: string }[] }>("GET", `/user/installations/${inst.id}/repositories?per_page=100&page=${page}`);
-      for (const r of batch.repositories) repos.add(r.full_name.toLowerCase());
-      if (batch.repositories.length < 100) break;
-    }
-    return repos;
-  } catch {
-    return null;
-  }
-}
+type Shared = { gh: GitHub; hub: string; slug: string | null; ownerId: number; state: State; checks: HubChecks };
 
-type Shared = { gh: GitHub; hub: string; slug: string | null; ownerId: number; state: State; reach: Set<string> | null };
-
-function stateOf(text: string | null): State {
-  try {
-    return parseState(text);
-  } catch {
-    return emptyState();
-  }
-}
-
-async function shared(gh: GitHub, hub: string, login: string): Promise<Shared> {
-  const [slug, stateText, owner] = await Promise.all([
+async function shared(s: Session, gh: GitHub, hub: string, login: string): Promise<Shared> {
+  const [slug, stateText, owner, checks] = await Promise.all([
     hubFacts(gh, hub).then((f) => f.slug, (e) => (e instanceof TapsterError ? null : Promise.reject(e))),
     readHubFile(gh, hub, ".tapster/state.json", "main"),
     gh.json<{ id: number }>("GET", `/users/${login}`),
+    hubChecks(s, gh, hub),
   ]);
-  return { gh, hub, slug, ownerId: owner.id, state: stateOf(stateText), reach: slug ? await appRepos(gh, slug) : new Set() };
+  return { gh, hub, slug, ownerId: owner.id, state: stateOf(stateText), checks };
 }
 
 const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim();
@@ -121,7 +98,7 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
     setup: { ok: setup.length === 0, problems: setup },
     protection: { ok: problems.length === 0, off: e.protection === "off", problems },
     entry: { state: e.state, pr: e.pr },
-    app: { reaches: sh.reach === null ? null : sh.reach.has(e.repo.toLowerCase()), installUrl: sh.slug ? installLink(sh.slug, sh.ownerId, project.id) : "" },
+    app: { ...reachOf(sh.checks, e.name, e.repo, sh.state), installUrl: sh.slug ? installLink(sh.slug, sh.ownerId, project.id) : "" },
     release: {
       latest: latest ? { tag: latest.tag_name, url: latest.html_url, byHub: published.some((p) => p.tag === latest.tag_name && p.status === "published") } : null,
       draft: draft ? { tag: draft.tag_name, url: draft.html_url, note: noteIn(draft.body) } : null,
@@ -151,7 +128,7 @@ async function statusOrReason(sh: Shared, e: Listed): Promise<ProjectStatus> {
       setup: { ok: false, problems: [] },
       protection: { ok: false, off: false, problems: [] },
       entry: { state: e.state, pr: e.pr },
-      app: { reaches: null, installUrl: "" },
+      app: { reaches: null, how: null, at: null, since: null, reason: null, run: null, running: false, installUrl: "" },
       release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, head: null },
       secrets: { names: [], published: false },
       unreadable: `${err.reason}. ${err.fix}`,
@@ -173,7 +150,7 @@ async function status(c: Ctx): Promise<StatusView> {
   const only = c.url.searchParams.get("repo");
   if (only !== null && (!REPO.test(only) || only.split("/")[0]!.toLowerCase() !== login.toLowerCase())) throw new TapsterError(`${only} is not one of your repositories`, "Reload the page and try again.");
   const entries = await hubEntries(gh, hub);
-  const sh = await shared(gh, hub, login);
+  const sh = await shared(c.s, gh, hub, login);
   if (only !== null) {
     const found = entries.find((e) => e.repo.toLowerCase() === only.toLowerCase());
     if (found) return { projects: [await statusOrReason(sh, found)] };
@@ -235,18 +212,9 @@ async function follow(c: Ctx): Promise<FollowView> {
   };
 }
 
-async function reach(c: Ctx): Promise<{ reaches: boolean | null }> {
-  const { gh, login } = await me(c.s);
-  const hub = checkHub(c.url.searchParams.get("hub"), login);
-  const repo = c.url.searchParams.get("repo") ?? "";
-  if (!REPO.test(repo)) throw new TapsterError(`${repo} is not a repository name`, "Reload the page and try again.");
-  const repos = await appRepos(gh, (await hubFacts(gh, hub)).slug);
-  return { reaches: repos === null ? null : repos.has(repo.toLowerCase()) };
-}
-
 export const statusRoutes: Routes = {
+  ...reachRoutes,
   "GET /api/projects/status": status,
-  "GET /api/projects/reach": reach,
   "POST /api/projects/release": release,
   "GET /api/projects/follow": follow,
 };

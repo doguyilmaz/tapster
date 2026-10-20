@@ -367,7 +367,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
   const fix = (id: ProjectStepId): ComponentChildren => {
     if (!path) return id === "setup" || addFixes ? <span class="muted small">No clone of it turned up on this computer. Add its folder in Projects or run tapster add in a clone.</span> : null;
     if (id !== "setup" || !info) return null;
-    if (added?.files.length) return <span class="muted small">Commit and push the changes above{info.branch === info.defaultBranch ? "" : `, then merge them into ${info.defaultBranch}`}. Then click Check again.</span>;
+    if (added?.files.length) return <span class="muted small">Commit and push the changes above{info.branch === info.defaultBranch ? "" : `, then merge them into ${info.defaultBranch}`}. Then click Refresh.</span>;
     if (!info.ready) return <span class="muted small">The clone does not have tapster's release files yet. Update the project below.</span>;
     if (info.dirty.length) {
       return (

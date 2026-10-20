@@ -1,6 +1,6 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import type { FollowView, Problem as ProblemView, ProjectStatus } from "../contract";
+import type { FollowView, Problem as ProblemView, ProjectStatus, ReachView } from "../contract";
 import { type ProjectStep, type ProjectStepId, canRelease, projectNext, projectSteps, tagCommand, tagProblem } from "../status";
 import { get, post } from "./api";
 import { hubName, problemOf, say, statusOf, tilde } from "./state";
@@ -72,56 +72,121 @@ function Step({ state, title, children }: { state: ProjectStep["state"]; title: 
   );
 }
 
+export function reachLine(s: ProjectStatus): string {
+  const a = s.app;
+  if (a.how === "key") return a.reaches ? `The App reaches ${s.repo}; tapster checked with the App's key.` : `The App does not reach ${s.repo} yet; tapster checked with the App's key.`;
+  if (a.how === "run") return a.reaches ? `The hub's check on ${when(a.at ?? "")} reached ${s.repo}.` : `The hub's check on ${when(a.at ?? "")} could not reach ${s.repo}: ${a.reason}.`;
+  if (a.how === "release") return `The hub has published a release of ${s.name}, so its App reached ${s.repo} then.`;
+  return sentence([a.reason ?? "the hub has not checked it yet"]);
+}
+
 function AppStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatus) => void }) {
-  const [watching, setWatching] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [asked, setAsked] = useState<number | null>(null);
+  const [live, setLive] = useState<{ running: boolean; run: string | null } | null>(null);
+  const [problem, setProblem] = useState<ProblemView | null>(null);
+  const ask = async () => {
+    setProblem(null);
+    setArmed(false);
+    try {
+      if (s.app.how === "key") {
+        const next = await statusOf(s.repo);
+        if (next) onStatus(next);
+        return;
+      }
+      const r = await post<{ started: boolean; run: string | null; at: string }>("/api/projects/check", { hub: hubName.value });
+      setLive({ running: true, run: r.run });
+      setAsked(Date.parse(r.at));
+    } catch (e) {
+      setProblem(problemOf(e));
+    }
+  };
   useEffect(() => {
-    if (!watching || s.app.reaches !== false) return;
+    if (!armed) return;
+    const back = () => {
+      if (document.hidden) return;
+      setArmed(false);
+      void ask();
+    };
+    document.addEventListener("visibilitychange", back);
+    addEventListener("focus", back);
+    return () => {
+      document.removeEventListener("visibilitychange", back);
+      removeEventListener("focus", back);
+    };
+  }, [armed]);
+  useEffect(() => {
+    if (asked === null) return;
     let timer = 0;
-    let wait = 5000;
-    const until = Date.now() + 15 * 60_000;
+    let wait = 6000;
+    let again = false;
+    const until = Date.now() + 20 * 60_000;
     const tick = async () => {
       if (!document.hidden) {
         try {
-          const r = await get<{ reaches: boolean | null }>(`/api/projects/reach?${q(s)}`);
-          if (r.reaches !== false) {
+          const v = await get<ReachView>(`/api/projects/reach?${q(s)}`);
+          setLive({ running: v.running, run: v.run });
+          if (!v.running && v.since && Date.parse(v.since) >= asked - 15_000) {
             const next = await statusOf(s.repo);
             if (next) onStatus(next);
+            setAsked(null);
+            setLive(null);
             return;
           }
-          wait = 5000;
+          if (!v.running && !again) {
+            again = true;
+            await post("/api/projects/check", { hub: hubName.value });
+          }
+          wait = 6000;
         } catch {
           wait = Math.min(wait * 2, 30000);
         }
       }
       if (Date.now() < until) timer = window.setTimeout(tick, wait);
-      else setWatching(false);
+      else {
+        setAsked(null);
+        setLive(null);
+      }
     };
-    timer = window.setTimeout(tick, 2000);
+    timer = window.setTimeout(tick, 3000);
     return () => clearTimeout(timer);
-  }, [watching, s.app.reaches, s.repo]);
-  if (s.app.reaches) return <span class="muted">The hub's App reaches {s.repo}.</span>;
-  if (!s.app.installUrl) return <span class="muted">Create the hub's GitHub App in Setup first.</span>;
-  const link = (
-    <Out href={s.app.installUrl} class={s.app.reaches === false ? "btn primary small" : "btn secondary small"} onClick={() => setWatching(true)}>
-      Install the App on {s.name}
-    </Out>
-  );
-  if (s.app.reaches === null) {
-    return (
-      <>
-        <span class="muted">GitHub shows an App's repositories only to the App, so tapster cannot check this. Each hub run reports a project the App cannot reach.</span>
-        <div class="row">{link}</div>
-      </>
-    );
-  }
+  }, [asked, s.repo]);
+  const running = asked !== null || s.app.running;
+  const run = live?.run ?? (s.app.running ? s.app.run : null);
   return (
     <>
-      <span class="muted">The hub cannot publish {s.repo} until its App reaches it. GitHub preselects the project; keep "Only select repositories".</span>
-      <div class="row">{link}</div>
-      {watching && (
+      <span class="muted">{reachLine(s)}</span>
+      {s.app.reaches === false && <span class="muted">The hub cannot publish {s.repo} until its App reaches it. GitHub preselects the project; keep "Only select repositories".</span>}
+      {running && (
         <p class="row muted small" role="status">
-          <Spinner label="Checking" /> This updates by itself once you click Install on GitHub.
+          <Spinner label="Checking" /> The hub checks its App now. This updates by itself when its run ends.
+          {run && (
+            <a href={run} target="_blank" rel="noopener noreferrer">
+              Open the run
+            </a>
+          )}
         </p>
+      )}
+      {armed && !running && (
+        <p class="muted small" role="status">
+          Once you have clicked Install on GitHub, come back to this page: tapster then asks the hub to check.
+        </p>
+      )}
+      <Problem problem={problem} />
+      {s.app.reaches !== true && (
+        <div class="row">
+          {s.app.installUrl ? (
+            <Out href={s.app.installUrl} class={s.app.reaches === false ? "btn primary small" : "btn secondary small"} onClick={() => setArmed(true)}>
+              Install the App on {s.name}
+            </Out>
+          ) : (
+            <span class="muted small">Create the hub's GitHub App in Setup first.</span>
+          )}
+          <button type="button" class="btn secondary small" onClick={() => void ask()} disabled={running}>
+            <Icon name="refresh" />
+            Check again
+          </button>
+        </div>
       )}
     </>
   );
@@ -234,6 +299,10 @@ function ReleaseBox({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSt
         </span>
       </div>
       {s.entry.state !== "merged" && <Note tone="info">The hub publishes it once you merge the hub entry.</Note>}
+      <p class="muted small">
+        {reachLine(s)}
+        {s.app.reaches === false ? " The hub cannot publish this release until its App reaches the project." : ""}
+      </p>
       <Problem problem={problem} />
       <div class="row">
         <Busy busy={busy} class="btn primary" onClick={release} disabled={Boolean(bad)}>
@@ -276,7 +345,7 @@ export function StatusCard({ s, onStatus, fix }: { s: ProjectStatus; onStatus: (
         </h3>
         <Busy busy={busy} class="btn quiet small" onClick={refresh}>
           {!busy && <Icon name="refresh" />}
-          Check again
+          Refresh
         </Busy>
       </div>
       {s.unreadable ? (

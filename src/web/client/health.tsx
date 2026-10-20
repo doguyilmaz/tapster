@@ -103,8 +103,8 @@ export function Health() {
   const runNow = async () => {
     setStarting(true);
     try {
-      await post("/api/hub/run", { hub: h.name });
-      say("ok", "The hub run started. It shows up below in a few seconds.");
+      const r = await post<{ started: boolean }>("/api/hub/run", { hub: h.name });
+      say("ok", r.started ? "The hub run started. It shows up below in a few seconds." : "A hub run is already queued or running. It shows up below.");
       setTimeout(() => void load(), 4000);
     } catch (e) {
       setProblem(problemOf(e));

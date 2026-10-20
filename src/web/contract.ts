@@ -76,6 +76,16 @@ export type DiffView = { files: { path: string; before: string | null; after: st
 
 export type CommitView = { sha: string; subject: string; date: string; url: string };
 
+export type ReachView = {
+  reaches: boolean | null;
+  how: "key" | "run" | "release" | null;
+  at: string | null;
+  since: string | null;
+  reason: string | null;
+  run: string | null;
+  running: boolean;
+};
+
 export type ProjectStatus = {
   name: string;
   repo: string;
@@ -85,7 +95,7 @@ export type ProjectStatus = {
   setup: { ok: boolean; problems: string[] };
   protection: { ok: boolean; off: boolean; problems: string[] };
   entry: { state: "merged" | "proposed" | "missing"; pr: string | null };
-  app: { reaches: boolean | null; installUrl: string };
+  app: ReachView & { installUrl: string };
   release: {
     latest: { tag: string; url: string; byHub: boolean } | null;
     draft: { tag: string; url: string; note: string | null } | null;

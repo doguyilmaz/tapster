@@ -3,6 +3,17 @@ import type { HubView, ProjectStatus } from "../src/web/contract";
 import { canRelease, highestTag, nextTag, projectNext, projectStop, projectSteps, tagCommand, tagProblem } from "../src/web/status";
 import { stops } from "../src/web/steps";
 
+const reach = (reaches: boolean | null): ProjectStatus["app"] => ({
+  reaches,
+  how: reaches === null ? null : "run",
+  at: reaches === null ? null : "2026-10-20T10:00:00Z",
+  since: reaches === null ? null : "2026-10-20T09:59:00Z",
+  reason: reaches === false ? "the hub's App is not installed on octo/aims" : null,
+  run: null,
+  running: false,
+  installUrl: "https://github.com/apps/x/installations/new",
+});
+
 const aims = (over: Partial<ProjectStatus> = {}): ProjectStatus => ({
   name: "aims",
   repo: "octo/aims",
@@ -12,7 +23,7 @@ const aims = (over: Partial<ProjectStatus> = {}): ProjectStatus => ({
   setup: { ok: true, problems: [] },
   protection: { ok: true, off: false, problems: [] },
   entry: { state: "merged", pr: null },
-  app: { reaches: true, installUrl: "https://github.com/apps/x/installations/new" },
+  app: reach(true),
   release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, head: { sha: "a".repeat(40), subject: "Start", date: "2026-10-01T00:00:00Z", url: "https://github.com/octo/aims/commit/a" } },
   secrets: { names: [], published: false },
   unreadable: null,
@@ -46,7 +57,7 @@ test("the tag command tags the commit on GitHub, never the local clone", () => {
 
 test("each fact is a done step or the next step, in the order of the card", () => {
   const s = aims({
-    app: { reaches: false, installUrl: "u" },
+    app: reach(false),
     entry: { state: "proposed", pr: "https://github.com/octo/homebrew-tap/pull/7" },
     secrets: { names: ["HOMEBREW_TAP_GITHUB_TOKEN"], published: false },
   });
@@ -58,7 +69,7 @@ test("each fact is a done step or the next step, in the order of the card", () =
     ["release", "open"],
   ]);
   expect(projectNext(s)?.label).toBe("Merge the hub entry");
-  expect(projectNext(aims({ app: { reaches: false, installUrl: "u" } }))?.label).toBe("Install the App");
+  expect(projectNext(aims({ app: reach(false) }))?.label).toBe("Install the App");
   expect(projectNext(aims({ release: { ...aims().release, highest: "v0.2.1", next: "v0.2.2" } }))?.label).toBe("Release v0.2.2");
 });
 
@@ -91,16 +102,17 @@ test("a project GitHub does not show needs attention and offers no release", () 
   expect(projectStop([gone], 1)).toEqual({ done: false, status: "aims: GitHub did not show it" });
 });
 
-test("the App's reach that GitHub does not show blocks nothing", () => {
-  const unknown = aims({ app: { reaches: null, installUrl: "u" } });
-  expect(projectSteps(unknown).find((x) => x.id === "app")!.state).toBe("done");
+test("an App reach the hub has not checked yet is a step but blocks no release", () => {
+  const unknown = aims({ app: reach(null) });
+  expect(projectSteps(unknown).find((x) => x.id === "app")).toEqual({ id: "app", state: "open", label: "Let the hub check its App" });
   expect(canRelease(unknown)).toEqual({ ok: true, why: null });
+  expect(projectSteps(aims({ app: { ...reach(null), running: true } })).find((x) => x.id === "app")).toEqual({ id: "app", state: "wait", label: "The hub checks its App" });
 });
 
-test("the release button waits for the workflow and the App and never replaces a tagging workflow", () => {
+test("the release button waits for tapster's workflow but not for the App and never replaces a tagging workflow", () => {
   expect(canRelease(aims())).toEqual({ ok: true, why: null });
   expect(canRelease(aims({ setup: { ok: false, problems: ["x"] } }))).toEqual({ ok: false, why: "First the release workflow on main must be tapster's." });
-  expect(canRelease(aims({ app: { reaches: false, installUrl: "u" } }))).toEqual({ ok: false, why: "First install the App on aims." });
+  expect(canRelease(aims({ app: reach(false) }))).toEqual({ ok: true, why: null });
   expect(canRelease(aims({ release: { ...aims().release, autoTag: true } }))).toEqual({ ok: false, why: "The release workflow tags each release by itself." });
   expect(canRelease(aims({ release: { ...aims().release, head: null } })).ok).toBe(false);
 });
@@ -122,7 +134,7 @@ test("the setup route's project stop reads the project statuses", () => {
   };
   const project = (list: ProjectStatus[] | null) => stops(h, "no", Date.now(), list).find((s) => s.id === "project")!;
   expect(project(null)).toMatchObject({ state: "done", status: "1 in the hub" });
-  expect(project([aims({ app: { reaches: false, installUrl: "u" } })])).toMatchObject({ state: "now", status: "aims: Install the App" });
+  expect(project([aims({ app: reach(false) })])).toMatchObject({ state: "now", status: "aims: Install the App" });
 });
 
 test("the route's project stop sums up the projects the same way", () => {
@@ -130,6 +142,6 @@ test("the route's project stop sums up the projects the same way", () => {
   expect(projectStop(null, 0)).toEqual({ done: false, status: "None yet" });
   expect(projectStop([aims()], 1)).toEqual({ done: true, status: "1 in the hub" });
   expect(projectStop([aims({ entry: { state: "proposed", pr: "p" } })], 0)).toEqual({ done: false, status: "aims: Merge the hub entry" });
-  const other = aims({ name: "ebb", repo: "octo/ebb", app: { reaches: false, installUrl: "u" } });
+  const other = aims({ name: "ebb", repo: "octo/ebb", app: reach(false) });
   expect(projectStop([aims({ entry: { state: "proposed", pr: "p" } }), other], 1)).toEqual({ done: false, status: "2 projects need you" });
 });
