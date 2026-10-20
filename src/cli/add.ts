@@ -284,7 +284,7 @@ export async function protectProject(gh: GitHub, repo: string, deployKeys = fals
   const keptNote = kept.length ? ` It keeps what an earlier ${kept.join(" and ")} opened.` : "";
   if (done.status === "exists") return `- ${repo} is already protected: only an admin can create, move or delete its branches and tags.${keptNote}`;
   if (done.status === "created") {
-    return `- protected ${repo}: only you can create, move or delete branches and tags; workflows and Apps, the hub's included, cannot. Push release tags yourself; GitHub then notes "Bypassed rule violations", which is your admin right at work.${done.dependabot ? " Branches named dependabot/... stay open, so Dependabot can open pull requests; the hub accepts that only with protection: dependabot in its entry." : ""}${keptNote}`;
+    return `- protected ${repo}: only you can create, move or delete branches and tags; workflows and Apps, the hub's included, cannot. Release tags come from you; GitHub then notes "Bypassed rule violations", which is your admin right at work.${done.dependabot ? " Branches named dependabot/... stay open, so Dependabot can open pull requests; the hub accepts that only with protection: dependabot in its entry." : ""}${keptNote}`;
   }
   return `- GitHub does not enforce rulesets on ${repo} (private repositories need a paid plan for them). A stolen App key could tag code the hub would sign. Make it public or use a paid plan. To accept the risk, set protection: off for this package in the hub's tapster.yml; until then the hub refuses it.`;
 }

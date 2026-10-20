@@ -95,6 +95,7 @@ export type ProjectStatus = {
     head: CommitView | null;
   };
   secrets: { names: string[]; published: boolean };
+  unreadable: string | null;
 };
 
 export type StatusView = { projects: ProjectStatus[] };

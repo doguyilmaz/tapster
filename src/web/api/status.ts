@@ -92,7 +92,7 @@ async function headOf(gh: GitHub, repo: string, branch: string): Promise<CommitV
   }
 }
 
-async function projectStatus(sh: Shared, e: HubEntry | (Omit<HubEntry, "state" | "pr"> & { state: "missing"; pr: null })): Promise<ProjectStatus> {
+async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
   const { gh } = sh;
   const project = await gh.getRepo(e.repo);
   const branch = project.default_branch;
@@ -131,7 +131,32 @@ async function projectStatus(sh: Shared, e: HubEntry | (Omit<HubEntry, "state" |
       head,
     },
     secrets: { names: secrets, published: published.some((p) => p.status === "published") },
+    unreadable: null,
   };
+}
+
+type Listed = HubEntry | (Omit<HubEntry, "state" | "pr"> & { state: "missing"; pr: null });
+
+async function statusOrReason(sh: Shared, e: Listed): Promise<ProjectStatus> {
+  try {
+    return await projectStatus(sh, e);
+  } catch (err) {
+    if (!(err instanceof TapsterError)) throw err;
+    return {
+      name: e.name,
+      repo: e.repo,
+      url: `https://github.com/${e.repo}`,
+      kind: e.kind,
+      defaultBranch: "main",
+      setup: { ok: false, problems: [] },
+      protection: { ok: false, off: false, problems: [] },
+      entry: { state: e.state, pr: e.pr },
+      app: { reaches: null, installUrl: "" },
+      release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, head: null },
+      secrets: { names: [], published: false },
+      unreadable: `${err.reason}. ${err.fix}`,
+    };
+  }
 }
 
 async function guessKind(gh: GitHub, repo: string, branch: string): Promise<"go" | "bun" | "app"> {
@@ -151,12 +176,12 @@ async function status(c: Ctx): Promise<StatusView> {
   const sh = await shared(gh, hub, login);
   if (only !== null) {
     const found = entries.find((e) => e.repo.toLowerCase() === only.toLowerCase());
-    if (found) return { projects: [await projectStatus(sh, found)] };
+    if (found) return { projects: [await statusOrReason(sh, found)] };
     const name = only.split("/")[1]!.toLowerCase().replace(/[^a-z0-9-]/g, "-");
     const kind = await guessKind(gh, only, (await gh.getRepo(only)).default_branch);
-    return { projects: [await projectStatus(sh, { name, repo: only, kind, workflow: "release.yml", protection: "on", description: null, state: "missing", pr: null })] };
+    return { projects: [await statusOrReason(sh, { name, repo: only, kind, workflow: "release.yml", protection: "on", description: null, state: "missing", pr: null })] };
   }
-  return { projects: await Promise.all(entries.map((e) => projectStatus(sh, e))) };
+  return { projects: await Promise.all(entries.map((e) => statusOrReason(sh, e))) };
 }
 
 const releaseBody = z.object({ hub: z.string(), repo: z.string().regex(REPO), tag: z.string().max(100), sha: z.string().regex(/^[0-9a-f]{40,64}$/) }).strict();
@@ -210,8 +235,18 @@ async function follow(c: Ctx): Promise<FollowView> {
   };
 }
 
+async function reach(c: Ctx): Promise<{ reaches: boolean | null }> {
+  const { gh, login } = await me(c.s);
+  const hub = checkHub(c.url.searchParams.get("hub"), login);
+  const repo = c.url.searchParams.get("repo") ?? "";
+  if (!REPO.test(repo)) throw new TapsterError(`${repo} is not a repository name`, "Reload the page and try again.");
+  const repos = await appRepos(gh, (await hubFacts(gh, hub)).slug);
+  return { reaches: repos === null ? null : repos.has(repo.toLowerCase()) };
+}
+
 export const statusRoutes: Routes = {
   "GET /api/projects/status": status,
+  "GET /api/projects/reach": reach,
   "POST /api/projects/release": release,
   "GET /api/projects/follow": follow,
 };

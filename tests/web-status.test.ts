@@ -68,12 +68,27 @@ test("aims' status comes from GitHub: each fact done or the next step", async ()
   expect(s.app.installUrl).toBe(`https://github.com/apps/tapster-octo-tap/installations/new/permissions?suggested_target_id=42&repository_ids[]=${repo.id}`);
 });
 
+test("a listed repository GitHub does not show gets its reason while the others still load", async () => {
+  const hub = fake.get(HUB)!;
+  const before = hub.files!.get("tapster.yml")!;
+  hub.files!.set("tapster.yml", `${before}  - name: gone\n    repo: octo/gone\n    binaries: [gone]\n    assets: { linux-amd64: "gone_{version}_linux_amd64.tar.gz" }\n`);
+  const list = await statuses();
+  hub.files!.set("tapster.yml", before);
+  expect(list.find((p) => p.name === "aims")!.unreadable).toBeNull();
+  expect(list.find((p) => p.name === "gone")!.unreadable).toStartWith("GitHub GET /repos/octo/gone returned 404.");
+});
+
 test("the App's reach flips once GitHub shows the installation, and stays unknown when GitHub does not tell", async () => {
+  const reach = async () => (await call("GET", `/api/projects/reach?hub=${HUB}&repo=octo/aims`)).data;
+  expect(await reach()).toEqual({ reaches: false });
   fake.installation = { id: 9, repos: ["octo/ebb", "octo/aims"] };
+  expect(await reach()).toEqual({ reaches: true });
   expect((await statuses("&repo=octo/aims"))[0]!.app.reaches).toBe(true);
   fake.userInstallations = false;
+  expect(await reach()).toEqual({ reaches: null });
   expect((await aims()).app.reaches).toBeNull();
   fake.userInstallations = true;
+  expect((await call("GET", `/api/projects/reach?hub=${HUB}&repo=nope`)).status).toBe(400);
 });
 
 test("a project whose entry waits in a hub pull request is listed with the link, and its setup says what main lacks", async () => {

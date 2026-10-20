@@ -35,6 +35,7 @@ export type ProjectStep = { id: ProjectStepId; state: "done" | "open" | "wait" |
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 export function projectSteps(s: ProjectStatus): ProjectStep[] {
+  if (s.unreadable) return [{ id: "setup", state: "attention", label: "GitHub did not show it" }];
   const r = s.release;
   const release: ProjectStep = r.draft?.note
     ? { id: "release", state: "attention", label: `Fix the draft ${r.draft.tag}` }
@@ -60,6 +61,7 @@ const SETUP: ProjectStepId[] = ["setup", "protect", "entry", "app"];
 const ready = (s: ProjectStatus) => projectSteps(s).every((x) => !SETUP.includes(x.id) || x.state === "done");
 
 export function canRelease(s: ProjectStatus): { ok: boolean; why: string | null } {
+  if (s.unreadable) return { ok: false, why: s.unreadable };
   if (s.release.autoTag) return { ok: false, why: "The release workflow tags each release by itself." };
   if (!s.setup.ok) return { ok: false, why: `First the release workflow on ${s.defaultBranch} must be tapster's.` };
   if (s.app.reaches === false) return { ok: false, why: `First install the App on ${s.name}.` };

@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { AppStart, FilesView, HubView, InstallView, Problem as ProblemView } from "../contract";
 import { ApiError, get, post } from "./api";
 import { type Stop, type StopId, changedOnly, expiresSoon, firstOpen, lineDiff, macNeeded, stops } from "../steps";
-import { appResult, go, hub, hubError, hubLoading, hubName, loadHub, mac, macChoice, openStop, problemOf, say, setMac } from "./state";
+import { clonePaths, targetOf } from "./projects";
+import { type SheetTarget, ProjectSheet } from "./sheet";
+import { appResult, clones, go, hub, hubError, hubLoading, hubName, loadClones, loadHub, loadStatuses, mac, macChoice, openStop, problemOf, say, setMac, statusError, statuses } from "./state";
+import { StatusRows } from "./status";
 import { Badge, Busy, Cmd, Copy, Field, FileDrop, Icon, Note, Out, Password, Problem, Spinner } from "./ui";
 
 function Dot({ stop, index }: { stop: Stop; index: number }) {
@@ -651,22 +654,24 @@ function Files({ h }: { h: HubView }) {
 }
 
 function Projects({ h }: { h: HubView }) {
+  const [open, setOpen] = useState<SheetTarget | null>(null);
+  useEffect(() => {
+    void loadStatuses();
+    if (clones.value?.hub !== h.name) void loadClones().catch(() => undefined);
+  }, [h.name]);
+  const list = statuses.value?.hub === h.name ? statuses.value.list : null;
+  const local = clonePaths(clones.value?.hub === h.name ? clones.value.scan.projects : []);
   return (
     <div class="panel">
-      <Head title={h.packages.length ? "Your projects" : "Add your first project"} lead="tapster finds the projects cloned on this computer and adds them to the hub: it prepares the release workflow, protects the repository and proposes the hub entry." />
-      {h.packages.length > 0 && (
-        <div class="card list">
-          {h.packages.map((p) => (
-            <div class="item" key={p.name}>
-              <span>
-                <span class="name">{p.name}</span>
-                <span class="path"> {p.repo}</span>
-              </span>
-              <Badge>{p.kind === "app" ? "Mac app" : p.kind === "bun" ? "Bun" : "Go"}</Badge>
-            </div>
-          ))}
-        </div>
+      <Head title={h.packages.length || list?.length ? "Your projects" : "Add your first project"} lead="tapster finds the projects cloned on this computer and adds them to the hub: it prepares the release workflow, protects the repository and proposes the hub entry. Open a project to see where it stands." />
+      <Problem problem={statusError.value} />
+      {list === null && h.packages.length > 0 && !statusError.value && (
+        <p class="row muted" role="status">
+          <Spinner /> Reading where your projects stand
+        </p>
       )}
+      {list !== null && list.length > 0 && <StatusRows list={list} paths={new Map([...local].map(([k, p]) => [k, p.path]))} onOpen={(s) => setOpen(targetOf(s, local))} />}
+      {open && <ProjectSheet key={open.repo} target={open} hubName={h.name} onClose={() => setOpen(null)} />}
       {h.invalid.length > 0 && (
         <Note tone="warn" title="The hub leaves these entries out">
           <ul class="log">
@@ -818,7 +823,7 @@ function Ready({ h }: { h: HubView }) {
         <h2 class="section-title" style="font-size: 1.15rem">
           {h.name} is ready
         </h2>
-        <p class="muted">Push a version tag in a project and the hub signs and publishes it on its next run. Health shows how the hub is doing.</p>
+        <p class="muted">Open a project under Your projects and click Release: tapster tags its latest commit on GitHub and the hub signs and publishes it on its next run. Health shows how the hub is doing.</p>
       </div>
     </div>
   );
@@ -833,6 +838,10 @@ export function Setup() {
   });
   const panelRef = useRef<HTMLDivElement>(null);
   void macChoice.value;
+  const listing = Boolean(h && h.name === hubName.value && h.files.config);
+  useEffect(() => {
+    if (listing && statuses.value?.hub !== h!.name) void loadStatuses();
+  }, [h?.name, listing]);
   if (hubError.value) {
     return (
       <div class="stack" style="max-width: 640px">
@@ -854,7 +863,7 @@ export function Setup() {
     );
   }
   const choice = mac(h.name);
-  const list = stops(h, choice);
+  const list = stops(h, choice, Date.now(), statuses.value?.hub === h.name ? statuses.value.list : null);
   const current = open ?? (appResult.value?.kind === "created" ? "app" : firstOpen(list));
   const done = list.filter((s) => s.state === "done" || s.state === "skipped").length;
   const next = list.find((s) => s.state === "now" || s.state === "attention");
