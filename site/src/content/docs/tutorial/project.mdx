@@ -54,6 +54,14 @@ Click **Add to you/homebrew-tap**. tapster then:
   your hub to sign. Your own pushes show "Bypassed rule violations", which is your admin right at work;
 - opens a pull request on the hub with the project's entry for `tapster.yml`.
 
+Next to the button, **Add, commit, push and merge in one go** does the next section's first two steps too. It is off
+by default and your browser remembers the choice. With it on, the button adds the project, commits only tapster's files,
+pushes them and merges the hub entry. The sheet shows each step as it runs. If one fails, tapster stops there, shows
+why and leaves the rest to the steps below. **Check the changes first** shows the diff before anything happens.
+tapster refuses to do it in one go when the clone is not on the default branch, has changes of its own in the files
+tapster edits or has commits that are not on GitHub yet. It also stops after adding when the hub's pull request could
+not be opened.
+
 ## 2. Commit, merge and install
 
 <Image src={added} alt="After adding, the sheet shows tapster's changes to .goreleaser.yaml and the release workflow as a diff." />
@@ -63,10 +71,16 @@ Click **Add to you/homebrew-tap**. tapster then:
 1. Review the diff, then click **Commit these files** and **Push**. tapster commits only the files it changed, with your
    own git setup, so your hooks and commit signing apply. If git needs a password, the page gives you the command to run
    in a terminal. If the clone already has these files as committed, the sheet says **No changes** instead.
-2. Under **Hub entry**, click **Review and merge** and merge the pull request on the hub.
+2. Under **Hub entry**, check the entry the sheet shows and click **Merge the hub entry**. tapster merges the pull
+   request with your GitHub sign-in. First it checks that the pull request still changes only `tapster.yml`, that it
+   adds just this entry to the one on main and that it still ends at the commit the sheet showed. It also waits while
+   main holds a change you did not make, as the hub does. Then it deletes the branch. **Review on GitHub** opens the
+   pull request there instead.
 3. Under **The hub's App**, click **Install the App** unless the App already reaches this project. GitHub preselects it;
-   keep **Only select repositories**. GitHub shows an App's repositories only to the App itself, so when you come back to
-   the page tapster starts a hub run that checks it. The step turns done by itself when that run has reached the project.
+   keep **Only select repositories**. With **All repositories** the App would also reach the hub, which holds your
+   keys. The hub then refuses to run. This step stays on GitHub because GitHub does not let your sign-in add
+   repositories to an App. GitHub shows an App's repositories only to the App itself, so when you come back to the page
+   tapster starts a hub run that checks it. The step turns done by itself when that run has reached the project.
 
 </Steps>
 
@@ -81,7 +95,7 @@ GitHub and shows as done or as the next step:
 - **Release workflow**: the files on the default branch open drafts, attest the archives and leave signing to the hub.
   If your clone has these changes but GitHub does not yet, the sheet offers to commit and push them.
 - **Protection**: tapster's rulesets protect the repository.
-- **Hub entry**: merged or waiting in a pull request with its link.
+- **Hub entry**: merged or waiting in a pull request, with the entry and **Merge the hub entry**.
 - **The hub's App**: what the hub's last check said about it, with the time of that check. **Check again** starts a hub
   run that checks it; tapster starts one run at a time.
 - **Releases**: the latest release and whether the hub published it, a waiting draft with the hub's reason if it
