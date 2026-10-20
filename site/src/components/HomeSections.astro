@@ -12,7 +12,7 @@ const route = [
   { title: "Delivered", text: "The release is published and the cask is written. brew install gets the signed build.", where: "Your users' machines" },
 ];
 const keys = [
-  { title: "No tapster server", text: "tapster is a command you run and an Action that runs in your hub. The optional doorbell runs in your own Cloudflare account." },
+  { title: "No tapster server", text: "tapster is a setup page your own computer serves and an Action that runs in your hub. The optional doorbell runs in your own Cloudflare account." },
   { title: "One place for keys", text: "Your Apple certificate, notary key and App key are secrets of your hub. Only its main branch can open them." },
   { title: "A stolen key is not enough", text: "Only you can tag your projects. The hub signs only drafts that your own workflows built." },
 ];
@@ -68,8 +68,8 @@ const dest = [
 
   <section class="start">
     <div>
-      <h2>Set up your hub</h2>
-      <p>You need a GitHub account, Bun and the GitHub CLI. Signing for macOS also needs an Apple Developer account.</p>
+      <h2>Set up your hub in your browser</h2>
+      <p>One command opens the setup, served by your own computer: <code>bunx @doguyilmaz/tapster setup</code>. You need a GitHub account, Bun and the GitHub CLI. Signing for macOS also needs an Apple Developer account.</p>
     </div>
     <LinkButton href={`${base}tutorial/before/`}>Start the tutorial</LinkButton>
   </section>
