@@ -1,51 +1,25 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { GitHub } from "../src/github";
 import { run } from "../src/run";
 import { useGhWrite } from "../src/cli/gh";
 import { newSparkleKey } from "../src/cli/keystore";
-import { appCallback } from "../src/web/api/hub";
 import type { AddView, FilesView, HubView, InspectView, ScanView } from "../src/web/contract";
-import { type Deps, handler, newSession } from "../src/web/server";
-import { routes } from "../src/web/start";
 import { sampleHome } from "../scripts/demo";
 import { FakeHub } from "./helpers/fakehub";
+import { type Call, webApp } from "./helpers/web";
 
 const fake = new FakeHub("octo");
 const sparkle = newSparkleKey();
 let home = "";
-let call: (method: string, path: string, body?: unknown) => Promise<{ status: number; data: Record<string, unknown> }>;
-let s: ReturnType<typeof newSession>;
+let call: Call;
+let handle: ReturnType<typeof webApp>["handle"];
 
 beforeAll(async () => {
   fake.repo("homebrew-tap", { files: new Map([["README.md", "# mine\n"], [".github/workflows/tests.yml", "jobs:\n  t:\n    steps:\n      - uses: Homebrew/actions/setup-homebrew@master\n"]]) });
   home = await sampleHome(fake);
   useGhWrite(fake.ghWrite);
-  const deps: Deps = {
-    github: async () => new GitHub("t", fake.fetch, async () => {}, "user"),
-    fetch: fake.fetch as typeof fetch,
-    home,
-    cwd: join(home, "Developer", "ebb"),
-    pin: "0123456789abcdef0123456789abcdef01234567",
-    log: () => {},
-    open: () => {},
-    notary: async () => false,
-    keychain: async (account) => (account === "ed25519" ? sparkle.seed : null),
-  };
-  s = newSession(deps, 8277);
-  const handle = handler(s, routes(s, () => {}), (c) => appCallback(c));
-  call = async (method, path, body) => {
-    const headers: Record<string, string> = { host: "127.0.0.1:8277", authorization: `Bearer ${s.token}` };
-    let payload: FormData | string | undefined;
-    if (body instanceof FormData) payload = body;
-    else if (body !== undefined) {
-      headers["content-type"] = "application/json";
-      payload = JSON.stringify(body);
-    }
-    const res = await handle(new Request(`http://127.0.0.1:8277${path}`, { method, headers, body: payload }));
-    return { status: res.status, data: (await res.json().catch(() => ({}))) as Record<string, unknown> };
-  };
+  ({ call, handle } = webApp(fake, home, { keychain: async (account) => (account === "ed25519" ? sparkle.seed : null) }));
 });
 
 afterAll(() => {
@@ -90,13 +64,13 @@ test("the App goes through GitHub and back with a single-use state, and its key 
   const state = new URL(start.action).searchParams.get("state")!;
   expect(JSON.parse(start.manifest).redirect_url).toBe("http://127.0.0.1:8277/app/callback");
   fake.failWrites = true;
-  const back = await handler(s, routes(s, () => {}), (c) => appCallback(c))(new Request(`http://127.0.0.1:8277/app/callback?code=abc&state=${state}`, { headers: { host: "127.0.0.1:8277" } }));
+  const back = await handle(new Request(`http://127.0.0.1:8277/app/callback?code=abc&state=${state}`, { headers: { host: "127.0.0.1:8277" } }));
   expect(back.headers.get("location")).toStartWith("/setup?app=unstored&hub=octo%2Fhomebrew-tap");
   fake.failWrites = false;
   const waiting = await hubView();
   expect([waiting.app.held, waiting.app.key]).toEqual([true, false]);
   expect((await call("POST", "/api/hub/app/store", { hub: "octo/homebrew-tap" })).data).toEqual({ stored: true });
-  const again = await handler(s, routes(s, () => {}), (c) => appCallback(c))(new Request(`http://127.0.0.1:8277/app/callback?code=abc&state=${state}`, { headers: { host: "127.0.0.1:8277" } }));
+  const again = await handle(new Request(`http://127.0.0.1:8277/app/callback?code=abc&state=${state}`, { headers: { host: "127.0.0.1:8277" } }));
   expect(again.headers.get("location")).toBe("/setup?app=unknown");
   const repo = fake.get("octo/homebrew-tap")!;
   expect([...repo.env!.secrets]).toContain("TAPSTER_APP_PRIVATE_KEY");
@@ -161,7 +135,9 @@ test("hub files are previewed, then written in one commit that removes the old w
 test("the scan lists the user's clones with their kind and leaves other owners out", async () => {
   const scan = (await call("POST", "/api/projects/scan", { hub: "octo/homebrew-tap", extra: [] })).data as unknown as ScanView;
   const byRepo = Object.fromEntries(scan.projects.map((p) => [p.repo, p.kind ?? p.why]));
+  expect(scan.projects.filter((p) => p.repo === "octo/ebb").map((p) => [p.path, p.others])).toEqual([[join(home, "Developer", "ebb"), [join(home, "Developer", "FORK", "discain")]]]);
   expect(byRepo).toEqual({
+    "octo/aims": "go",
     "octo/ebb": "go",
     "octo/hafifpix": "bun",
     "octo/lockstep": "go",

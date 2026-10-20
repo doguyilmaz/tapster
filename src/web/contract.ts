@@ -42,6 +42,7 @@ export type LocalProject = {
   why: string | null;
   inHub: boolean;
   proposed: string | null;
+  others: string[];
 };
 
 export type ScanView = { projects: LocalProject[]; roots: string[]; others: number; truncated: boolean };
@@ -63,13 +64,47 @@ export type InspectView = {
   inHub: boolean;
   proposed: string | null;
   apple: boolean;
+  ready: boolean;
+  ahead: number | null;
 };
 
 export type AddOptionsView = { workflow: string; autoTag: boolean; dependabot: boolean; force: boolean };
 
 export type AddView = { lines: string[]; pr: string | null; entry: string | null; installUrl: string; files: string[] };
 
-export type DiffView = { files: { path: string; before: string | null; after: string | null }[] };
+export type DiffView = { files: { path: string; before: string | null; after: string | null; change: "create" | "update" | "same" | "remove" }[] };
+
+export type CommitView = { sha: string; subject: string; date: string; url: string };
+
+export type ProjectStatus = {
+  name: string;
+  repo: string;
+  url: string;
+  kind: string;
+  defaultBranch: string;
+  setup: { ok: boolean; problems: string[] };
+  protection: { ok: boolean; off: boolean; problems: string[] };
+  entry: { state: "merged" | "proposed" | "missing"; pr: string | null };
+  app: { reaches: boolean | null; installUrl: string };
+  release: {
+    latest: { tag: string; url: string; byHub: boolean } | null;
+    draft: { tag: string; url: string; note: string | null } | null;
+    highest: string | null;
+    next: string;
+    autoTag: boolean;
+    head: CommitView | null;
+  };
+  secrets: { names: string[]; published: boolean };
+};
+
+export type StatusView = { projects: ProjectStatus[] };
+
+export type FollowView = {
+  run: { status: string; conclusion: string | null; url: string } | null;
+  draft: { url: string; note: string | null } | null;
+  published: { url: string; byHub: boolean } | null;
+  hub: string;
+};
 
 export type HealthView = {
   checks: { name: string; ok: boolean; fix: string; note?: string }[];

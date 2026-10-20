@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultRoots, insideHome, originRepo, projectKind, readSmall, scanClones } from "../src/web/scan";
+import { type CloneFacts, cloneFacts, defaultRoots, insideHome, oneClonePerRepo, originRepo, projectKind, readSmall, scanClones } from "../src/web/scan";
 
 const base = mkdtempSync(join(tmpdir(), "scan-"));
 afterAll(() => rmSync(base, { recursive: true, force: true }));
@@ -57,6 +57,44 @@ test("the scan finds clones three levels down, skips noise and follows a symlink
   expect(found.find((f) => f.repo === "me/a")!.kind).toBe("go");
   expect(found.find((f) => f.repo === "me/d")!.path).toBe(join(home, "code", "d"));
   expect(insideHome(join(home, "code", "d"), home)).toBe(true);
+});
+
+test("several clones of one repository make one row: the one on the default branch, then the one changed last", () => {
+  const facts: Record<string, CloneFacts> = {
+    "/h/a": { branch: "feature", defaultBranch: "main", changed: 300 },
+    "/h/b": { branch: "main", defaultBranch: "main", changed: 100 },
+    "/h/c": { branch: "main", defaultBranch: null, changed: 200 },
+    "/h/x": { branch: "old", defaultBranch: null, changed: 10 },
+    "/h/y": { branch: "new", defaultBranch: null, changed: 20 },
+  };
+  const rows = oneClonePerRepo(
+    [
+      { path: "/h/a", repo: "me/ebb" },
+      { path: "/h/b", repo: "me/ebb" },
+      { path: "/h/c", repo: "Me/Ebb" },
+      { path: "/h/x", repo: "me/lockstep" },
+      { path: "/h/y", repo: "me/lockstep" },
+      { path: "/h/z", repo: "me/solo" },
+    ],
+    (dir) => facts[dir]!,
+  );
+  expect(rows.map((r) => [r.path, r.others])).toEqual([
+    ["/h/c", ["/h/b", "/h/a"]],
+    ["/h/y", ["/h/x"]],
+    ["/h/z", []],
+  ]);
+});
+
+test("a clone's branch, default branch and last change come from its .git files", () => {
+  const dir = join(base, "facts");
+  clone(dir, "git@github.com:me/facts.git");
+  writeFileSync(join(dir, ".git", "HEAD"), "ref: refs/heads/feature/x\n");
+  mkdirSync(join(dir, ".git", "refs", "remotes", "origin"), { recursive: true });
+  writeFileSync(join(dir, ".git", "refs", "remotes", "origin", "HEAD"), "ref: refs/remotes/origin/trunk\n");
+  const f = cloneFacts(dir);
+  expect([f.branch, f.defaultBranch]).toEqual(["feature/x", "trunk"]);
+  expect(f.changed).toBeGreaterThan(0);
+  expect(cloneFacts(join(base, "missing"))).toEqual({ branch: null, defaultBranch: null, changed: 0 });
 });
 
 test("the scan stops at its limits and says so", () => {
