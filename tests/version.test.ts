@@ -65,3 +65,17 @@ test("the sparkle step of the real template is found and patched", async () => {
   const patched = patchSparkleEnv(written, ["shared"]);
   expect(patched).toBe(fillWorkflow(template, pins, { sha, tag: "v1.0.0" }, ["shared"]));
 });
+
+test("setup offers a workflow update only to a hub that runs an older tapster", async () => {
+  const { pinState } = await import("../src/cli/hubfiles");
+  const flow = (sha: string, tag: string) => `      - uses: doguyilmaz/tapster@${sha} # ${tag}\n`;
+  const me = { version: "1.1.0", sha: "b".repeat(40) };
+  expect(pinState(null, me, null)).toBe("missing");
+  expect(pinState(flow("b".repeat(40), "v1.1.0"), me, null)).toBe("current");
+  expect(pinState(flow("a".repeat(40), "v1.0.1"), me, null)).toBe("older");
+  expect(pinState(flow("c".repeat(40), "v1.2.0"), me, null)).toBe("newer");
+  expect(pinState(flow("c".repeat(40), "main"), me, null)).toBe("other");
+  expect(pinState("name: something else\n", me, null)).toBe("other");
+  expect(pinState(flow("d".repeat(40), "main"), me, "d".repeat(40))).toBe("current");
+  expect(pinState(flow("a".repeat(40), "v1.0.1"), { version: "0.0.0-dev", sha: null }, null)).toBe("other");
+});

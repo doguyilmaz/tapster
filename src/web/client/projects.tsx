@@ -1,8 +1,8 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { AddView, DiffView, InspectView, LocalProject, Problem as ProblemView, ScanView } from "../contract";
 import { post } from "./api";
 import { hub, loadHub, problemOf, recall, remember, say, tilde } from "./state";
-import { changedOnly, lineDiff } from "./steps";
+import { changedOnly, lineDiff, notes } from "../steps";
 import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner } from "./ui";
 
 const ROOTS_KEY = "tapster.roots";
@@ -166,17 +166,6 @@ export function Projects() {
   );
 }
 
-export function notes(lines: string[]): string[] {
-  const out: string[] = [];
-  for (const raw of lines.flatMap((l) => l.split("\n"))) {
-    const line = raw.trim().replace(/^- /, "");
-    if (!line || /^proposed the hub entry in |^open this page and choose Install|^https:\/\//.test(line)) continue;
-    if (raw.startsWith("  ") && out.length) out[out.length - 1] += ` ${line}`;
-    else out.push(line.charAt(0).toUpperCase() + line.slice(1));
-  }
-  return out;
-}
-
 function Switch({ checked, onChange, title, children }: { checked: boolean; onChange: (v: boolean) => void; title: string; children: preact.ComponentChildren }) {
   return (
     <label class="switch">
@@ -220,6 +209,30 @@ function Diff({ view }: { view: DiffView }) {
 }
 
 function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: string; onClose: () => void; onAdded: () => void }) {
+  const sheetRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    sheetRef.current?.querySelector<HTMLElement>("button")?.focus();
+    const trap = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || !sheetRef.current) return;
+      const items = [...sheetRef.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input, select, summary, [tabindex]:not([tabindex='-1'])")];
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) return;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    addEventListener("keydown", trap);
+    return () => {
+      removeEventListener("keydown", trap);
+      before?.focus();
+    };
+  }, []);
   const [info, setInfo] = useState<InspectView | null>(null);
   const [problem, setProblem] = useState<ProblemView | null>(null);
   const [workflow, setWorkflow] = useState("release.yml");
@@ -268,7 +281,7 @@ function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: str
   return (
     <>
       <div class="sheet-back" onClick={onClose} />
-      <aside class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <aside class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" ref={sheetRef}>
         <div class="sheet-head">
           <div class="stack tight" style="flex: 1; min-width: 0; gap: 0.1rem">
             <h2 id="sheet-title" class="section-title mono" style="font-size: 1.05rem; overflow-wrap: anywhere">
@@ -385,10 +398,13 @@ function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: str
             <>
               <Note tone="ok" title={`tapster prepared ${p.repo}`} />
               <ul class="checks small">
-                {notes(added.lines).map((l, i) => (
+                {notes(added.lines).map((n, i) => (
                   <li key={i}>
                     <Icon name="right" />
-                    <span class="muted" style="overflow-wrap: anywhere">{l}</span>
+                    <span class="stack tight" style="min-width: 0">
+                      <span class="muted" style="overflow-wrap: anywhere">{n.text}</span>
+                      {n.block && <pre class="block">{n.block}</pre>}
+                    </span>
                   </li>
                 ))}
               </ul>

@@ -1,4 +1,5 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
+import { TapsterError } from "../../src/errors";
 
 type Ruleset = { id: number; name: string; target: string; enforcement: string; conditions?: { ref_name?: { include?: string[]; exclude?: string[] } }; rules?: { type: string }[]; bypass_actors?: unknown[] };
 type Release = { id: number; tag_name: string; draft: boolean; prerelease: boolean; created_at: string; published_at: string | null; assets: { id: number; name: string }[]; body: string };
@@ -31,6 +32,7 @@ export class FakeHub {
   readonly repos = new Map<string, FakeRepo>();
   readonly pem = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString();
   installation: { id: number; repos: string[] } | null = null;
+  failWrites = false;
   calls: string[] = [];
   private nextId = 100;
 
@@ -71,12 +73,15 @@ export class FakeHub {
     const repo = this.get(args[args.indexOf("--repo") + 1]!);
     if (!repo) throw new Error("no such repository");
     const name = args[2]!;
+    if (this.failWrites) throw new TapsterError("gh exited with 1", "error connecting to api.github.com");
+    const env = args.includes("--env");
+    if (env && !repo.env) throw new TapsterError("gh exited with 1", "HTTP 404: Not Found (environment)");
     if (args[0] === "secret" && args[1] === "set") {
-      if (args.includes("--env")) (repo.env ??= this.newEnv()).secrets.add(name);
+      if (env) repo.env!.secrets.add(name);
       else repo.actionSecrets.push(name);
       void stdin;
     } else if (args[0] === "secret" && args[1] === "delete") repo.env?.secrets.delete(name);
-    else if (args[0] === "variable" && args.includes("--env")) (repo.env ??= this.newEnv()).vars.set(name, args[args.indexOf("--body") + 1]!);
+    else if (args[0] === "variable" && env) repo.env!.vars.set(name, args[args.indexOf("--body") + 1]!);
     else if (args[0] === "variable") repo.repoVars.set(name, args[args.indexOf("--body") + 1]!);
   };
 

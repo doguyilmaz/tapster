@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { isMap, isSeq, parse, parseDocument, type Scalar, YAMLMap } from "yaml";
 import { BUNDLE_ID } from "../config";
@@ -17,6 +17,7 @@ import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
 import { appInstallUrl, autoTagSteps, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubFacts, hubName, installSentence, proposeEntry, releaseEntry, releaseSecrets, withoutMac } from "./hubpr";
 import { ask } from "./prompt";
+import { mustRead, readRegular, readSmall } from "./paths";
 
 type Pins = typeof pinsJson;
 
@@ -143,7 +144,7 @@ function infoPlists(dir: string, depth = 0): string[] {
 }
 
 function makeTarget(dir: string): { build: string | null; appPath: string | null } {
-  const make = existsSync(join(dir, "Makefile")) ? readFileSync(join(dir, "Makefile"), "utf8") : "";
+  const make = readSmall(join(dir, "Makefile")) ?? "";
   return { build: /^app:/m.test(make) ? "make app" : null, appPath: /^APP\s*:?=\s*([^\s].*?\.app)\s*$/m.exec(make)?.[1] ?? null };
 }
 
@@ -151,8 +152,9 @@ export function findApp(dir: string): FoundApp | null {
   const top = readdirSync(dir);
   if (!top.some((f) => f === "project.yml" || f === "Package.swift" || f.endsWith(".xcodeproj"))) return null;
   const make = makeTarget(dir);
-  if (existsSync(join(dir, "project.yml"))) {
-    const project = parse(readFileSync(join(dir, "project.yml"), "utf8")) as { settings?: { base?: Record<string, unknown> }; targets?: Record<string, Record<string, unknown>> };
+  const yml = readSmall(join(dir, "project.yml"));
+  if (yml !== null) {
+    const project = parse(yml) as { settings?: { base?: Record<string, unknown> }; targets?: Record<string, Record<string, unknown>> };
     for (const [target, t] of Object.entries(project?.targets ?? {})) {
       if (t.type !== "application") continue;
       const props = ((t.info as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}) as Record<string, unknown>;
@@ -173,13 +175,15 @@ export function findApp(dir: string): FoundApp | null {
   for (const path of infoPlists(dir)) {
     let info: Record<string, unknown>;
     try {
-      info = parsePlist(readFileSync(path)) as Record<string, unknown>;
+      const bytes = readRegular(path);
+      if (!bytes) continue;
+      info = parsePlist(bytes) as Record<string, unknown>;
     } catch {
       continue;
     }
     const feed = feedName(info.SUFeedURL);
     if (!feed) continue;
-    const pbx = xcodeproj && existsSync(join(dir, xcodeproj, "project.pbxproj")) ? readFileSync(join(dir, xcodeproj, "project.pbxproj"), "utf8") : "";
+    const pbx = (xcodeproj && readSmall(join(dir, xcodeproj, "project.pbxproj"), 16 << 20)) || "";
     const fromPbx = /PRODUCT_BUNDLE_IDENTIFIER = "?([A-Za-z0-9.-]+)"?;/.exec(pbx)?.[1] ?? null;
     return {
       name: literal(info.CFBundleName) ?? (xcodeproj ? basename(xcodeproj, ".xcodeproj") : basename(dir)),
@@ -272,7 +276,7 @@ export function addOptions(args: string[]): AddOptions {
 async function writeTemplate(dir: string, file: string, text: string, force: boolean): Promise<string> {
   const flow = join(dir, ".github/workflows", file);
   if (existsSync(flow) && !force) {
-    const ringed = addRingStep(await readFile(flow, "utf8"));
+    const ringed = addRingStep(mustRead(flow, `.github/workflows/${file}`));
     if (ringed === null) throw new TapsterError(`.github/workflows/${file} already exists`, "Move it aside and run tapster add again. To replace it, run tapster add --force.");
     await writeFile(flow, ringed);
     return `- kept .github/workflows/${file}; it rings the hub after opening the draft`;
@@ -298,16 +302,23 @@ export async function prepare(dir: string, repo: string, name: string, opts: Add
   }
   const goreleaser = [".goreleaser.yaml", ".goreleaser.yml"].find((f) => existsSync(join(dir, f)));
   if (goreleaser && existsSync(join(dir, "go.mod"))) {
-    const g = adaptGoreleaser(await readFile(join(dir, goreleaser), "utf8"));
+    const g = adaptGoreleaser(mustRead(join(dir, goreleaser), goreleaser));
     await writeFile(join(dir, goreleaser), g.text);
     const flowPath = join(dir, ".github/workflows", opts.workflow);
     if (!existsSync(flowPath)) throw new TapsterError(`no .github/workflows/${opts.workflow} found`, "Name the workflow that runs GoReleaser with --workflow.");
-    const w = adaptReleaseWorkflow(await readFile(flowPath, "utf8"), pinsJson["actions/attest-build-provenance"].sha, pinsJson["actions/attest-build-provenance"].tag);
+    const w = adaptReleaseWorkflow(mustRead(flowPath, `.github/workflows/${opts.workflow}`), pinsJson["actions/attest-build-provenance"].sha, pinsJson["actions/attest-build-provenance"].tag);
     await writeFile(flowPath, w.text);
     return { kind: "go", entry: null, reason: null, notes: [...g.notes, ...w.notes].map((n) => `- ${n}`), goreleaser: g.text, files: [goreleaser, `.github/workflows/${opts.workflow}`] };
   }
   if (existsSync(join(dir, "package.json")) && (existsSync(join(dir, "bun.lock")) || existsSync(join(dir, "bun.lockb")))) {
-    const found = binName(JSON.parse(await readFile(join(dir, "package.json"), "utf8")), name);
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(mustRead(join(dir, "package.json"), "package.json"));
+    } catch (e) {
+      if (e instanceof TapsterError) throw e;
+      throw new TapsterError("package.json is not valid JSON", "Fix package.json, then try again.");
+    }
+    const found = binName(manifest as Parameters<typeof binName>[0], name);
     if (!found) throw new TapsterError("package.json has no bin entry", "Add the CLI entry file to bin in package.json.");
     const note = await writeTemplate(dir, "release.yml", bunWorkflow(found.bin, found.entry, pinsJson, mac), opts.force);
     const own = note.startsWith("- kept");

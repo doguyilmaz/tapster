@@ -156,6 +156,7 @@ form.secret { display: grid; gap: 1rem; }
 .drop { position: relative; display: flex; align-items: center; gap: 0.9rem; border: 1.5px dashed var(--line-strong); border-radius: 11px; padding: 0.95rem 1rem; background: var(--raised); cursor: pointer; transition: border-color 0.12s, background 0.12s; }
 .drop:hover, .drop.over { border-color: var(--orange); background: var(--orange-soft); }
 .drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.drop:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
 .drop .icon { width: 1.6rem; height: 1.6rem; color: var(--muted); }
 .drop.has { border-style: solid; border-color: color-mix(in srgb, var(--green) 45%, transparent); background: var(--green-soft); }
 .drop.has .icon { color: var(--green); }

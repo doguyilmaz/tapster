@@ -12,7 +12,7 @@ import { P12_LIMIT, P8_LIMIT, inspectP12, notaryKey, saveCertificate, saveNotary
 import { convertManifest, permissionLines } from "../../cli/appflow";
 import { doctorChecks, hubRulesetCheck, policyCheck } from "../../cli/doctor";
 import { appInstallation, appManifest, storeApp } from "../../cli/hubapp";
-import { FLOW, hubFiles, sparkleLabels, starterFiles } from "../../cli/hubfiles";
+import { FLOW, hubFiles, pinState, sparkleLabels, starterFiles } from "../../cli/hubfiles";
 import { protectHub } from "../../cli/init";
 import { everyFromFlow } from "../../cli/schedule";
 import type { AccountView, AppStart, FilePlan, FilesView, HealthView, HubChoice, HubView, InstallView, OtherWorkflow } from "../contract";
@@ -176,7 +176,7 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
       config: config !== null,
       state: state !== null,
       readme: readme !== null,
-      workflow: flow === null ? "missing" : pinned && pinned[1] === (s.deps.pin ?? TAPSTER.sha) ? "current" : "other",
+      workflow: pinState(flow, TAPSTER, s.deps.pin),
       pinned: pinned ? `${pinned[2]} (${pinned[1]!.slice(0, 7)})` : null,
       every: flow ? everyFromFlow(flow) : null,
     },
@@ -226,7 +226,10 @@ async function protect(c: Ctx) {
 
 async function appStart(c: Ctx): Promise<AppStart> {
   const { hub } = await readJson(c.req, hubBody);
-  const { login } = await hubFrom(c, hub);
+  const { gh, login } = await hubFrom(c, hub);
+  if ((await or404(gh.json("GET", `/repos/${hub}/environments/tapster`))) === null) {
+    throw new TapsterError(`${hub} is not protected yet`, "Protect it first: the App's key goes into the tapster environment that step creates.");
+  }
   const state = randomBytes(16).toString("hex");
   for (const [k, p] of c.s.pending) if (Date.now() - p.at > 3_600_000) c.s.pending.delete(k);
   c.s.pending.set(state, { hub, owner: login, at: Date.now() });
@@ -241,15 +244,30 @@ export async function appCallback(c: Ctx): Promise<Response> {
   const pending = c.s.pending.get(state);
   if (!pending || !/^[A-Za-z0-9_-]{1,128}$/.test(code)) return back({ app: "unknown" });
   c.s.pending.delete(state);
+  let created: Awaited<ReturnType<typeof convertManifest>>;
   try {
-    const created = await convertManifest(code, pending.owner, "If GitHub created the App anyway, delete it at https://github.com/settings/apps first, because its name would block a new one. Then create it again.", c.s.deps.fetch);
+    created = await convertManifest(code, pending.owner, "If GitHub created the App anyway, delete it at https://github.com/settings/apps first, because its name would block a new one. Then create it again.", c.s.deps.fetch);
+  } catch (e) {
+    const p = e instanceof TapsterError ? e : new TapsterError("GitHub did not hand over the new App", "Try again from Setup.");
+    return back({ app: "failed", hub: pending.hub, reason: p.reason, fix: p.fix });
+  }
+  c.s.apps.set(pending.hub, { id: String(created.id), pem: created.pem, slug: created.slug });
+  try {
     await storeApp(pending.hub, created);
-    c.s.apps.set(pending.hub, { id: String(created.id), pem: created.pem, slug: created.slug });
     return back({ app: "created", hub: pending.hub });
   } catch (e) {
-    const p = e instanceof TapsterError ? e : new TapsterError("the App could not be stored", "Try again from Setup.");
-    return back({ app: "failed", reason: p.reason, fix: p.fix });
+    const p = e instanceof TapsterError ? e : new TapsterError("the App's key could not be stored", "Try again.");
+    return back({ app: "unstored", hub: pending.hub, reason: p.reason, fix: p.fix });
   }
+}
+
+async function appStore(c: Ctx) {
+  const { hub } = await readJson(c.req, hubBody);
+  await hubFrom(c, hub);
+  const held = c.s.apps.get(hub);
+  if (!held) throw new TapsterError("this setup no longer holds the App's key", "GitHub hands the key over only once. Generate a new key in the App's settings on GitHub, then run tapster init --rotate app in a clone of the hub.");
+  await storeApp(hub, { id: Number(held.id), slug: held.slug, pem: held.pem });
+  return { stored: true };
 }
 
 async function installation(c: Ctx): Promise<InstallView> {
@@ -298,8 +316,9 @@ const filesQuery = z.object({ hub: z.string(), every: z.number().int().nullable(
 async function filePlan(c: Ctx, gh: GitHub, hub: string, every: number | null, remove: string[], readme: boolean, read: (p: string) => Promise<string | null>): Promise<FilesView> {
   const repo = await gh.json<{ private: boolean }>("GET", `/repos/${hub}`);
   const plan = await hubFiles(gh, hub, read, c.s.deps.pin, { every, isPrivate: repo.private });
+  const newer = pinState(await read(FLOW), TAPSTER, c.s.deps.pin) === "newer";
   const files: FilePlan[] = [];
-  for (const f of plan.files) files.push({ path: f.path, content: f.content, before: f.before, change: f.before === null ? "create" : f.before === f.content ? "same" : "update" });
+  for (const f of plan.files.filter((x) => !(newer && x.path === FLOW))) files.push({ path: f.path, content: f.content, before: f.before, change: f.before === null ? "create" : f.before === f.content ? "same" : "update" });
   const ours = starterFiles(hub).find((f) => f.path === "README.md")!;
   const current = plan.kept.includes("README.md") ? await read("README.md") : null;
   if (readme && current !== null && current !== ours.content) files.push({ path: "README.md", content: ours.content, before: current, change: "update" });
@@ -308,7 +327,7 @@ async function filePlan(c: Ctx, gh: GitHub, hub: string, every: number | null, r
     const before = await read(`.github/workflows/${r}`);
     if (before !== null) files.push({ path: `.github/workflows/${r}`, content: "", before, change: "remove" });
   }
-  return { files, kept: plan.kept, pin: plan.change, notes: plan.notes, foreign: [], readme: current !== null && current !== ours.content };
+  return { files, kept: plan.kept, pin: newer ? "kept: the hub runs a newer tapster than this one" : plan.change, notes: newer ? [] : plan.notes, foreign: [], readme: current !== null && current !== ours.content };
 }
 
 async function filesPreview(c: Ctx): Promise<FilesView> {
@@ -338,7 +357,7 @@ async function createHub(c: Ctx) {
   const body = await readJson(c.req, z.object({ name: z.string().regex(/^homebrew-[A-Za-z0-9._-]{1,80}$/), private: z.boolean() }).strict());
   const { gh, login } = await me(c.s);
   try {
-    const r = await gh.json<{ full_name: string }>("POST", "/user/repos", { name: body.name, private: body.private, auto_init: true, description: "Homebrew tap, published by tapster" });
+    const r = await gh.json<{ full_name: string }>("POST", "/user/repos", { name: body.name, private: body.private, auto_init: false, description: "Homebrew tap, published by tapster" });
     return { hub: r.full_name };
   } catch (e) {
     if (e instanceof GitHubError && e.status === 422) throw new TapsterError(`${login}/${body.name} already exists`, "Pick it from the list instead.");
@@ -375,6 +394,7 @@ export const hubRoutes: Routes = {
   },
   "POST /api/hub/protect": protect,
   "POST /api/hub/app": appStart,
+  "POST /api/hub/app/store": appStore,
   "GET /api/hub/installation": installation,
   "POST /api/hub/certificate": certificate,
   "POST /api/hub/notary": notary,

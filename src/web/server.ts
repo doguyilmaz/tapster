@@ -106,6 +106,7 @@ function claim(s: Session, code: unknown): Response {
   if (expires === undefined || expires < Date.now()) return json({ error: { reason: "this link has expired", fix: "Press Enter in the terminal that runs tapster setup for a fresh link." } }, 410);
   s.codes.delete(code);
   s.claimed.add(code);
+  s.touched = Date.now();
   return json({ token: s.token });
 }
 
@@ -120,7 +121,6 @@ export function handler(s: Session, routes: Routes, callback: (c: Ctx) => Promis
     if (req.method === "GET" && IMAGES[path]) return respond(new Uint8Array(IMAGES[path]), 200, "image/webp");
     if (req.method === "GET" && path === "/app/callback") return callback({ s, req, url });
     if (req.method === "POST" && path === "/api/claim") {
-      s.touched = Date.now();
       const body = (await req.json().catch(() => null)) as { code?: unknown } | null;
       return claim(s, body?.code);
     }

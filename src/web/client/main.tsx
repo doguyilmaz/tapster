@@ -18,11 +18,11 @@ function readReturn(): void {
   const q = new URLSearchParams(location.search);
   const app = q.get("app");
   if (!app) return;
-  if (app === "created") {
-    const name = q.get("hub");
-    if (name && name !== hubName.value) chooseHub(name);
-    appResult.value = { kind: "created" };
-  } else if (app === "failed") appResult.value = { kind: "failed", problem: { reason: q.get("reason") ?? "the App could not be created", fix: q.get("fix") ?? "Try again." } };
+  const name = q.get("hub");
+  if (name && name !== hubName.value) chooseHub(name);
+  const problem = { reason: q.get("reason") ?? "the App could not be created", fix: q.get("fix") ?? "Try again." };
+  if (app === "created") appResult.value = { kind: "created" };
+  else if (app === "failed" || app === "unstored") appResult.value = { kind: app, problem };
   else appResult.value = { kind: "unknown" };
   history.replaceState(null, "", location.pathname);
 }

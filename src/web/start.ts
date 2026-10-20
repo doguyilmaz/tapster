@@ -8,6 +8,7 @@ import { currentRepo, userGitHub } from "../cli/gh";
 import { hubRoutes, appCallback } from "./api/hub";
 import { projectRoutes } from "./api/projects";
 import type { SessionView } from "./contract";
+import { respond } from "./http";
 import { type Deps, type Routes, type Session, handler, newSession } from "./server";
 
 export const PORT = 8277;
@@ -69,7 +70,15 @@ function realDeps(pin: string | null): Deps {
 }
 
 function listen(port: number, fetchHandler: (req: Request) => Promise<Response>) {
-  return Bun.serve({ hostname: "127.0.0.1", port, fetch: fetchHandler, maxRequestBodySize: 1 << 20, idleTimeout: 120 });
+  return Bun.serve({
+    hostname: "127.0.0.1",
+    port,
+    fetch: fetchHandler,
+    development: false,
+    error: () => respond("tapster setup hit an unexpected error. The terminal that runs it may say more.", 500, "text/plain; charset=utf-8"),
+    maxRequestBodySize: 1 << 20,
+    idleTimeout: 120,
+  });
 }
 
 export async function setup(args: string[], deps?: Deps): Promise<void> {

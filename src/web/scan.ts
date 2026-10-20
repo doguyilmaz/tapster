@@ -1,19 +1,12 @@
-import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync } from "node:fs";
+import { readSmall } from "../cli/paths";
 import { dirname, join, resolve, sep } from "node:path";
 import type { LocalProject, ProjectKind } from "./contract";
 
 const SKIP = new Set(["node_modules", "Library", "Applications", "Pictures", "Music", "Movies", "Documents", "Desktop", "Downloads", "Public", "vendor", "Pods", "DerivedData", "build", "dist", "target", "out"]);
 const HOME_ROOTS = ["Developer", "Projects", "projects", "code", "Code", "src", "dev", "git", "GitHub", "repos", "workspace", "work"];
 
-export function readSmall(path: string, limit = 1 << 20): string | null {
-  try {
-    const st = lstatSync(path);
-    if (!st.isFile() || st.size > limit) return null;
-    return readFileSync(path, "utf8");
-  } catch {
-    return null;
-  }
-}
+export { readSmall };
 
 const isFile = (path: string) => {
   try {

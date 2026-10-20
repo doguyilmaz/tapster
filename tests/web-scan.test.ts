@@ -77,3 +77,17 @@ test("home checks hold for paths outside and tricks with dot-dot", () => {
   expect(insideHome("/Users/meow/x", "/Users/me")).toBe(false);
   expect(defaultRoots("/Users/me", "/Users/me/Developer/tool")).toContain("/Users/me/Developer");
 });
+
+test("a clone whose build files link to devices cannot hang tapster", async () => {
+  const { findApp, prepare, addOptions } = await import("../src/cli/add");
+  const dir = join(base, "trap");
+  mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+  symlinkSync("/dev/zero", join(dir, "project.yml"));
+  symlinkSync("/dev/zero", join(dir, "Makefile"));
+  expect(findApp(dir)).toBeNull();
+  const go = join(base, "trap-go");
+  mkdirSync(join(go, ".github", "workflows"), { recursive: true });
+  writeFileSync(join(go, "go.mod"), "module x\n");
+  symlinkSync("/dev/zero", join(go, ".goreleaser.yaml"));
+  await expect(prepare(go, "me/x", "x", addOptions([]))).rejects.toThrow(/not a regular file/);
+});

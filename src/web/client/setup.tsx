@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { AppStart, FilesView, HubView, InstallView, Problem as ProblemView } from "../contract";
 import { ApiError, get, post } from "./api";
-import { type Stop, type StopId, changedOnly, expiresSoon, firstOpen, lineDiff, macNeeded, stops } from "./steps";
-import { appResult, go, hub, hubError, hubLoading, hubName, loadHub, mac, macChoice, problemOf, say, setMac } from "./state";
+import { type Stop, type StopId, changedOnly, expiresSoon, firstOpen, lineDiff, macNeeded, stops } from "../steps";
+import { appResult, go, hub, hubError, hubLoading, hubName, loadHub, mac, macChoice, openStop, problemOf, say, setMac } from "./state";
 import { Badge, Busy, Cmd, Field, FileDrop, Icon, Note, Out, Password, Problem, Spinner } from "./ui";
 
 function Dot({ stop, index }: { stop: Stop; index: number }) {
@@ -117,7 +117,9 @@ function Installation({ h, slug }: { h: HubView; slug: string }) {
     const tick = async () => {
       if (!document.hidden) {
         try {
-          setView(await get<InstallView>(`/api/hub/installation?hub=${encodeURIComponent(h.name)}`));
+          const next = await get<InstallView>(`/api/hub/installation?hub=${encodeURIComponent(h.name)}`);
+          setView(next);
+          if (next.id !== null && !next.onHub) return;
         } catch {
           wait = Math.min(wait * 2, 30000);
         }
@@ -163,15 +165,58 @@ function Installation({ h, slug }: { h: HubView; slug: string }) {
   );
 }
 
+function ProtectFirst({ h, what, onGo }: { h: HubView; what: string; onGo: () => void }) {
+  return (
+    <div class="panel">
+      <Head title={what} lead={`This step stores a key in ${h.name}'s tapster environment, which Protect the hub creates.`} />
+      <Note tone="info" title="Protect the hub first">
+        <span>Then come back here.</span>
+      </Note>
+      <div class="row">
+        <button type="button" class="btn primary" onClick={onGo}>
+          <Icon name="shield" />
+          Go to Protect the hub
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function App({ h }: { h: HubView }) {
   const [start, setStart] = useState<AppStart | null>(null);
   const [problem, setProblem] = useState<ProblemView | null>(null);
+  const [storing, storeProblem, store] = useAction();
   const result = appResult.value;
   const created = Boolean(h.app.id && h.app.slug && h.app.key);
   useEffect(() => {
-    if (created || h.app.id) return;
+    if (created || h.app.id || result?.kind === "unstored") return;
     post<AppStart>("/api/hub/app", { hub: h.name }).then(setStart, (e) => setProblem(problemOf(e)));
-  }, [h.name, created]);
+  }, [h.name, created, result?.kind]);
+  if (result?.kind === "unstored" && !created) {
+    return (
+      <div class="panel">
+        <Head title="Store the App's key" lead="GitHub created the App and handed its key to this setup, but storing it in the hub failed. The key is still in memory here, so try again." />
+        <Problem problem={result.problem} />
+        <Problem problem={storeProblem} />
+        <div class="row">
+          <Busy
+            busy={storing}
+            class="btn primary"
+            onClick={() =>
+              store(async () => {
+                await post("/api/hub/app/store", { hub: h.name });
+                appResult.value = { kind: "created" };
+                await loadHub();
+              })
+            }
+          >
+            Store the key again
+          </Busy>
+        </div>
+        <p class="muted small">If this setup stops first, the key is gone: generate a new one in the App's settings and store it with tapster init --rotate app.</p>
+      </div>
+    );
+  }
   if (h.app.id && !h.app.key) {
     return (
       <div class="panel">
@@ -499,6 +544,9 @@ function Files({ h }: { h: HubView }) {
       const res = await post<{ result: string }>("/api/hub/files", { hub: h.name, every, remove, readme });
       setWritten(true);
       await loadHub();
+      setView(await post<FilesView>("/api/hub/files/preview", { hub: h.name, every, remove: [], readme: false }));
+      setRemove([]);
+      setReadme(false);
       say("ok", res.result === "committed" ? `Wrote the hub files to ${h.name}.` : "The hub files were already up to date.");
     });
   return (
@@ -517,6 +565,13 @@ function Files({ h }: { h: HubView }) {
           <span class="hint">{h.private ? "A private hub bills every run as at least one minute; hourly keeps a hub within the free minutes." : "Public hubs run for free. The doorbell can start the hub right after each release."}</span>
         </div>
       </div>
+      {h.files.workflow === "newer" && (
+        <Note tone="warn" title={`The hub runs ${h.files.pinned}, newer than this tapster`}>
+          <span>
+            tapster keeps the hub's workflow, so it does not move the hub back. To change the workflow, run the latest: <code>bunx @doguyilmaz/tapster@latest setup</code>
+          </span>
+        </Note>
+      )}
       {others.length > 0 && (
         <div class="stack tight">
           <h3 class="section-title">The tap's old workflows</h3>
@@ -695,7 +750,11 @@ function Ready({ h }: { h: HubView }) {
 
 export function Setup() {
   const h = hub.value;
-  const [open, setOpen] = useState<StopId | "extras" | null>(null);
+  const [open, setOpen] = useState<StopId | "extras" | null>(() => {
+    const asked = openStop.value as StopId | null;
+    openStop.value = null;
+    return asked;
+  });
   const panelRef = useRef<HTMLDivElement>(null);
   void macChoice.value;
   if (hubError.value) {
@@ -727,13 +786,14 @@ export function Setup() {
     setOpen(id);
     if (window.matchMedia("(max-width: 900px)").matches) panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+  const gate = (what: string, el: preact.JSX.Element) => (h.protect.done ? el : <ProtectFirst h={h} what={what} onGo={() => pick("protect")} />);
   const panel: Record<StopId | "extras", preact.JSX.Element> = {
     extras: <Extras h={h} />,
     protect: <Protect h={h} />,
-    app: <App h={h} />,
+    app: h.app.id || appResult.value?.kind === "unstored" ? <App h={h} /> : gate("Create the GitHub App", <App h={h} />),
     macos: <Mac h={h} choice={choice} />,
-    certificate: <Certificate h={h} />,
-    notary: <Notary h={h} />,
+    certificate: gate("Apple certificate", <Certificate h={h} />),
+    notary: gate("Notarization key", <Notary h={h} />),
     files: <Files h={h} />,
     project: <Projects h={h} />,
   };

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { HealthView, Problem as ProblemView } from "../contract";
 import { get, post } from "./api";
-import { hub, problemOf, say } from "./state";
+import { go, hub, loadHub, openStop, problemOf, say } from "./state";
 import { Badge, Busy, Icon, Note, Out, Problem, Spinner } from "./ui";
 
 const when = (iso: string) => {
@@ -12,6 +12,60 @@ const when = (iso: string) => {
   if (mins < 48 * 60) return `${Math.round(mins / 60)} h ago`;
   return d.toLocaleDateString();
 };
+
+const PROTECTION = new Set(["the tapster environment exists", "only main may open the tapster environment", "main cannot be deleted or force-pushed, by anyone", "the hub runs only GitHub's and tapster's actions, pinned by commit", "the default workflow token is read-only"]);
+const WORKFLOW = new Set(["the hub workflow exists", "the hub workflow is tapster's template", "the hub workflow runs only on schedule and manual dispatch", "tapster.yml is valid"]);
+
+function FixButton({ name, hub: hubName, onFixed }: { name: string; hub: string; onFixed: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<ProblemView | null>(null);
+  if (PROTECTION.has(name)) {
+    return (
+      <span class="stack tight">
+        <span class="row">
+          <Busy
+            busy={busy}
+            class="btn secondary small"
+            onClick={async () => {
+              setBusy(true);
+              setProblem(null);
+              try {
+                await post("/api/hub/protect", { hub: hubName });
+                await loadHub();
+                onFixed();
+              } catch (e) {
+                setProblem(problemOf(e));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <Icon name="shield" />
+            Restore the protection
+          </Busy>
+        </span>
+        <Problem problem={problem} />
+      </span>
+    );
+  }
+  const stop = WORKFLOW.has(name) ? "files" : name === "the credentials this hub needs are stored" ? null : undefined;
+  if (stop === undefined) return null;
+  return (
+    <span class="row">
+      <button
+        type="button"
+        class="btn secondary small"
+        onClick={() => {
+          openStop.value = stop;
+          go("/setup");
+        }}
+      >
+        Fix it in Setup
+        <Icon name="arrow" />
+      </button>
+    </span>
+  );
+}
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -81,6 +135,10 @@ export function Health() {
       {h.issue && (
         <Note tone="warn" title={`The hub opened issue #${h.issue.number}: tapster: the hub needs attention`}>
           <span>Updated {when(h.issue.updated)}. It closes itself once everything is fine.</span>
+          <details>
+            <summary class="small">Show what it says</summary>
+            <pre class="block" style="white-space: pre-wrap; margin-top: 0.5rem">{h.issue.body.replace(/<!--[\s\S]*?-->/g, "").trim()}</pre>
+          </details>
           <Out href={h.issue.url} class="btn secondary small">Open the issue</Out>
         </Note>
       )}
@@ -99,6 +157,7 @@ export function Health() {
               <div class="stack tight" style="gap: 0.2rem">
                 <span style="font-weight: 550">{cap(c.name)}</span>
                 {!c.ok && <span class="muted small">{c.fix}</span>}
+                {!c.ok && <FixButton name={c.name} hub={h.name} onFixed={() => void load()} />}
                 {c.note && <span class="faint small">{cap(c.note)}.</span>}
               </div>
             </div>

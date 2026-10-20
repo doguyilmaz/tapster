@@ -70,6 +70,12 @@ test("a fresh tap shows every step open and warns about its old workflows", asyn
   expect(h.files.workflow).toBe("missing");
 });
 
+test("the App waits for the protection, which creates the environment its key goes into", async () => {
+  const early = await call("POST", "/api/hub/app", { hub: "octo/homebrew-tap" });
+  expect(early.status).toBe(400);
+  expect((early.data.error as { reason: string }).reason).toBe("octo/homebrew-tap is not protected yet");
+});
+
 test("protecting the hub turns every protection on", async () => {
   expect((await call("POST", "/api/hub/protect", { hub: "octo/homebrew-tap" })).status).toBe(200);
   const h = await hubView();
@@ -80,8 +86,11 @@ test("the App goes through GitHub and back with a single-use state, and its key 
   const start = (await call("POST", "/api/hub/app", { hub: "octo/homebrew-tap" })).data as { action: string; manifest: string };
   const state = new URL(start.action).searchParams.get("state")!;
   expect(JSON.parse(start.manifest).redirect_url).toBe("http://127.0.0.1:8277/app/callback");
+  fake.failWrites = true;
   const back = await handler(s, routes(s, () => {}), (c) => appCallback(c))(new Request(`http://127.0.0.1:8277/app/callback?code=abc&state=${state}`, { headers: { host: "127.0.0.1:8277" } }));
-  expect(back.headers.get("location")).toBe("/setup?app=created&hub=octo%2Fhomebrew-tap");
+  expect(back.headers.get("location")).toStartWith("/setup?app=unstored&hub=octo%2Fhomebrew-tap");
+  fake.failWrites = false;
+  expect((await call("POST", "/api/hub/app/store", { hub: "octo/homebrew-tap" })).data).toEqual({ stored: true });
   const again = await handler(s, routes(s, () => {}), (c) => appCallback(c))(new Request(`http://127.0.0.1:8277/app/callback?code=abc&state=${state}`, { headers: { host: "127.0.0.1:8277" } }));
   expect(again.headers.get("location")).toBe("/setup?app=unknown");
   const repo = fake.get("octo/homebrew-tap")!;

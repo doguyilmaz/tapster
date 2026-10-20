@@ -81,10 +81,15 @@ export function checkP8(p8: Uint8Array): void {
   }
 }
 
-export function notaryKey(p8: Uint8Array, keyId: string, issuer: string): NotaryKey {
-  checkP8(p8);
+export function checkKeyId(keyId: string): string {
   const id = keyId.trim();
   if (!/^[A-Z0-9]{10}$/.test(id)) throw new TapsterError(`${id || "an empty Key ID"} is not a Key ID`, "Copy the 10-character Key ID next to the key in App Store Connect.");
+  return id;
+}
+
+export function notaryKey(p8: Uint8Array, keyId: string, issuer: string): NotaryKey {
+  checkP8(p8);
+  const id = checkKeyId(keyId);
   const iss = issuer.trim().toLowerCase();
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(iss)) {
     throw new TapsterError("that is not an Issuer ID", "Copy the Issuer ID shown above the key list in App Store Connect.");

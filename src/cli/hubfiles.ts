@@ -1,4 +1,4 @@
-import { type HubConfig, isApp, parseHub } from "../config";
+import { type HubConfig, compareSemver, isApp, parseHub, parseTag } from "../config";
 import { TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { TAPSTER } from "../version";
@@ -60,6 +60,22 @@ export function pinChange(before: string | null, after: string): string {
   const prev = before === null ? null : PIN.exec(before);
   if (!prev) return `tapster ${show(next)}`;
   return prev[1] === next[1] && prev[2] === next[2] ? `tapster ${show(prev)}, unchanged` : `tapster ${show(prev)} -> ${show(next)}`;
+}
+
+export type PinState = "missing" | "current" | "older" | "newer" | "other";
+
+export function pinState(flow: string | null, me: { version: string; sha: string | null }, pin: string | null): PinState {
+  if (flow === null) return "missing";
+  const hub = PIN.exec(flow);
+  const sha = pin ?? me.sha;
+  if (!hub) return "other";
+  if (hub[1] === sha) return "current";
+  if (pin !== null || !me.sha) return "other";
+  const theirs = parseTag(hub[2]!);
+  const ours = parseTag(`v${me.version}`);
+  if (!theirs || !ours) return "other";
+  const order = compareSemver(theirs, ours);
+  return order < 0 ? "older" : order > 0 ? "newer" : "other";
 }
 
 export function patchSparkleEnv(flow: string, labels: string[]): string {

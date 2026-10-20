@@ -1,4 +1,4 @@
-import type { HubView } from "../contract";
+import type { HubView } from "./contract";
 
 export type StopId = "protect" | "app" | "macos" | "certificate" | "notary" | "files" | "project";
 export type StopState = "done" | "now" | "later" | "skipped" | "attention";
@@ -64,8 +64,17 @@ export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now())
       id: "files",
       name: "Hub files",
       done: h.files.config && h.files.state && h.files.workflow !== "missing",
-      attention: h.files.workflow === "other",
-      status: h.files.workflow === "missing" ? "Not written yet" : h.files.workflow === "other" ? `Runs ${h.files.pinned ?? "another tapster"}; update available` : `Runs ${h.files.pinned}`,
+      attention: h.files.workflow === "older" || h.files.workflow === "other",
+      status:
+        h.files.workflow === "missing"
+          ? "Not written yet"
+          : h.files.workflow === "older"
+            ? `Runs ${h.files.pinned}; update available`
+            : h.files.workflow === "other"
+              ? `Runs ${h.files.pinned ?? "a workflow tapster did not write"}`
+              : h.files.workflow === "newer"
+                ? `Runs ${h.files.pinned}, newer than this tapster`
+                : `Runs ${h.files.pinned}`,
       open: "Not written yet",
     },
     {
@@ -128,5 +137,34 @@ export function changedOnly(lines: { kind: "ctx" | "add" | "del"; text: string }
     } else skipped++;
   });
   if (skipped) out.push({ kind: "gap", text: `${skipped} unchanged lines` });
+  return out;
+}
+
+export type NoteItem = { text: string; block: string | null };
+
+const dedent = (lines: string[]) => {
+  const indent = Math.min(...lines.filter((l) => l.trim()).map((l) => /^ */.exec(l)![0].length));
+  return lines.map((l) => l.slice(indent)).join("\n").trimEnd();
+};
+
+export function notes(lines: string[]): NoteItem[] {
+  const out: NoteItem[] = [];
+  for (const said of lines) {
+    const [first = "", ...more] = said.split("\n");
+    const head = first.trim().replace(/^- /, "");
+    if (!head || /^proposed the hub entry in |^open this page and choose Install/.test(head)) continue;
+    const last = out.at(-1);
+    let item: NoteItem;
+    if (first.startsWith("  ") && last && last.block === null) {
+      item = last;
+      item.text += ` ${head}`;
+    } else {
+      item = { text: head.charAt(0).toUpperCase() + head.slice(1), block: null };
+      out.push(item);
+    }
+    let i = 0;
+    while (i < more.length && !item.text.endsWith(":")) item.text += ` ${more[i++]!.trim()}`;
+    if (i < more.length) item.block = dedent(more.slice(i));
+  }
   return out;
 }

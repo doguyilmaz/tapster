@@ -11,7 +11,7 @@ import { TAPSTER } from "../version";
 import { run, runPath } from "../run";
 import { appFromManifest, openUrl } from "./appflow";
 import { appInstallation, appManifest, storeApp } from "./hubapp";
-import { checkP8, inspectP12, notaryKey, saveCertificate, saveNotary, verifyNotary } from "./apple";
+import { checkKeyId, checkP8, inspectP12, notaryKey, saveCertificate, saveNotary, verifyNotary } from "./apple";
 import { rotateDoorbell, setupDoorbell } from "./doorbell";
 import { currentRepo, deleteEnvSecret, hubEnv, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
 import { type KeyRef, type Store, localStore, newSparkleKey, previousKey, requireStore } from "./keystore";
@@ -145,7 +145,8 @@ async function storeNotary(hub: string): Promise<void> {
   const path = cleanPath(await ask(".p8 file (drag it here): "));
   const p8 = await readInput(path, "the .p8 file");
   checkP8(p8);
-  const key = notaryKey(p8, await ask("Key ID: "), await ask("Issuer ID: "));
+  const keyId = checkKeyId(await ask("Key ID: "));
+  const key = notaryKey(p8, keyId, await ask("Issuer ID: "));
   console.log((await verifyNotary(key)) ? "Apple accepted the key." : "Not on macOS, so the key is checked at the first release instead.");
   await saveNotary(hub, key);
   console.log(`Notarization key stored. You may delete ${path} once you keep a backup.`);
