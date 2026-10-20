@@ -3,10 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unpackArchives, unpackTool } from "../src/action/fetch";
-import { repackTool } from "../src/action/publish";
+import { repackTool, toolOutputs } from "../src/action/publish";
 import { checkToolApp } from "../src/appcheck";
 import { type TarEntry, readTarGz, writeTarGz } from "../src/archive";
 import { signApp, stapleApp, toolBundle } from "../src/appsign";
+import { parseChecksums, sha256 } from "../src/checksums";
 import { signTool, toolSteps } from "../src/action/sign";
 import { type CliPackage, parseConfig } from "../src/config";
 import { writeTree } from "../src/extract";
@@ -99,6 +100,19 @@ test("beside Linux builds only the macOS archive is unpacked for signing; the Li
   const dir = release(linux);
   const archives = await unpackArchives(withLinux, cfg.packages, "1.2.0", dir, agree);
   expect(archives).toEqual([{ asset: ARCHIVE, platform: "darwin-universal", dir: join(dir, "bin", ARCHIVE), binaries: ["ebb"], app: "ebb.app" }]);
+  expect(readFileSync(join(dir, "assets", LINUX)).equals(linux)).toBe(true);
+});
+
+test("publishing replaces the macOS archive and its checksum only; the Linux archive and its line stay as they were", async () => {
+  const linux = writeTarGz([file("ebb", ELF, 0o755)], 0);
+  const dir = release(linux);
+  const mac = readFileSync(join(dir, "assets", ARCHIVE));
+  const archives = await unpackArchives(withLinux, cfg.packages, "1.2.0", dir, agree);
+  const out = await toolOutputs({ archives, checksums: [{ sha256: sha256(mac), name: ARCHIVE }, { sha256: sha256(linux), name: LINUX }] }, dir, 0);
+  expect(out.files.map((f) => f.name)).toEqual([ARCHIVE]);
+  const lines = parseChecksums(out.sums.toString("utf8"));
+  expect(lines.find((l) => l.name === LINUX)!.sha256).toBe(sha256(linux));
+  expect(lines.find((l) => l.name === ARCHIVE)!.sha256).toBe(sha256(out.files[0]!.data));
   expect(readFileSync(join(dir, "assets", LINUX)).equals(linux)).toBe(true);
 });
 

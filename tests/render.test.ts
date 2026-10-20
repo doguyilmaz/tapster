@@ -124,6 +124,27 @@ test("on macOS the app's commands replace the bare ones, which Linux links; othe
   expect(bare).toEndWith('  livecheck do\n    skip "tapster"\n  end\nend\n');
 });
 
+test("a universal app beside Linux keeps launchctl and quit in on_macos and the hook at the top", () => {
+  const out = renderCask({
+    pkg: { ...ebb, name: "ebb-linux", assets: { ...ebb.assets, "linux-amd64": "ebb_{version}_linux_amd64.tar.gz" }, cask: { ...ebb.cask, uninstall: { launchctl: ["com.doguyilmaz.ebb"], quit: ["com.doguyilmaz.ebb"] } } },
+    version: "0.1.1",
+    description: "Shows where disk space went",
+    homepage: "https://github.com/o/ebb",
+    license: null,
+    downloads: [
+      { platform: "darwin-universal", url: "", sha256: "4".repeat(64) },
+      { platform: "linux-amd64", url: "", sha256: "5".repeat(64) },
+    ],
+  });
+  expect(out).toBe(golden("ebb-linux.rb"));
+});
+
+test("a tool without an app keeps its uninstall at the top, also with Linux builds", () => {
+  const out = renderCask({ ...aimsInput, pkg: { ...aims, cask: { uninstall: { launchctl: ["com.o.aims.agent"] } } } })!;
+  expect(out).toContain('  zsh_completion "completions/aims.zsh"\n\n  uninstall launchctl: "com.o.aims.agent"\nend\n');
+  expect(out).not.toContain("    uninstall");
+});
+
 test("without Linux downloads a tool with an app renders as before", () => {
   const darwin = appInput.downloads.slice(0, 2);
   const mac = renderCask({ ...appInput, downloads: darwin })!;
