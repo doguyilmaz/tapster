@@ -28,7 +28,8 @@ changes on GitHub:
 4. **Add your projects.** tapster finds the projects cloned on your computer, prepares their release workflows, protects
    them and proposes them to the hub.
 
-Then push a tag in a project. The [tutorial](https://tapster.doguyilmaz.com/tutorial/before/) shows every step.
+Then click **Release** on a project. tapster tags its latest commit on GitHub and shows the release until the hub has
+published it. The [tutorial](https://tapster.doguyilmaz.com/tutorial/before/) shows every step.
 
 Prefer a terminal? Run `bunx @doguyilmaz/tapster init` in a clone of your tap and `bunx @doguyilmaz/tapster add` in
 each project. See [Set up from a terminal](https://tapster.doguyilmaz.com/guides/terminal/).
@@ -36,7 +37,7 @@ each project. See [Set up from a terminal](https://tapster.doguyilmaz.com/guides
 ## How it works
 
 ```
-project (push tag v1.2.3)              hub: you/homebrew-tap
+project (tag v1.2.3)                   hub: you/homebrew-tap
   builds, attests, holds no keys       runs tapster on a schedule or when rung
   -> draft release + checksums.txt  -> checks every file against the project's build
                                        signs and notarizes the macOS code

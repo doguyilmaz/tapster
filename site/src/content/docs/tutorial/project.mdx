@@ -16,11 +16,16 @@ import added from "../../../assets/setup/added.webp";
 
 In tapster setup, open **Projects**.
 
-<Image src={projects} alt="The Projects page lists the clones of your repositories on this computer, with their kind and an Add button." />
+<Image src={projects} alt="The Projects page lists the projects in the hub with their next step, then the clones of your repositories that are ready to add." />
 
-tapster looks for clones of your own repositories in the folder you started it from, its parent and the usual places
-such as `~/Developer`, `~/Projects` and `~/code`. It reads each clone's `.git/config` and checks which build files
-exist. Nothing leaves your computer. If a project lives elsewhere, type its folder and click **Look there too**.
+**In the hub** lists every project in the hub's `tapster.yml` or waiting in a hub pull request, with its next step.
+**Ready to add** lists the clones of your own repositories that tapster can publish.
+
+tapster looks for clones in the folder you started it from, its parent and the usual places such as `~/Developer`,
+`~/Projects` and `~/code`. It reads each clone's `.git/config` and checks which build files exist. Nothing leaves your
+computer. If a project lives elsewhere, type its folder and click **Look there too**. If several clones point at the
+same repository, the list shows one: the clone on the default branch or else the one you changed last. Its sheet names
+the others, so you can pick another.
 
 It recognizes three kinds of projects:
 
@@ -51,21 +56,38 @@ Click **Add to you/homebrew-tap**. tapster then:
 
 ## 2. Commit, merge and install
 
-<Image src={added} alt="After adding, the sheet shows the changes as a diff and the next steps: commit, push, merge the hub entry and install the App." />
+<Image src={added} alt="After adding, the sheet shows tapster's changes to .goreleaser.yaml and the release workflow as a diff." />
 
 <Steps>
 
 1. Review the diff, then click **Commit these files** and **Push**. tapster commits only the files it changed, with your
    own git setup, so your hooks and commit signing apply. If git needs a password, the page gives you the command to run
-   in a terminal.
-2. Click **Review and merge on GitHub** and merge the pull request on the hub.
-3. Click **Install the App** unless the App already reaches this project. GitHub preselects it; keep
-   **Only select repositories**.
+   in a terminal. If the clone already has these files as committed, the sheet says **No changes** instead.
+2. Under **Hub entry**, click **Review and merge** and merge the pull request on the hub.
+3. Under **The hub's App**, click **Install the App** unless the App already reaches this project. GitHub preselects it;
+   keep **Only select repositories**. The step turns done by itself once GitHub shows the installation.
 
 </Steps>
 
 If the repository's GitHub description is one that Homebrew would reject, the sheet says so and the entry suggests a
 better one. Homebrew wants a short description that starts with a capital letter and has no full stop at the end.
+
+## 3. Come back at any time
+
+Click a project under **In the hub** (or under **Your projects** in Setup) to see where it stands. Each fact comes from
+GitHub and shows as done or as the next step:
+
+- **Release workflow**: the files on the default branch open drafts, attest the archives and leave signing to the hub.
+  If your clone has these changes but GitHub does not yet, the sheet offers to commit and push them.
+- **Protection**: tapster's rulesets protect the repository.
+- **Hub entry**: merged or waiting in a pull request with its link.
+- **The hub's App**: it reaches the project. If not, the sheet links to the install page.
+- **Releases**: the latest release and whether the hub published it, a waiting draft with the hub's reason if it
+  refuses it and the next release. See [Ship the first release](/tutorial/release/).
+
+**Update the project** appears only when something is missing that adding fixes. Adding again keeps the entry the hub
+already has. If GoReleaser's Homebrew section is gone because an earlier run removed it, tapster reads the description,
+homepage, license and completions from the clone's git history.
 
 :::note
 A project whose archive names tapster cannot predict yet, for example GoReleaser with its own name template, gets no
@@ -74,5 +96,5 @@ entry until its first draft exists. Add it again after that.
 
 :::note[Where your keys go]{icon="padlock"}
 The project holds no keys. If it still has old release secrets such as `MACOS_*` or `HOMEBREW_TAP_*`, the sheet lists
-them. Delete them once the hub has published a release.
+their names. Once the hub has published a release of the project, it shows the `gh secret delete` command for each.
 :::

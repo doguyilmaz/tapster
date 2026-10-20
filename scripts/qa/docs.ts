@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { demo } from "../demo";
+import { demo, listAims } from "../demo";
 import { launch } from "./cdp";
 
 const out = join(import.meta.dir, "..", "..", "site", "src", "assets", "setup");
@@ -16,6 +16,14 @@ const page = await launch();
 const sharp = (await import(join(import.meta.dir, "..", "..", "site", "node_modules", "sharp"))).default as (input: string) => { resize(o: { width: number }): { webp(o: { quality: number }): { toFile(p: string): Promise<unknown> } } };
 const shot = async (name: string) => {
   await page.eval("document.querySelectorAll('.toast').forEach((t) => t.remove()); window.scrollTo(0, 0)");
+  await Bun.sleep(150);
+  const png = join(tmp, `${name}.png`);
+  await page.shot(png, false);
+  await sharp(png).resize({ width: 1600 }).webp({ quality: 82 }).toFile(join(out, `${name}.webp`));
+};
+const sheetShot = async (name: string, heading: string) => {
+  await Bun.sleep(300);
+  await page.eval(`(() => { const s = document.querySelector('.sheet'); const h = [...s.querySelectorAll('h3, strong')].find((e) => e.textContent.includes(${JSON.stringify(heading)})); s.scrollTop = h.getBoundingClientRect().top + s.scrollTop - 100; document.querySelectorAll('.toast').forEach((t) => t.remove()); })()`);
   await Bun.sleep(150);
   const png = join(tmp, `${name}.png`);
   await page.shot(png, false);
@@ -48,19 +56,23 @@ try {
   await shot("files");
   await page.clickText("to main", "button");
   await page.waitFor("document.body.textContent.includes('git pull')");
+  listAims(fake);
+  fake.installation = { id: 9, repos: ["octo/ebb", "octo/aims"] };
   await page.clickText("Projects", "nav a");
-  await page.waitFor("document.body.textContent.includes('Ready to add')");
+  await page.waitFor("document.body.textContent.includes('Ready to add') && document.body.textContent.includes('Release v0.2.2')", 20000);
   await shot("projects");
   await page.clickText("octo/ebb", ".item button.link");
   await page.waitFor("document.body.textContent.includes('Options')");
   await shot("project");
   await page.clickText("Add to octo/homebrew-tap");
-  await page.waitFor("document.body.textContent.includes('Review and commit the changes')", 20000);
-  await page.eval("document.querySelector('.sheet').scrollTop = document.querySelector('.sheet h3')?.offsetTop - 80");
-  await page.eval("document.querySelector('.toast')?.remove()");
-  const png = join(tmp, "added.png");
-  await page.shot(png, false);
-  await sharp(png).resize({ width: 1600 }).webp({ quality: 82 }).toFile(join(out, "added.webp"));
+  await page.waitFor("document.body.textContent.includes('Review and commit the changes') && document.body.textContent.includes('Where ebb stands')", 20000);
+  await sheetShot("added", "Review and commit the changes");
+  await page.eval("document.querySelector('.sheet-back').click()");
+  await page.clickText("octo/aims", ".item button.link");
+  await page.waitFor("[...document.querySelectorAll('.sheet button')].some((b) => b.textContent.includes('Release v0.2.2'))", 20000);
+  await page.size(1280, 1100);
+  await sheetShot("status", "The hub's App");
+  await page.size(1280, 820);
   await page.eval("document.querySelector('.sheet-back').click()");
   await page.clickText("Health", "nav a");
   await page.waitFor("document.querySelector('.card.list')", 15000);

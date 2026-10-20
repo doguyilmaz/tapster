@@ -1,34 +1,44 @@
 ---
 title: "Ship the first release"
-description: "Push a tag, watch the hub sign and publish it, then install it with Homebrew."
+description: "Release from tapster setup, watch the hub sign and publish it, then install it with Homebrew."
 sidebar:
   order: 5
   label: "5. Ship the first release"
 ---
 import { Steps } from "@astrojs/starlight/components";
+import { Image } from "astro:assets";
 import TutorialProgress from "../../../components/TutorialProgress.astro";
+import status from "../../../assets/setup/status.webp";
 
 <TutorialProgress step={5} />
 
-## 1. Push a tag
+## 1. Release
 
-In the project, push a tag shaped like `v1.2.3`:
+In tapster setup, open **Projects** and click the project under **In the hub**. Once the release workflow on its
+default branch is tapster's and the hub's App reaches it, the **Releases** step offers a release:
+
+<Image src={status} alt="The project's sheet: every step is done and the Releases step shows the commit to tag, the version v0.2.2 and a Release button." />
+
+- **Commit**: the latest commit of the default branch on GitHub, with its date. This is what gets the tag.
+- **Version**: the next patch after the highest version tag on GitHub, such as `v0.2.2` after `v0.2.1`. A project
+  without one starts at `v0.1.0`. You can type another version as long as it is higher.
+
+Click **Release**. tapster creates the tag on GitHub with your own sign-in, at exactly the commit it showed. If the
+branch moved in between or the tag exists already, it refuses and says why. It never tags the clone on your computer,
+which can be behind or on another branch.
+
+The same release from a terminal is one command. The sheet shows it with the commit filled in, under
+**Or tag it from a terminal**:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.1.0 -f sha="$(gh api repos/you/my-tool/commits/main --jq .sha)"
 ```
-
-GitHub accepts the tag with the note from [step 4](/tutorial/project/#1-choose-the-options).
 
 ## 2. The project opens a draft
 
 The project's release workflow builds the archives, writes `checksums.txt`, attests the files and opens a **draft**
-release. Follow it on the project's **Actions** tab or with:
-
-```sh
-gh run watch
-```
+release. The sheet follows it: the workflow's run, then the draft, then the hub's publish, each with a link. You can
+also watch it on the project's **Actions** tab.
 
 :::tip[You should see]{icon="approve-check-circle"}
 A draft release named `v0.1.0` with the archives and `checksums.txt`. It is not public yet.
@@ -86,7 +96,8 @@ codesign -dv --verbose=2 "$(command -v my-tool)" 2>&1 | grep Authority
 
 ## If the hub does not publish
 
-The hub writes the reason at the top of the draft's release notes. See [Troubleshooting](/reference/troubleshooting/#on-a-draft)
+The hub writes the reason at the top of the draft's release notes. The project's sheet in tapster setup shows it under
+**Releases** too. See [Troubleshooting](/reference/troubleshooting/#on-a-draft)
 for each reason.
 
 Then check the whole setup:

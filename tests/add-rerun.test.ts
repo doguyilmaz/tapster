@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addOptions, addProject, homebrewFromHistory, prepare } from "../src/cli/add";
+import { addOptions, addProject, homebrewFromHistory, prepare, releaseHint } from "../src/cli/add";
 import { goreleaserCask } from "../src/cli/hubpr";
 import { GitHub } from "../src/github";
 import { run } from "../src/run";
@@ -120,6 +120,18 @@ test("adding a project the hub already lists keeps its entry and trusts the desc
   expect(said).not.toContain("not proposed");
   expect(added).toMatchObject({ pr: null, entry: null });
   expect(fake.get("octo/homebrew-tap")!.pulls).toEqual([]);
+});
+
+test("tapster add ends with one gh command that tags GitHub's default branch with the next patch, not the clone", async () => {
+  const fake = new FakeHub("octo");
+  const aims = fake.repo("aims", { tags: new Map([["v0.2.0", "a".repeat(40)], ["v0.2.1", "b".repeat(40)]]) });
+  const gh = new GitHub("t", fake.fetch, async () => {}, "user");
+  const hint = await releaseHint(gh, "octo/aims");
+  expect(hint).toContain("release v0.2.2 by tagging the latest commit of main on GitHub");
+  expect(hint).toContain('gh api --method POST repos/octo/aims/git/refs -f ref=refs/tags/v0.2.2 -f sha="$(gh api repos/octo/aims/commits/main --jq .sha)"');
+  expect(hint).not.toContain("git tag");
+  aims.keys.push({ title: "tapster tags", read_only: false });
+  expect(await releaseHint(gh, "octo/aims")).toBe("Your release workflow tags each release by itself.");
 });
 
 test("adding a project whose entry waits in a pull request points there and suggests the missing description", async () => {

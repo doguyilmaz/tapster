@@ -172,7 +172,7 @@ Every release workflow also gets a step named **Ring the tapster hub**. It does 
 
 :::tip[You should see]{icon="approve-check-circle"}
 `- protected you/my-tool: only you can create, move or delete branches and tags; workflows and Apps, the hub's
-included, cannot. Push release tags yourself; GitHub then notes "Bypassed rule violations", which is your admin
+included, cannot. Release tags come from you; GitHub then notes "Bypassed rule violations", which is your admin
 right at work.`
 :::
 
@@ -211,7 +211,7 @@ If you picked this project when you created the hub, skip it. Otherwise open the
 ### Your turn
 
 tapster commits nothing. When it ends with
-`Review the changes with git diff, commit and push them, then push a tag to release.`, do this:
+`Review the changes with git diff, then commit and push them.`, do this:
 
 - [ ] Merge the pull request on your hub.
 - [ ] Open the install link if tapster printed one for a project the App does not reach yet.
@@ -223,6 +223,19 @@ tapster commits nothing. When it ends with
   git commit -m "Release through tapster"
   git push
   ```
+
+- [ ] Release. tapster's last line is a `gh` command that tags the latest commit of the default branch on GitHub, with
+  the next patch version after the highest tag there:
+
+  ```sh
+  gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.2.2 -f sha="$(gh api repos/you/my-tool/commits/main --jq .sha)"
+  ```
+
+  It tags GitHub's copy, not your clone, so a clone that is behind or on another branch cannot put the tag on the
+  wrong commit. A project whose workflow tags by itself (`--auto-tag`) gets no command.
+
+If you run `tapster add` again later, it keeps the hub entry the hub already has and changes no file that is already
+right.
 
 :::note[Where your keys go]{icon="padlock"}
 The project holds no keys. If it still has old release secrets such as `MACOS_*` or `HOMEBREW_TAP_*`, tapster lists

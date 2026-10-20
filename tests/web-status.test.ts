@@ -78,7 +78,7 @@ test("a listed repository GitHub does not show gets its reason while the others 
   expect(list.find((p) => p.name === "gone")!.unreadable).toStartWith("GitHub GET /repos/octo/gone returned 404.");
 });
 
-test("the App's reach flips once GitHub shows the installation, and stays unknown when GitHub does not tell", async () => {
+test("the App's reach flips once GitHub shows the installation and stays unknown when GitHub does not tell", async () => {
   const reach = async () => (await call("GET", `/api/projects/reach?hub=${HUB}&repo=octo/aims`)).data;
   expect(await reach()).toEqual({ reaches: false });
   fake.installation = { id: 9, repos: ["octo/ebb", "octo/aims"] };
@@ -91,7 +91,7 @@ test("the App's reach flips once GitHub shows the installation, and stays unknow
   expect((await call("GET", `/api/projects/reach?hub=${HUB}&repo=nope`)).status).toBe(400);
 });
 
-test("a project whose entry waits in a hub pull request is listed with the link, and its setup says what main lacks", async () => {
+test("a project whose entry waits in a hub pull request is listed with the link; its setup says what main lacks", async () => {
   const hub = fake.get(HUB)!;
   hub.branches.set("tapster-add-ebb", new Map([["tapster.yml", `version: 1\ntap: octo/tap\npackages:\n  - name: ebb\n    repo: octo/ebb\n    binaries: [ebb]\n    assets: { linux-amd64: "ebb_{version}_linux_amd64.tar.gz" }\n`]]));
   hub.pulls.push({ number: 3, head: "tapster-add-ebb", html_url: "https://github.com/octo/homebrew-tap/pull/3", title: "Add ebb" });

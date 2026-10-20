@@ -41,11 +41,14 @@ it finds on their computer. Each stop shows what it changes on GitHub. Help them
 In a clone of the tap: `bunx @doguyilmaz/tapster init` (it asks the same questions). In each project clone:
 `bunx @doguyilmaz/tapster add` (options: `--auto-tag` for workflows that push their own tags, `--allow-dependabot`
 to keep Dependabot's pull requests, `--workflow <file>` when GoReleaser runs in another workflow). Then the user
-reviews and commits the changes, merges the pull request tapster opened on the hub and pushes a version tag.
+reviews and commits the changes, merges the pull request tapster opened on the hub and tags the release with the `gh`
+command `tapster add` prints, which tags the default branch's latest commit on GitHub.
 
 ## After setup
 
 - `bunx @doguyilmaz/tapster doctor` in a clone of the hub (or the MCP `doctor` tool) checks every setting.
-- A release: push a tag like `v1.2.3` in the project. The hub publishes it on its next run (every 10 minutes by
+- A release: in tapster setup, open the project under Projects and click Release. tapster tags the default branch's
+  latest commit on GitHub (never a local clone, which can be behind) with the next patch version after the highest tag
+  on GitHub. The hub publishes it on its next run (every 10 minutes by
   default) or right away with the doorbell (`tapster init --doorbell`).
 - Problems with a release: use the tapster-releases skill.
