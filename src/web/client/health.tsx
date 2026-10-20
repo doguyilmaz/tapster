@@ -16,7 +16,7 @@ const when = (iso: string) => {
 const PROTECTION = new Set(["the tapster environment exists", "only main may open the tapster environment", "main cannot be deleted or force-pushed, by anyone", "the hub runs only GitHub's and tapster's actions, pinned by commit", "the default workflow token is read-only"]);
 const WORKFLOW = new Set(["the hub workflow exists", "the hub workflow is tapster's template", "the hub workflow runs only on schedule and manual dispatch", "tapster.yml is valid"]);
 
-function FixButton({ name, hub: hubName, onFixed }: { name: string; hub: string; onFixed: () => void }) {
+function FixButton({ name, fix, hub: hubName, onFixed }: { name: string; fix: string; hub: string; onFixed: () => void }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<ProblemView | null>(null);
   if (PROTECTION.has(name)) {
@@ -48,7 +48,7 @@ function FixButton({ name, hub: hubName, onFixed }: { name: string; hub: string;
       </span>
     );
   }
-  const stop = WORKFLOW.has(name) ? "files" : name === "the credentials this hub needs are stored" ? null : undefined;
+  const stop = WORKFLOW.has(name) && !(name === "tapster.yml is valid" && fix !== "Run tapster init.") ? "files" : name === "the credentials this hub needs are stored" ? null : undefined;
   if (stop === undefined) return null;
   return (
     <span class="row">
@@ -157,7 +157,7 @@ export function Health() {
               <div class="stack tight" style="gap: 0.2rem">
                 <span style="font-weight: 550">{cap(c.name)}</span>
                 {!c.ok && <span class="muted small">{c.fix}</span>}
-                {!c.ok && <FixButton name={c.name} hub={h.name} onFixed={() => void load()} />}
+                {!c.ok && <FixButton name={c.name} fix={c.fix} hub={h.name} onFixed={() => void load()} />}
                 {c.note && <span class="faint small">{cap(c.note)}.</span>}
               </div>
             </div>

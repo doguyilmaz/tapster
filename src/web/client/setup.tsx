@@ -119,7 +119,7 @@ function Installation({ h, slug }: { h: HubView; slug: string }) {
         try {
           const next = await get<InstallView>(`/api/hub/installation?hub=${encodeURIComponent(h.name)}`);
           setView(next);
-          if (next.id !== null && !next.onHub) return;
+          wait = next.id !== null && !next.onHub ? 30000 : 4000;
         } catch {
           wait = Math.min(wait * 2, 30000);
         }
@@ -189,14 +189,14 @@ function App({ h }: { h: HubView }) {
   const result = appResult.value;
   const created = Boolean(h.app.id && h.app.slug && h.app.key);
   useEffect(() => {
-    if (created || h.app.id || result?.kind === "unstored") return;
+    if (created || h.app.id || h.app.held || result?.kind === "unstored") return;
     post<AppStart>("/api/hub/app", { hub: h.name }).then(setStart, (e) => setProblem(problemOf(e)));
   }, [h.name, created, result?.kind]);
-  if (result?.kind === "unstored" && !created) {
+  if ((result?.kind === "unstored" || h.app.held) && !created) {
     return (
       <div class="panel">
         <Head title="Store the App's key" lead="GitHub created the App and handed its key to this setup, but storing it in the hub failed. The key is still in memory here, so try again." />
-        <Problem problem={result.problem} />
+        {result?.kind === "unstored" && <Problem problem={result.problem} />}
         <Problem problem={storeProblem} />
         <div class="row">
           <Busy
@@ -205,15 +205,15 @@ function App({ h }: { h: HubView }) {
             onClick={() =>
               store(async () => {
                 await post("/api/hub/app/store", { hub: h.name });
-                appResult.value = { kind: "created" };
                 await loadHub();
+                appResult.value = { kind: "created" };
               })
             }
           >
             Store the key again
           </Busy>
         </div>
-        <p class="muted small">If this setup stops first, the key is gone: generate a new one in the App's settings and store it with tapster init --rotate app.</p>
+        <p class="muted small">If this setup stops first, the key is gone. Then delete the App at github.com/settings/apps and create it again here.</p>
       </div>
     );
   }
@@ -862,11 +862,11 @@ export function Setup() {
     setOpen(id);
     if (window.matchMedia("(max-width: 900px)").matches) panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
-  const gate = (what: string, el: preact.JSX.Element) => (h.protect.done ? el : <ProtectFirst h={h} what={what} onGo={() => pick("protect")} />);
+  const gate = (what: string, el: preact.JSX.Element) => (h.protect.environment ? el : <ProtectFirst h={h} what={what} onGo={() => pick("protect")} />);
   const panel: Record<StopId | "extras", preact.JSX.Element> = {
     extras: <Extras h={h} />,
     protect: <Protect h={h} />,
-    app: h.app.id || appResult.value?.kind === "unstored" ? <App h={h} /> : gate("Create the GitHub App", <App h={h} />),
+    app: h.app.id || h.app.held || appResult.value?.kind === "unstored" ? <App h={h} /> : gate("Create the GitHub App", <App h={h} />),
     macos: <Mac h={h} choice={choice} />,
     certificate: gate("Apple certificate", <Certificate h={h} />),
     notary: gate("Notarization key", <Notary h={h} />),

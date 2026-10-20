@@ -12,7 +12,7 @@ import { P12_LIMIT, P8_LIMIT, inspectP12, notaryKey, saveCertificate, saveNotary
 import { convertManifest, permissionLines } from "../../cli/appflow";
 import { doctorChecks, hubRulesetCheck, policyCheck } from "../../cli/doctor";
 import { appInstallation, appManifest, storeApp } from "../../cli/hubapp";
-import { FLOW, hubFiles, patchSparkleEnv, pinState, sparkleLabels, starterFiles } from "../../cli/hubfiles";
+import { FLOW, PIN, hubFiles, patchSparkleEnv, pinState, sparkleLabels, starterFiles } from "../../cli/hubfiles";
 import { keyPins } from "../../cli/init";
 import { setEnvSecret } from "../../cli/gh";
 import { decodeSparkleKey } from "../../sparkle-key";
@@ -23,7 +23,6 @@ import { type Ctx, type Routes, type Session, readJson } from "../server";
 
 const HUB = /^[A-Za-z0-9-]+\/homebrew-[A-Za-z0-9._-]+$/;
 const ISSUE_TITLE = "tapster: the hub needs attention";
-const PIN = /doguyilmaz\/tapster@([0-9a-f]{40}) # (\S+)/;
 
 export async function account(s: Session): Promise<AccountView> {
   let gh: GitHub;
@@ -176,8 +175,8 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
     url: repo.html_url,
     private: repo.private,
     empty,
-    protect: { done: checks.every((x) => x.ok), checks, others: otherWorkflows(flows) },
-    app: { id: appId, slug: v("TAPSTER_APP_SLUG"), key: names(secrets).includes("TAPSTER_APP_PRIVATE_KEY"), installed: held ? await installView(s, hub) : null },
+    protect: { done: checks.every((x) => x.ok), environment: env !== null, checks, others: otherWorkflows(flows) },
+    app: { id: appId, slug: v("TAPSTER_APP_SLUG"), key: names(secrets).includes("TAPSTER_APP_PRIVATE_KEY"), held: Boolean(held), installed: held ? await installView(s, hub) : null },
     apple: {
       needed: hasApple || macPackages ? true : null,
       certificate: v("TAPSTER_TEAM_ID") ? { team: v("TAPSTER_TEAM_ID")!, expires: v("TAPSTER_CERT_EXPIRES") ?? "" } : null,
@@ -277,7 +276,7 @@ async function appStore(c: Ctx) {
   const { hub } = await readJson(c.req, hubBody);
   await hubFrom(c, hub);
   const held = c.s.apps.get(hub);
-  if (!held) throw new TapsterError("this setup no longer holds the App's key", "GitHub hands the key over only once. Generate a new key in the App's settings on GitHub, then run tapster init --rotate app in a clone of the hub.");
+  if (!held) throw new TapsterError("this setup no longer holds the App's key", "GitHub hands the key over only once. Delete the App at https://github.com/settings/apps, then create it again here.");
   await storeApp(hub, { id: Number(held.id), slug: held.slug, pem: held.pem });
   return { stored: true };
 }
@@ -355,7 +354,8 @@ async function filesCommit(c: Ctx) {
   const { gh, hub, login } = await hubFrom(c, q.hub);
   if ((await mainRef(gh, hub)) === null) {
     const readme = starterFiles(hub).find((f) => f.path === "README.md")!;
-    await gh.json("PUT", `/repos/${hub}/contents/README.md`, { message: "Start the tap", content: Buffer.from(readme.content).toString("base64") });
+    await gh.json("PUT", `/repos/${hub}/contents/README.md`, { message: "Start the tap", content: Buffer.from(readme.content).toString("base64"), branch: "main" });
+    if ((await gh.json<{ default_branch: string }>("GET", `/repos/${hub}`)).default_branch !== "main") await gh.json("PATCH", `/repos/${hub}`, { default_branch: "main" });
   }
   await guardMain(gh, hub, login);
   const result = await commitToHub(gh, hub, "Set up tapster", async (read) => {

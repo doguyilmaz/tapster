@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { mkdir, writeFile } from "node:fs/promises";
+
 import { basename, join } from "node:path";
 import { isMap, isSeq, parse, parseDocument, type Scalar, YAMLMap } from "yaml";
 import { BUNDLE_ID } from "../config";
@@ -17,7 +17,7 @@ import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
 import { appInstallUrl, autoTagSteps, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubFacts, hubName, installSentence, proposeEntry, releaseEntry, releaseSecrets, withoutMac } from "./hubpr";
 import { ask } from "./prompt";
-import { mustRead, readRegular, readSmall } from "./paths";
+import { mustRead, readRegular, readSmall, writeInside } from "./paths";
 
 type Pins = typeof pinsJson;
 
@@ -278,11 +278,10 @@ async function writeTemplate(dir: string, file: string, text: string, force: boo
   if (existsSync(flow) && !force) {
     const ringed = addRingStep(mustRead(flow, `.github/workflows/${file}`));
     if (ringed === null) throw new TapsterError(`.github/workflows/${file} already exists`, "Move it aside and run tapster add again. To replace it, run tapster add --force.");
-    await writeFile(flow, ringed);
+    await writeInside(dir, `.github/workflows/${file}`, ringed);
     return `- kept .github/workflows/${file}; it rings the hub after opening the draft`;
   }
-  await mkdir(join(dir, ".github/workflows"), { recursive: true });
-  await writeFile(flow, text);
+  await writeInside(dir, `.github/workflows/${file}`, text);
   return `- wrote .github/workflows/${file} (build, attest, draft, ring the hub)`;
 }
 
@@ -303,11 +302,11 @@ export async function prepare(dir: string, repo: string, name: string, opts: Add
   const goreleaser = [".goreleaser.yaml", ".goreleaser.yml"].find((f) => existsSync(join(dir, f)));
   if (goreleaser && existsSync(join(dir, "go.mod"))) {
     const g = adaptGoreleaser(mustRead(join(dir, goreleaser), goreleaser));
-    await writeFile(join(dir, goreleaser), g.text);
+    await writeInside(dir, goreleaser, g.text);
     const flowPath = join(dir, ".github/workflows", opts.workflow);
     if (!existsSync(flowPath)) throw new TapsterError(`no .github/workflows/${opts.workflow} found`, "Name the workflow that runs GoReleaser with --workflow.");
     const w = adaptReleaseWorkflow(mustRead(flowPath, `.github/workflows/${opts.workflow}`), pinsJson["actions/attest-build-provenance"].sha, pinsJson["actions/attest-build-provenance"].tag);
-    await writeFile(flowPath, w.text);
+    await writeInside(dir, `.github/workflows/${opts.workflow}`, w.text);
     return { kind: "go", entry: null, reason: null, notes: [...g.notes, ...w.notes].map((n) => `- ${n}`), goreleaser: g.text, files: [goreleaser, `.github/workflows/${opts.workflow}`] };
   }
   if (existsSync(join(dir, "package.json")) && (existsSync(join(dir, "bun.lock")) || existsSync(join(dir, "bun.lockb")))) {

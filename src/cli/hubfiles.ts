@@ -52,7 +52,7 @@ export async function tapsterPin(gh: GitHub, build: typeof TAPSTER, flag: string
   return { sha: flag, tag: "main" };
 }
 
-const PIN = /doguyilmaz\/tapster@([0-9a-f]{40}) # (\S+)/;
+export const PIN = /doguyilmaz\/tapster@([0-9a-f]{40}) # (\S+)/;
 
 export function pinChange(before: string | null, after: string): string {
   const show = (m: RegExpExecArray) => `${m[2]} (${m[1]!.slice(0, 7)})`;

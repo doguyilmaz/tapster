@@ -48,6 +48,14 @@ test("tools are listed with JSON schemas and only run_hub writes", async () => {
   expect(res.result.tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name)).toEqual(["run_hub"]);
 });
 
+test("a clone of someone else's tap in the current folder does not stop the tools", async () => {
+  const dir = join(home, "Developer", "theirs");
+  await Bun.$`git init -q ${dir} && git -C ${dir} remote add origin https://github.com/Homebrew/homebrew-core.git && git -C ${dir} config tapster.hub Homebrew/homebrew-core`.quiet();
+  const there = { ...ctx, deps: { ...ctx.deps, cwd: dir } };
+  const res = (await handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "hub_runs", arguments: {} } }, there)) as { result: { structuredContent?: { hub: string } } };
+  expect(res.result.structuredContent?.hub).toBe("octo/homebrew-tap");
+});
+
 test("hub_status finds the user's only hub and reports its steps and projects", async () => {
   const res = await call("hub_status");
   expect(res.result.isError).toBeUndefined();
@@ -78,11 +86,13 @@ test("local_projects, doctor and run_hub work; bad input is an error result, not
 
 test("the stdio loop answers one JSON line per request and survives garbage", async () => {
   const out: string[] = [];
-  const input = Readable.from([`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" })}\n`, "not json\n", `${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "nope" })}\n`]);
+  const input = Readable.from([`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" })}\n`, "not json\n", "null\n", "[1, 2]\n", `${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "nope" })}\n`]);
   await serve(ctx, input, (l) => out.push(l));
   expect(out.map((l) => JSON.parse(l))).toEqual([
     { jsonrpc: "2.0", id: 1, result: {} },
     { jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } },
+    { jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid request: send one JSON-RPC object per line" } },
+    { jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid request: send one JSON-RPC object per line" } },
     { jsonrpc: "2.0", id: 2, error: { code: -32601, message: "unknown method nope" } },
   ]);
 });

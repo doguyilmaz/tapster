@@ -15,8 +15,8 @@ export type HubView = {
   url: string;
   private: boolean;
   empty: boolean;
-  protect: { done: boolean; checks: Check[]; others: OtherWorkflow[] };
-  app: { id: string | null; slug: string | null; key: boolean; installed: InstallView | null };
+  protect: { done: boolean; environment: boolean; checks: Check[]; others: OtherWorkflow[] };
+  app: { id: string | null; slug: string | null; key: boolean; held: boolean; installed: InstallView | null };
   apple: { needed: boolean | null; certificate: { team: string; expires: string } | null; certificateStored: boolean; notary: boolean };
   files: { config: boolean; state: boolean; readme: boolean; workflow: "missing" | "current" | "older" | "newer" | "other"; pinned: string | null; every: number | null };
   packages: { name: string; repo: string; kind: string }[];

@@ -69,7 +69,7 @@ test("a fresh tap shows every step open and warns about its old workflows", asyn
   const h = await hubView();
   expect(h.protect.done).toBe(false);
   expect(h.protect.others).toEqual([{ file: "tests.yml", actions: ["Homebrew/actions/setup-homebrew@master"] }]);
-  expect(h.app).toEqual({ id: null, slug: null, key: false, installed: null });
+  expect(h.app).toEqual({ id: null, slug: null, key: false, held: false, installed: null });
   expect(h.files.workflow).toBe("missing");
 });
 
@@ -93,6 +93,8 @@ test("the App goes through GitHub and back with a single-use state, and its key 
   const back = await handler(s, routes(s, () => {}), (c) => appCallback(c))(new Request(`http://127.0.0.1:8277/app/callback?code=abc&state=${state}`, { headers: { host: "127.0.0.1:8277" } }));
   expect(back.headers.get("location")).toStartWith("/setup?app=unstored&hub=octo%2Fhomebrew-tap");
   fake.failWrites = false;
+  const waiting = await hubView();
+  expect([waiting.app.held, waiting.app.key]).toEqual([true, false]);
   expect((await call("POST", "/api/hub/app/store", { hub: "octo/homebrew-tap" })).data).toEqual({ stored: true });
   const again = await handler(s, routes(s, () => {}), (c) => appCallback(c))(new Request(`http://127.0.0.1:8277/app/callback?code=abc&state=${state}`, { headers: { host: "127.0.0.1:8277" } }));
   expect(again.headers.get("location")).toBe("/setup?app=unknown");

@@ -215,11 +215,14 @@ function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: str
     sheetRef.current?.querySelector<HTMLElement>("button")?.focus();
     const trap = (e: KeyboardEvent) => {
       if (e.key !== "Tab" || !sheetRef.current) return;
-      const items = [...sheetRef.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input, select, summary, [tabindex]:not([tabindex='-1'])")];
+      const items = [...sheetRef.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex='-1'])")];
       const first = items[0];
       const last = items[items.length - 1];
       if (!first || !last) return;
-      if (e.shiftKey && document.activeElement === first) {
+      if (!sheetRef.current.contains(document.activeElement)) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && document.activeElement === first) {
         e.preventDefault();
         last.focus();
       } else if (!e.shiftKey && document.activeElement === last) {

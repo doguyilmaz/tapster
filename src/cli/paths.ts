@@ -1,5 +1,6 @@
 import { lstatSync, readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { TapsterError } from "../errors";
 
 export function cleanPath(input: string, home = process.env.HOME ?? ""): string {
@@ -37,4 +38,27 @@ export function mustRead(path: string, what: string, limit = 1 << 20): string {
   const text = readSmall(path, limit);
   if (text === null) throw new TapsterError(`${what} is not a regular file tapster can read`, "Replace a link or a very large file with the file itself, then try again.");
   return text;
+}
+
+const lstatOrNull = (path: string) => {
+  try {
+    return lstatSync(path);
+  } catch {
+    return null;
+  }
+};
+
+export async function writeInside(dir: string, rel: string, content: string): Promise<void> {
+  const parts = rel.split("/");
+  let at = dir;
+  for (const part of parts.slice(0, -1)) {
+    at = join(at, part);
+    const st = lstatOrNull(at);
+    if (st && !st.isDirectory()) throw new TapsterError(`${rel} would be written through a link or a file`, "Replace the link with a real folder, then try again.");
+    if (!st) await mkdir(at);
+  }
+  const target = join(dir, rel);
+  const st = lstatOrNull(target);
+  if (st && !st.isFile()) throw new TapsterError(`${rel} is not a regular file`, "Replace the link with the file itself, then try again.");
+  await writeFile(target, content);
 }

@@ -55,7 +55,7 @@ const help: Record<string, string> = {
 
   claude mcp add tapster -- bunx @doguyilmaz/tapster mcp
 
-  The tools read the hub, its runs, a project's releases and the projects on this computer, and can start a hub run.
+  The tools read the hub, its runs, a project's releases and the projects on this computer. One of them starts a hub run.
   They use your GitHub CLI sign-in and never touch your keys.`,
 };
 

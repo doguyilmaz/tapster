@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const dirs = [join(import.meta.dir, "..", "src", "web"), join(import.meta.dir, "..", "src", "web", "client"), join(import.meta.dir, "..", "src", "web", "api")];
+const dirs = [join(import.meta.dir, "..", "src", "web"), join(import.meta.dir, "..", "src", "web", "client"), join(import.meta.dir, "..", "src", "web", "api"), join(import.meta.dir, "..", "src", "mcp")];
 
 test("the setup app's words follow the writing rules: no em dash and no comma before and or or", () => {
   const found: string[] = [];

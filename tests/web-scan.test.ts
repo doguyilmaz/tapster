@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultRoots, insideHome, originRepo, projectKind, readSmall, scanClones } from "../src/web/scan";
@@ -99,4 +99,22 @@ test("a clone whose build files link to devices cannot hang tapster", async () =
   writeFileSync(join(go, "go.mod"), "module x\n");
   symlinkSync("/dev/zero", join(go, ".goreleaser.yaml"));
   await expect(prepare(go, "me/x", "x", addOptions([]))).rejects.toThrow(/not a regular file/);
+});
+
+test("tapster add never writes through a link in the clone", async () => {
+  const { prepare, addOptions } = await import("../src/cli/add");
+  const { writeInside } = await import("../src/cli/paths");
+  const outside = join(base, "outside");
+  mkdirSync(outside, { recursive: true });
+  const dir = join(base, "linked");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "package.json"), '{"name":"t","bin":{"t":"cli.ts"}}');
+  writeFileSync(join(dir, "bun.lock"), "{}");
+  symlinkSync(outside, join(dir, ".github"));
+  await expect(prepare(dir, "me/t", "t", addOptions([]))).rejects.toThrow(/through a link/);
+  const dangling = join(base, "dangling");
+  mkdirSync(join(dangling, ".github", "workflows"), { recursive: true });
+  symlinkSync(join(outside, "planted.yml"), join(dangling, ".github", "workflows", "release.yml"));
+  await expect(writeInside(dangling, ".github/workflows/release.yml", "x")).rejects.toThrow(/not a regular file/);
+  expect(readdirSync(outside)).toEqual([]);
 });

@@ -5,6 +5,7 @@ import { TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { readHubFile } from "../hubcommit";
 import { parseState } from "../state";
+import { noteIn } from "../draftnote";
 import { TAPSTER } from "../version";
 import { doctorChecks } from "../cli/doctor";
 import { currentRepo } from "../cli/gh";
@@ -18,7 +19,7 @@ import { stops } from "../web/steps";
 const VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 export const INSTRUCTIONS = `tapster turns the user's Homebrew tap into a release hub that signs, notarizes and publishes the releases of their projects.
-These tools read the hub and the projects through the user's GitHub CLI sign-in and can start a hub run. They cannot set up a hub: creating the GitHub App needs the user's click, and the Apple files live on their computer. For setup, tell the user to run "bunx @doguyilmaz/tapster setup", which opens a local page that walks through it, or "bunx @doguyilmaz/tapster add" in a project. Docs: https://tapster.doguyilmaz.com/`;
+These tools read the hub and the projects through the user's GitHub CLI sign-in and can start a hub run. They cannot set up a hub: creating the GitHub App needs the user's click and the Apple files live on their computer. For setup, tell the user to run "bunx @doguyilmaz/tapster setup", which opens a local page that walks through it. In a project, "bunx @doguyilmaz/tapster add" does the same from a terminal. Docs: https://tapster.doguyilmaz.com/`;
 
 type Ctx = { deps: Deps; gh(): Promise<GitHub> };
 type Tool = { name: string; title: string; description: string; input: z.ZodObject<z.ZodRawShape>; readOnly: boolean; run(args: Record<string, unknown>, ctx: Ctx): Promise<unknown> };
@@ -29,10 +30,11 @@ async function resolveHub(ctx: Ctx, given: unknown): Promise<{ gh: GitHub; hub: 
   const gh = await ctx.gh();
   const login = (await gh.json<{ login: string }>("GET", "/user")).login;
   if (typeof given === "string" && given) return { gh, hub: checkHub(given, login), login };
-  const saved = (await run("git", ["-C", ctx.deps.cwd, "config", "--get", "tapster.hub"], { allowFail: true })).stdout.trim();
+  const mine = (name: string | null) => (name && name.split("/")[0]!.toLowerCase() === login.toLowerCase() && /\/homebrew-/.test(name) ? name : null);
+  const saved = mine((await run("git", ["-C", ctx.deps.cwd, "config", "--get", "tapster.hub"], { allowFail: true })).stdout.trim());
   if (saved) return { gh, hub: checkHub(saved, login), login };
-  const here = await currentRepo(ctx.deps.cwd).catch(() => null);
-  if (here && /\/homebrew-/.test(here)) return { gh, hub: checkHub(here, login), login };
+  const here = mine(await currentRepo(ctx.deps.cwd).catch(() => null));
+  if (here) return { gh, hub: checkHub(here, login), login };
   const hubs = await hubChoices(gh, login);
   const ours = hubs.filter((h) => h.tapster);
   const only = ours.length === 1 ? ours[0] : hubs.length === 1 ? hubs[0] : null;
@@ -40,7 +42,6 @@ async function resolveHub(ctx: Ctx, given: unknown): Promise<{ gh: GitHub; hub: 
   throw new TapsterError("there is no single hub to read", hubs.length ? `Pass hub as one of: ${hubs.map((h) => h.name).join(", ")}.` : "The user has no repository named homebrew-...; they can create one with bunx @doguyilmaz/tapster setup.");
 }
 
-const noteOf = (body: string | null | undefined) => /<!-- tapster -->\s*>?\s*([\s\S]*?)<!-- \/tapster -->/.exec(body ?? "")?.[1]?.replace(/\*\*/g, "").trim() ?? null;
 
 export const TOOLS: Tool[] = [
   {
@@ -89,7 +90,7 @@ export const TOOLS: Tool[] = [
   {
     name: "release_status",
     title: "A project's releases",
-    description: "A project's latest releases and drafts, what the hub wrote on a draft it will not publish, and what the hub has published.",
+    description: "A project's latest releases and drafts, what the hub wrote on a draft it will not publish and what the hub has published.",
     input: z.object({ ...hubArg, repo: z.string().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/).describe("The project as owner/name.") }),
     readOnly: true,
     async run(args, ctx) {
@@ -103,7 +104,7 @@ export const TOOLS: Tool[] = [
         hub,
         repo,
         inHub: pkg ? pkg.name : null,
-        releases: releases.map((r) => ({ tag: r.tag_name, draft: r.draft, published: r.published_at, files: r.assets.length, hubNote: noteOf(r.body) })),
+        releases: releases.map((r) => ({ tag: r.tag_name, draft: r.draft, published: r.published_at, files: r.assets.length, hubNote: noteIn(r.body) })),
         publishedByHub: pkg ? (state.packages[pkg.name] ?? []).map((e) => ({ tag: e.tag, status: e.status })) : [],
       };
     },
@@ -147,6 +148,7 @@ const ok = (id: Message["id"], result: unknown) => ({ jsonrpc: "2.0", id, result
 const fail = (id: Message["id"], code: number, message: string) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
 
 export async function handle(msg: Message, ctx: Ctx): Promise<object | null> {
+  if (msg === null || typeof msg !== "object" || Array.isArray(msg)) return fail(null, -32600, "invalid request: send one JSON-RPC object per line");
   if (msg.id === undefined || msg.id === null) return null;
   if (msg.method === "initialize") {
     const asked = String(msg.params?.protocolVersion ?? "");

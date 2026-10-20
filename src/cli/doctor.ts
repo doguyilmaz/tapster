@@ -8,7 +8,7 @@ import type { GitHub } from "../github";
 import { currentRepo, userGitHub } from "./gh";
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
-import { fillWorkflow, sparkleLabels } from "./hubfiles";
+import { PIN, fillWorkflow, sparkleLabels } from "./hubfiles";
 import { releaseSecrets } from "./hubpr";
 import { everyFromFlow } from "./schedule";
 
@@ -91,7 +91,6 @@ export function credentialsCheck(config: HubConfig | null, secrets: string[], va
   return bad(name, `Missing: ${missing.join(", ")}. Run ${fixes.join(" and ")}.`);
 }
 
-const PIN = /doguyilmaz\/tapster@([0-9a-f]{40}) # (\S+)/;
 
 export function workflowCheck(text: string, me: { version: string; sha: string | null }): Check {
   const name = "the hub workflow is tapster's template";
