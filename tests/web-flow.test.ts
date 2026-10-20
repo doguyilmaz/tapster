@@ -227,6 +227,20 @@ test("opening a clone never runs commands from its own git config", async () => 
   expect(existsSync(marker)).toBe(false);
 });
 
+test("opening a partial clone never fetches a missing object through its own remote", async () => {
+  const path = join(home, "Developer", "hafifpix");
+  const marker = join(home, "fetch-ran");
+  const file = (await run("git", ["-C", path, "ls-tree", "-r", "--name-only", "HEAD"])).stdout.split("\n")[0]!;
+  const blob = (await run("git", ["-C", path, "rev-parse", `HEAD:${file}`])).stdout.trim();
+  rmSync(join(path, ".git", "objects", blob.slice(0, 2), blob.slice(2)));
+  for (const [k, v] of [["core.repositoryformatversion", "1"], ["extensions.partialClone", "lazy"], ["remote.lazy.promisor", "true"], ["remote.lazy.url", `ext::sh -c touch% ${marker}`], ["protocol.ext.allow", "always"]]) {
+    await run("git", ["-C", path, "config", k!, v!]);
+  }
+  await call("POST", "/api/projects/inspect", { hub: "octo/homebrew-tap", path });
+  await call("POST", "/api/projects/diff", { path, files: [file] });
+  expect(existsSync(marker)).toBe(false);
+});
+
 test("a new tap starts empty, gets protected and receives tapster's README as its first commit", async () => {
   expect((await call("POST", "/api/hubs", { name: "homebrew-fresh", private: false })).data).toEqual({ hub: "octo/homebrew-fresh" });
   const view = (await call("GET", "/api/hub?hub=octo/homebrew-fresh")).data as unknown as HubView;

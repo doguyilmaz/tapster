@@ -38,11 +38,12 @@ function cloneRepo(dir: string, login: string): string {
 }
 
 async function git(dir: string, args: string[], o: { user?: boolean; timeoutMs?: number } = {}) {
-  const env: Record<string, string> = o.user ? { ...(process.env as Record<string, string>), GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes" } : { GIT_TERMINAL_PROMPT: "0" };
+  const env: Record<string, string> = o.user ? { ...(process.env as Record<string, string>), GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes" } : { GIT_TERMINAL_PROMPT: "0", GIT_NO_LAZY_FETCH: "1", GIT_ALLOW_PROTOCOL: "none" };
   return runPath(TOOLS.git, "git", ["-C", dir, ...args], { env, allowFail: true, timeoutMs: o.timeoutMs ?? 20_000, maxOutput: 4 << 20 });
 }
 
-// Reading a clone must not run its own config: status and diff would run clean filters and fsmonitor from .git/config.
+// Reading a clone must not run its own config: status and diff would run clean filters and fsmonitor from .git/config,
+// and a partial clone would fetch a missing object through any remote its config names, ext:: included.
 async function committed(dir: string, path: string): Promise<string | null> {
   const res = await git(dir, ["cat-file", "-p", `HEAD:${path}`]);
   return res.code === 0 ? res.stdout : null;
