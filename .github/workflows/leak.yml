@@ -28,6 +28,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
+      - name: guide (no inputs, as the Marketplace snippet runs it)
+        uses: ./
       - name: one fake work item for sign
         run: |
           mkdir -p "$RUNNER_TEMP/tapster/fixture/v0.0.1/bin/a"
@@ -105,6 +107,10 @@ jobs:
         continue-on-error: true
         uses: ./
         with: { mode: check, template: 2, config: tests/leak/hub/stub.yml }
+      - name: report through the stub
+        continue-on-error: true
+        uses: ./
+        with: { mode: report, template: 2, findings: '[{"item":"fixture","reason":"a test finding","fix":"Nothing to do."}]', check: success }
       - name: fetch through the stub
         continue-on-error: true
         uses: ./
@@ -315,12 +321,12 @@ jobs:
           EXTRA_CANARIES: ${{ needs.plain-api.outputs.canaries }}
           EXTRA_CANARIES_LINUX: ${{ needs.plain-linux.outputs.canaries }}
           EXPECT_STAGES: >-
-            {"plain":["tapster: failed (openssl exited with", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
+            {"plain":["Set up this hub on your computer with bunx @doguyilmaz/tapster setup", "tapster: failed (openssl exited with", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
             "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "leakseed v1.0.0: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
             "masked":["fixture-linux v0.0.9: published", "fixture v0.0.1: failed (", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
             "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "leakseed v1.0.0: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
             "plain-linux":["linux: signed 1 checked package with key", "tapster: failed (gpg exited with"],
             "masked-linux":["linux: signed 1 checked package with key", "tapster: failed (gpg exited with"],
-            "plain-api":["fixture-linux v0.0.9: published", "Casks/fixture-linux.rb: rendered",
+            "plain-api":["opened the hub's health issue #1", "fixture-linux v0.0.9: published", "Casks/fixture-linux.rb: rendered",
             "fixture-linux v0.0.9: failed (the release was published while tapster worked on it",
             "returned 500", "returned 404", "returned 422", "network error"]}
