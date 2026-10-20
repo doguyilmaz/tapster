@@ -5,15 +5,17 @@ import { TapsterError } from "../../errors";
 import { protectionProblems } from "../../rulesets";
 import { readGit } from "../../clone";
 import { TOOLS, runPath } from "../../run";
-import { addOptions, addProject, findApp, projectName } from "../../cli/add";
+import { addOptions, addProject, findApp, prepare, projectName } from "../../cli/add";
 import { binName, hubEntries, hubFacts } from "../../cli/hubpr";
 import type { AddView, DiffView, InspectView, ScanView } from "../contract";
 import { defaultRoots, insideHome, oneClonePerRepo, originRepo, projectKind, readSmall, scanClones } from "../scan";
 import { type Ctx, type Routes, readJson } from "../server";
 import { checkHub, me } from "./hub";
+import { oneGoProblem } from "../oneclick";
 import { setupProblems } from "./status";
 
 const COMMIT_MESSAGE = "Release through the tapster hub";
+const TAPSTER_FILES = [".github/workflows/release.yml", ".goreleaser.yaml", ".goreleaser.yml"];
 
 export function clonePath(path: unknown, home: string): string {
   if (typeof path !== "string" || !isAbsolute(path)) throw new TapsterError("that is not a full folder path", "Give the folder's full path, such as /Users/you/Developer/my-tool.");
@@ -124,7 +126,7 @@ async function inspect(c: Ctx): Promise<InspectView> {
   if (kind === null) throw new TapsterError(`tapster cannot publish ${repo} yet: it is ${why}`, "tapster publishes GoReleaser Go tools, Bun command line tools and Mac apps that update with Sparkle.");
   const workflows = kind === "go" ? goWorkflows(dir) : [];
   const release = readSmall(join(dir, ".github", "workflows", "release.yml"));
-  const dirty = await changed(dir, [".github/workflows/release.yml", ".goreleaser.yaml", ".goreleaser.yml", ...workflows.map((w) => `.github/workflows/${w}`)]);
+  const dirty = await changed(dir, [...TAPSTER_FILES, ...workflows.map((w) => `.github/workflows/${w}`)]);
   const branch = branchOf(dir);
   const [project, facts, listed] = await Promise.all([gh.getRepo(repo), hubFacts(gh, hub).catch(() => null), hubEntries(gh, hub).catch(() => [])]);
   const problems = await protectionProblems(gh, repo, project.default_branch, "admin").catch(() => ["unknown"]);
@@ -135,7 +137,6 @@ async function inspect(c: Ctx): Promise<InspectView> {
   const ready =
     workflow !== null &&
     setupProblems({ kind, branch, workflowName: workflow, goreleaser: kind === "go" ? (local(".goreleaser.yaml") ?? local(".goreleaser.yml")) : null, workflow: local(`.github/workflows/${workflow}`) }).length === 0;
-  const upstream = await git(dir, ["rev-list", "--count", "@{u}..HEAD"]);
   return {
     path: dir,
     repo,
@@ -154,13 +155,19 @@ async function inspect(c: Ctx): Promise<InspectView> {
     proposed: entry?.pr ?? null,
     apple: facts.apple,
     ready,
-    ahead: upstream.code === 0 && /^\d+$/.test(upstream.stdout.trim()) ? Number(upstream.stdout.trim()) : null,
+    ahead: await ahead(dir),
   };
 }
 
-const addBody = z
-  .object({ ...hubBody, path: z.string(), options: z.object({ workflow: z.string().regex(/^[A-Za-z0-9._-]+\.ya?ml$/), autoTag: z.boolean(), dependabot: z.boolean(), force: z.boolean() }).strict() })
-  .strict();
+const options = z.object({ workflow: z.string().regex(/^[A-Za-z0-9._-]+\.ya?ml$/), autoTag: z.boolean(), dependabot: z.boolean(), force: z.boolean() }).strict();
+const addBody = z.object({ ...hubBody, path: z.string(), options, oneGo: z.boolean().optional() }).strict();
+
+const optionsOf = (o: z.infer<typeof options>) => addOptions([...(o.force ? ["--force"] : []), ...(o.autoTag ? ["--auto-tag"] : []), ...(o.dependabot ? ["--allow-dependabot"] : []), "--workflow", o.workflow]);
+
+async function ahead(dir: string): Promise<number | null> {
+  const res = await git(dir, ["rev-list", "--count", "@{u}..HEAD"]);
+  return res.code === 0 && /^\d+$/.test(res.stdout.trim()) ? Number(res.stdout.trim()) : null;
+}
 
 async function add(c: Ctx): Promise<AddView> {
   const body = await readJson(c.req, addBody);
@@ -168,13 +175,32 @@ async function add(c: Ctx): Promise<AddView> {
   const hub = checkHub(body.hub, login);
   const dir = clonePath(body.path, c.s.deps.home);
   const repo = cloneRepo(dir, login);
-  const o = body.options;
-  const opts = addOptions([...(o.force ? ["--force"] : []), ...(o.autoTag ? ["--auto-tag"] : []), ...(o.dependabot ? ["--allow-dependabot"] : []), "--workflow", o.workflow]);
+  const opts = optionsOf(body.options);
   const facts = await hubFacts(gh, hub);
+  if (body.oneGo) {
+    const problem = oneGoProblem({ branch: branchOf(dir), defaultBranch: (await gh.getRepo(repo)).default_branch, dirty: [...new Set(await changed(dir, [...TAPSTER_FILES, `.github/workflows/${opts.workflow}`]))], ahead: await ahead(dir) });
+    if (problem) throw new TapsterError(problem, "Fix that in the clone first. Or turn off doing it in one go and add the project step by step.");
+  }
   await git(dir, ["config", "tapster.hub", hub], { user: true });
   const lines: string[] = [];
   const added = await addProject(gh, dir, repo, hub, facts, opts, (line) => lines.push(line));
-  return { lines, pr: added.pr, entry: added.entry, installUrl: added.installUrl, files: await changed(dir, added.files) };
+  return { lines, pr: added.pr, head: added.head, entry: added.entry, installUrl: added.installUrl, files: await changed(dir, added.files) };
+}
+
+async function preview(c: Ctx): Promise<DiffView> {
+  const body = await readJson(c.req, z.object({ ...hubBody, path: z.string(), options }).strict());
+  const { gh, login } = await me(c.s);
+  const hub = checkHub(body.hub, login);
+  const dir = clonePath(body.path, c.s.deps.home);
+  const repo = cloneRepo(dir, login);
+  const writes = new Map<string, string>();
+  await prepare(dir, repo, projectName(repo), optionsOf(body.options), (await hubFacts(gh, hub)).apple, async (rel, content) => void writes.set(rel, content));
+  const files: DiffView["files"] = [];
+  for (const [path, after] of writes) {
+    const before = await committed(dir, path);
+    files.push({ path, before, after, change: before === null ? "create" : before === after ? "same" : "update" });
+  }
+  return { files };
 }
 
 function relFiles(files: string[]): string[] {
@@ -236,6 +262,7 @@ export const projectRoutes: Routes = {
   "POST /api/projects/scan": scan,
   "POST /api/projects/inspect": inspect,
   "POST /api/projects/add": add,
+  "POST /api/projects/preview": preview,
   "POST /api/projects/diff": diff,
   "POST /api/projects/commit": commit,
   "POST /api/projects/push": push,

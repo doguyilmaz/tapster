@@ -21,7 +21,7 @@ export type FakeRepo = {
   actions: { allowed_actions: string; sha_pinning_required: boolean; selected: { github_owned_allowed: boolean; verified_allowed: boolean; patterns_allowed: string[] } | null };
   workflowPerm: string;
   releases: Release[];
-  pulls: { number: number; head: string; html_url: string; title: string }[];
+  pulls: { number: number; head: string; html_url: string; title: string; state?: "open" | "closed"; merged?: string; fork?: string }[];
   issues: { number: number; title: string; body: string; html_url: string; updated_at: string; user: { login: string } }[];
   keys: { title: string; read_only: boolean }[];
   repoVars: Map<string, string>;
@@ -31,7 +31,10 @@ export type FakeRepo = {
   tags: Map<string, string>;
   annotated: Map<string, string>;
   branches: Map<string, Map<string, string>>;
+  bases: Map<string, Map<string, string>>;
   commit: { message: string; date: string };
+  history: { activity: { actor: string; after: string; type: string }[]; commits: { sha: string; files: Map<string, string> }[] } | null;
+  allowMerge: boolean;
 };
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => new Response(status === 204 ? null : JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
@@ -46,9 +49,12 @@ export class FakeHub {
   appKeyWorks = true;
   failWrites = false;
   calls: string[] = [];
+  actor: string;
   private nextId = 100;
 
-  constructor(readonly login = "octo") {}
+  constructor(readonly login = "octo") {
+    this.actor = login;
+  }
 
   repo(name: string, o: Partial<FakeRepo> = {}): FakeRepo {
     const full = `${this.login}/${name}`;
@@ -74,7 +80,10 @@ export class FakeHub {
       tags: new Map(),
       annotated: new Map(),
       branches: new Map(),
+      bases: new Map(),
       commit: { message: "Start", date: "2026-10-01T09:00:00Z" },
+      history: null,
+      allowMerge: true,
       ...o,
     };
     this.repos.set(full.toLowerCase(), r);
@@ -83,6 +92,59 @@ export class FakeHub {
 
   get(full: string): FakeRepo | undefined {
     return this.repos.get(full.toLowerCase());
+  }
+
+  // Untracked repositories answer as before: /activity names the owner at every head and every compare is identical.
+  track(full: string): void {
+    const r = this.get(full)!;
+    r.history = { activity: [{ actor: this.login, after: r.head, type: "push" }], commits: [{ sha: r.head, files: new Map(r.files ?? []) }] };
+  }
+
+  branchHead(full: string, branch: string): string {
+    return sha(`${full}${branch}${JSON.stringify([...(this.get(full)!.branches.get(branch) ?? [])])}`);
+  }
+
+  private wrote(r: FakeRepo, type: string): void {
+    if (!r.history) return;
+    r.history.commits.push({ sha: r.head, files: new Map(r.files ?? []) });
+    r.history.activity.unshift({ actor: this.actor, after: r.head, type });
+  }
+
+  private changedIn(r: FakeRepo, branch: string): string[] {
+    const before = r.bases.get(branch) ?? new Map<string, string>();
+    const after = r.branches.get(branch) ?? new Map<string, string>();
+    return [...new Set([...before.keys(), ...after.keys()])].filter((f) => before.get(f) !== after.get(f)).sort();
+  }
+
+  private pullView(r: FakeRepo, full: string, p: FakeRepo["pulls"][number]) {
+    return {
+      number: p.number,
+      html_url: p.html_url,
+      title: p.title,
+      state: p.state ?? "open",
+      merged: Boolean(p.merged),
+      head: { ref: p.head, sha: this.branchHead(full, p.head), repo: { full_name: p.fork ?? full } },
+      base: { ref: "main", sha: r.head },
+    };
+  }
+
+  private merge(r: FakeRepo, full: string, pr: FakeRepo["pulls"][number], body: Record<string, unknown>): Response {
+    if ((pr.state ?? "open") !== "open") return json({ message: "Pull Request is not mergeable" }, 405);
+    if (body.merge_method === "merge" && !r.allowMerge) return json({ message: "Merge commits are not allowed on this repository." }, 405);
+    if (body.sha && body.sha !== this.branchHead(full, pr.head)) return json({ message: "Head branch was modified. Review and try the merge again." }, 409);
+    const base = r.bases.get(pr.head) ?? new Map<string, string>();
+    const head = r.branches.get(pr.head) ?? new Map<string, string>();
+    const files = this.changedIn(r, pr.head);
+    if (files.some((f) => r.files?.get(f) !== base.get(f))) return json({ message: "Pull Request is not mergeable" }, 405);
+    r.files ??= new Map();
+    for (const f of files) {
+      if (head.has(f)) r.files.set(f, head.get(f)!);
+      else r.files.delete(f);
+    }
+    r.head = sha(`${r.head}merge${pr.number}`);
+    this.wrote(r, "pr_merge");
+    Object.assign(pr, { state: "closed", merged: String(body.merge_method ?? "merge") });
+    return json({ sha: r.head, merged: true, message: "Pull Request successfully merged" });
   }
 
   completeRun(full: string, o: { note?: boolean } = {}): FakeRun {
@@ -167,11 +229,18 @@ export class FakeHub {
   }
 
   private repoRoute(r: FakeRepo, full: string, method: string, rest: string, q: URLSearchParams, body: Record<string, unknown>): Response {
-    if (rest === "") return json({ id: r.id, private: r.private, description: r.description, html_url: `https://github.com/${full}`, default_branch: "main" });
+    if (rest === "") return json({ id: r.id, private: r.private, description: r.description, html_url: `https://github.com/${full}`, default_branch: "main", allow_merge_commit: r.allowMerge, allow_squash_merge: true, allow_rebase_merge: true });
     if (rest === "/installation") return this.installation?.repos.some((x) => x.toLowerCase() === full.toLowerCase()) ? json({ id: this.installation.id }) : json({}, 404);
     if (rest === "/git/ref/heads/main") return r.files ? json({ object: { sha: r.head } }) : json({}, 409);
     const headRef = /^\/git\/ref\/heads\/(.+)$/.exec(rest);
-    if (headRef) return r.branches.has(decodeURIComponent(headRef[1]!)) ? json({ object: { sha: sha(`${full}${headRef[1]}`) } }) : json({}, 404);
+    const dropRef = method === "DELETE" ? /^\/git\/refs\/heads\/(.+)$/.exec(rest) : null;
+    if (dropRef) {
+      const branch = decodeURIComponent(dropRef[1]!);
+      if (!r.branches.delete(branch)) return json({ message: "Reference does not exist" }, 422);
+      r.bases.delete(branch);
+      return json({}, 204);
+    }
+    if (headRef) return r.branches.has(decodeURIComponent(headRef[1]!)) ? json({ object: { sha: this.branchHead(full, decodeURIComponent(headRef[1]!)) } }) : json({}, 404);
     const tagRef = /^\/git\/ref\/tags\/(.+)$/.exec(rest);
     if (tagRef) {
       const tag = decodeURIComponent(tagRef[1]!);
@@ -198,6 +267,7 @@ export class FakeHub {
     if (rest === "/git/commits" && method === "POST") return json({ sha: sha(`${r.head}${Math.random()}`) }, 201);
     if (rest === "/git/refs/heads/main" && method === "PATCH") {
       r.head = String(body.sha);
+      this.wrote(r, "push");
       return json({});
     }
     if (rest === "/git/refs" && method === "POST") {
@@ -212,9 +282,24 @@ export class FakeHub {
       const branch = ref.slice("refs/heads/".length);
       if (r.branches.has(branch)) return json({ message: "Reference already exists" }, 422);
       r.branches.set(branch, new Map(r.files ?? []));
+      r.bases.set(branch, new Map(r.files ?? []));
       return json({ ref, object: { sha: body.sha } }, 201);
     }
-    if (rest === "/activity") return json([{ after: r.head }]);
+    if (rest === "/activity") {
+      if (!r.history) return json([{ after: r.head }]);
+      const who = q.get("actor")?.toLowerCase();
+      const list = r.history.activity.filter((a) => !who || a.actor.toLowerCase() === who).slice(0, Number(q.get("per_page") ?? 30));
+      return json(list.map((a) => ({ before: "", after: a.after, ref: "refs/heads/main", activity_type: a.type, actor: { login: a.actor, type: "User" } })));
+    }
+    const cmp = /^\/compare\/([0-9a-f]+)\.\.\.([0-9a-f]+)$/.exec(rest);
+    if (cmp && r.history) {
+      const at = (x: string) => r.history!.commits.findIndex((c) => c.sha === x);
+      const [i, j] = [at(cmp[1]!), at(cmp[2]!)];
+      if (i < 0 || j < 0) return json({ message: "Not Found" }, 404);
+      if (i >= j) return json({ status: i === j ? "identical" : "behind", files: [] });
+      const [a, b] = [r.history.commits[i]!.files, r.history.commits[j]!.files];
+      return json({ status: "ahead", files: [...new Set([...a.keys(), ...b.keys()])].filter((f) => a.get(f) !== b.get(f)).map((filename) => ({ filename })) });
+    }
     if (rest.startsWith("/compare/")) return json({ status: "identical", files: [] });
     const content = /^\/contents\/(.+)$/.exec(rest);
     if (content) {
@@ -222,15 +307,18 @@ export class FakeHub {
       if (method === "PUT") {
         if (body.branch && body.branch !== "main") {
           r.branches.get(String(body.branch))?.set(path, Buffer.from(String(body.content), "base64").toString("utf8"));
-          return json({}, 201);
+          return json({ commit: { sha: this.branchHead(full, String(body.branch)) } }, 201);
         }
         r.files ??= new Map();
         r.files.set(path, Buffer.from(String(body.content), "base64").toString("utf8"));
         r.head = sha(`${r.head}${path}`);
-        return json({}, 201);
+        this.wrote(r, "push");
+        return json({ commit: { sha: r.head } }, 201);
       }
       const ref = q.get("ref");
-      const files = (ref && r.branches.get(ref)) || (r.files ?? new Map<string, string>());
+      const atBranch = ref ? [...r.branches.keys()].find((b) => this.branchHead(full, b) === ref) : undefined;
+      const atCommit = ref ? r.history?.commits.findLast((c) => c.sha === ref)?.files : undefined;
+      const files = (ref && (r.branches.get(ref) ?? (atBranch !== undefined ? r.branches.get(atBranch) : atCommit))) || (r.files ?? new Map<string, string>());
       if (files.has(path)) return json({ content: Buffer.from(files.get(path)!).toString("base64"), sha: sha(files.get(path)!) });
       const dir = [...files.keys()].filter((f) => f.startsWith(`${path}/`) && !f.slice(path.length + 1).includes("/"));
       if (dir.length) return json(dir.map((f) => ({ name: f.slice(path.length + 1), type: "file" })));
@@ -291,7 +379,17 @@ export class FakeHub {
       r.pulls.push(pr);
       return json(pr, 201);
     }
-    if (rest === "/pulls") return json(r.pulls.filter((x) => !q.get("head") || q.get("head")!.endsWith(`:${x.head}`)).map((x) => ({ ...x, head: { ref: x.head } })));
+    if (rest === "/pulls") return json(r.pulls.filter((x) => (q.get("state") !== "open" || (x.state ?? "open") === "open") && (!q.get("head") || q.get("head")!.endsWith(`:${x.head}`))).map((x) => this.pullView(r, full, x)));
+    const pull = /^\/pulls\/(\d+)(\/files|\/merge)?$/.exec(rest);
+    if (pull) {
+      const pr = r.pulls.find((x) => x.number === Number(pull[1]));
+      if (!pr) return json({ message: "Not Found" }, 404);
+      if (pull[2] === "/merge" && method === "PUT") return this.merge(r, full, pr, body);
+      if (pull[2] !== "/files") return json(this.pullView(r, full, pr));
+      const base = r.bases.get(pr.head);
+      const head = r.branches.get(pr.head);
+      return json(this.changedIn(r, pr.head).map((filename) => ({ filename, status: !base?.has(filename) ? "added" : head?.has(filename) ? "modified" : "removed" })));
+    }
     if (rest === "/issues") return json(r.issues);
     if (rest === "/keys") return json(r.keys);
     if (rest.startsWith("/collaborators")) return json([]);

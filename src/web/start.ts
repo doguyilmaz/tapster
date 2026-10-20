@@ -7,6 +7,7 @@ import { verifyNotary } from "../cli/apple";
 import { requireStore } from "../cli/keystore";
 import { currentRepo, userGitHub } from "../cli/gh";
 import { hubRoutes, appCallback } from "./api/hub";
+import { entryRoutes } from "./api/entry";
 import { projectRoutes } from "./api/projects";
 import { statusRoutes } from "./api/status";
 import type { SessionView } from "./contract";
@@ -36,6 +37,7 @@ export function routes(s: Session, quit: () => void): Routes {
     ...hubRoutes,
     ...projectRoutes,
     ...statusRoutes,
+    ...entryRoutes,
     "GET /api/session": async (): Promise<SessionView> => {
       const repo = await currentRepo(s.deps.cwd).catch(() => null);
       const tap = repo !== null && /\/homebrew-/.test(repo);

@@ -306,15 +306,17 @@ export function addOptions(args: string[]): AddOptions {
   return opts;
 }
 
-async function writeTemplate(dir: string, file: string, text: string, force: boolean): Promise<string> {
+export type Write = (rel: string, content: string) => Promise<void>;
+
+async function writeTemplate(dir: string, file: string, text: string, force: boolean, write: Write): Promise<string> {
   const flow = join(dir, ".github/workflows", file);
   if (existsSync(flow) && !force) {
     const ringed = addRingStep(mustRead(flow, `.github/workflows/${file}`));
     if (ringed === null) throw new TapsterError(`.github/workflows/${file} already exists`, "Move it aside and run tapster add again. To replace it, run tapster add --force.");
-    await writeInside(dir, `.github/workflows/${file}`, ringed);
+    await write(`.github/workflows/${file}`, ringed);
     return `- kept .github/workflows/${file}; it rings the hub after opening the draft`;
   }
-  await writeInside(dir, `.github/workflows/${file}`, text);
+  await write(`.github/workflows/${file}`, text);
   return `- wrote .github/workflows/${file} (build, attest, draft, ring the hub)`;
 }
 
@@ -344,13 +346,13 @@ export async function homebrewFromHistory(dir: string): Promise<string | null> {
 
 type Prepared = { kind: "go" | "bun" | "app"; entry: string | null; reason: string | null; notes: string[]; goreleaser: string | null; original?: string | null; bin?: string | null; files: string[] };
 
-export async function prepare(dir: string, repo: string, name: string, opts: AddOptions, mac = true): Promise<Prepared> {
+export async function prepare(dir: string, repo: string, name: string, opts: AddOptions, mac = true, write: Write = (rel, content) => writeInside(dir, rel, content)): Promise<Prepared> {
   const app = findApp(dir);
   if (app && !mac) throw new TapsterError("the hub has no Apple credentials, which a Mac app needs", "Run tapster init --rotate certificate and tapster init --rotate notary in the hub clone, then tapster add again.");
   if (app) {
     const build = app.build ?? `echo "Set the build command in .github/workflows/release.yml" && exit 1`;
     const appPath = app.appPath ?? `build/${app.name}.app`;
-    const notes = [await writeTemplate(dir, "release.yml", appWorkflow({ build, appPath, runner: "macos-15", carry: [] }, pinsJson), opts.force)];
+    const notes = [await writeTemplate(dir, "release.yml", appWorkflow({ build, appPath, runner: "macos-15", carry: [] }, pinsJson), opts.force, write)];
     if (!app.build || !app.appPath) notes.push("- set the build command and the app path in that file; the build must sign the app ad hoc");
     notes.push("- the app must set SURequireSignedFeed and SUVerifyUpdateBeforeExtraction to true and stamp both version keys with the tag");
     notes.push(`- store the Sparkle key in the hub with tapster init --sparkle ${name.replace(/[^a-z0-9]/g, "")} (add --new to create one)`);
@@ -360,11 +362,11 @@ export async function prepare(dir: string, repo: string, name: string, opts: Add
   if (goreleaser && existsSync(join(dir, "go.mod"))) {
     const original = mustRead(join(dir, goreleaser), goreleaser);
     const g = adaptGoreleaser(original);
-    await writeInside(dir, goreleaser, g.text);
+    await write(goreleaser, g.text);
     const flowPath = join(dir, ".github/workflows", opts.workflow);
     if (!existsSync(flowPath)) throw new TapsterError(`no .github/workflows/${opts.workflow} found`, "Name the workflow that runs GoReleaser with --workflow.");
     const w = adaptReleaseWorkflow(mustRead(flowPath, `.github/workflows/${opts.workflow}`), pinsJson["actions/attest-build-provenance"].sha, pinsJson["actions/attest-build-provenance"].tag);
-    await writeInside(dir, `.github/workflows/${opts.workflow}`, w.text);
+    await write(`.github/workflows/${opts.workflow}`, w.text);
     const homebrew = hasHomebrew(original) ? original : await homebrewFromHistory(dir);
     return { kind: "go", entry: null, reason: null, notes: [...g.notes, ...w.notes].map((n) => `- ${n}`), goreleaser: g.text, original: homebrew ?? original, files: [goreleaser, `.github/workflows/${opts.workflow}`] };
   }
@@ -378,7 +380,7 @@ export async function prepare(dir: string, repo: string, name: string, opts: Add
     }
     const found = binName(manifest as Parameters<typeof binName>[0], name);
     if (!found) throw new TapsterError("package.json has no bin entry", "Add the CLI entry file to bin in package.json.");
-    const note = await writeTemplate(dir, "release.yml", bunWorkflow(found.bin, found.entry, pinsJson, mac), opts.force);
+    const note = await writeTemplate(dir, "release.yml", bunWorkflow(found.bin, found.entry, pinsJson, mac), opts.force, write);
     const own = note.startsWith("- kept");
     return { kind: "bun", entry: own ? null : bunEntry(name, repo, found.bin), reason: null, notes: [note], goreleaser: null, bin: own ? found.bin : null, files: [".github/workflows/release.yml"] };
   }
@@ -438,7 +440,7 @@ async function latestDraftOrRelease(gh: GitHub, repo: string): Promise<{ assets:
   return r ? { assets: r.assets.map((a) => a.name), version: r.tag_name.slice(1) } : null;
 }
 
-export type Added = { pr: string | null; entry: string | null; installUrl: string; files: string[]; kind: Prepared["kind"] };
+export type Added = { pr: string | null; head: string | null; entry: string | null; installUrl: string; files: string[]; kind: Prepared["kind"] };
 
 export async function addProject(gh: GitHub, dir: string, repo: string, hub: string, facts: { slug: string; apple: boolean }, opts: AddOptions, say: (line: string) => void): Promise<Added> {
   const name = projectName(repo);
@@ -470,6 +472,7 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
     if (prepared.kind === "go" || prepared.bin) say(`  Remove the macOS builds from ${prepared.kind === "go" ? "the GoReleaser builds (goos: darwin)" : ".github/workflows/release.yml"} too: the hub refuses macOS code it cannot sign.`);
   }
   let pr = existing?.pr ?? null;
+  let head: string | null = null;
   if (entry) {
     entry = entryExtras(entry, { kind: prepared.kind, workflow: opts.workflow, dependabot: opts.dependabot });
     const cask = goreleaserCask(prepared.original ?? null, { mac: apple, bundleId: (app) => bundleIdIn(dir, app) });
@@ -486,7 +489,7 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
     if (cask.carried.length) say(`- carried the ${cask.carried.join(", ")} of GoReleaser's Homebrew section into the hub entry`);
     for (const n of cask.notes) say(`- ${n}`);
     try {
-      pr = await proposeEntry(gh, hub, name, repo, entry);
+      ({ url: pr, head } = await proposeEntry(gh, hub, name, repo, entry));
       say(`- proposed the hub entry in ${pr}; merge it to start publishing`);
     } catch (e) {
       if (!(e instanceof TapsterError)) throw e;
@@ -503,7 +506,7 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
   if (secrets.length) say(`- ${repo} still holds release secrets that the hub replaces: ${secrets.join(", ")}. Delete them once the hub has published a release: gh secret delete <name> --repo ${repo}`);
   const installUrl = await appInstallUrl(gh, slug, repo);
   say(installSentence(repo, installUrl));
-  return { pr, entry, installUrl, files: prepared.files, kind: prepared.kind };
+  return { pr, head, entry, installUrl, files: prepared.files, kind: prepared.kind };
 }
 
 export const projectName = (repo: string) => repo.split("/")[1]!.toLowerCase().replace(/[^a-z0-9-]/g, "-");

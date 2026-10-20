@@ -1,11 +1,12 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { AddView, DiffView, InspectView, Problem as ProblemView, ProjectStatus } from "../contract";
+import type { AddOptionsView, AddView, DiffView, InspectView, Problem as ProblemView, ProjectStatus } from "../contract";
+import { type OneGo, addInOneGo, oneGoRefusal } from "../oneclick";
 import type { ProjectStepId } from "../status";
 import { changedOnly, lineDiff, notes } from "../steps";
 import { post } from "./api";
-import { loadClones, loadHub, problemOf, say, statuses, statusOf, tilde } from "./state";
-import { KIND, StatusCard } from "./status";
+import { loadClones, loadHub, problemOf, recall, remember, say, statuses, statusOf, tilde } from "./state";
+import { KIND, Mark, StatusCard } from "./status";
 import { Badge, Busy, Cmd, Icon, Note, Problem, Spinner } from "./ui";
 
 export type SheetTarget = { repo: string; path: string | null; others: string[]; listed: boolean };
@@ -191,25 +192,44 @@ function Changes({ repo, path, files, ahead }: { repo: string; path: string; fil
   );
 }
 
-function AddForm({ info, hubName, status, onAdded, onCancel }: { info: InspectView; hubName: string; status: ProjectStatus | null; onAdded: (a: AddView) => void; onCancel: (() => void) | null }) {
+const ONE_GO = "tapster.oneGo";
+
+function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: InspectView; hubName: string; status: ProjectStatus | null; onAdded: (a: AddView) => void; onOneGo: (o: AddOptionsView) => void; onCancel: (() => void) | null }) {
   const [workflow, setWorkflow] = useState(info.workflow ?? "release.yml");
   const [autoTag, setAutoTag] = useState(status?.release.autoTag ?? false);
   const [dependabot, setDependabot] = useState(info.dependabot);
   const [force, setForce] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [oneGo, setOneGo] = useState(recall(ONE_GO) === "1");
+  const [preview, setPreview] = useState<DiffView | null>(null);
+  const [busy, setBusy] = useState<"add" | "preview" | null>(null);
   const [problem, setProblem] = useState<ProblemView | null>(null);
   const noWorkflow = info.kind === "go" && info.workflows.length === 0;
-  const add = async () => {
-    setBusy(true);
+  const options = { workflow, autoTag, dependabot, force };
+  const offered = !status || status.entry.state === "missing";
+  const refusal = offered && oneGo ? oneGoRefusal(info) : null;
+  const inOneGo = offered && oneGo && !refusal;
+  useEffect(() => setPreview(null), [workflow, autoTag, dependabot, force]);
+  const act = async (what: "add" | "preview", f: () => Promise<void>) => {
+    setBusy(what);
     setProblem(null);
     try {
-      onAdded(await post<AddView>("/api/projects/add", { hub: hubName, path: info.path, options: { workflow, autoTag, dependabot, force } }));
-      void loadHub();
+      await f();
     } catch (e) {
       setProblem(problemOf(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
+  };
+  const add = () => {
+    if (inOneGo) return onOneGo(options);
+    return act("add", async () => {
+      onAdded(await post<AddView>("/api/projects/add", { hub: hubName, path: info.path, options }));
+      void loadHub();
+    });
+  };
+  const toggle = (on: boolean) => {
+    setOneGo(on);
+    remember(ONE_GO, on ? "1" : null);
   };
   return (
     <>
@@ -277,7 +297,7 @@ function AddForm({ info, hubName, status, onAdded, onCancel }: { info: InspectVi
         <ul class="checks">
           <li>
             <Icon name="right" />
-            <span>{info.kind === "go" ? `Edits .goreleaser.yaml and .github/workflows/${workflow}: drafts instead of releases, an attestation step and the step that rings the hub.` : "Writes .github/workflows/release.yml: build, attest, open a draft and ring the hub."} You review and commit these in the next step.</span>
+            <span>{info.kind === "go" ? `Edits .goreleaser.yaml and .github/workflows/${workflow}: drafts instead of releases, an attestation step and the step that rings the hub.` : "Writes .github/workflows/release.yml: build, attest, open a draft and ring the hub."}{inOneGo ? "" : " You review and commit these in the next step."}</span>
           </li>
           <li>
             <Icon name="right" />
@@ -293,13 +313,36 @@ function AddForm({ info, hubName, status, onAdded, onCancel }: { info: InspectVi
               <span>Adds the deploy key "tapster tags" and a release environment.</span>
             </li>
           )}
+          {inOneGo && (
+            <li>
+              <Icon name="right" />
+              <span>Commits only its own files, pushes {info.defaultBranch} and merges the hub entry with your GitHub sign-in. It stops at the first step that fails.</span>
+            </li>
+          )}
         </ul>
       </div>
+      {offered && (
+        <Switch checked={oneGo} onChange={toggle} title="Add, commit, push and merge in one go">
+          Off by default. This browser remembers your choice. Check the changes first if you want to see them before anything happens.
+        </Switch>
+      )}
+      {refusal && (
+        <Note tone="warn" title="Not in one go for this clone">
+          <span>{refusal} Add then runs step by step.</span>
+        </Note>
+      )}
+      {inOneGo && preview && <Diff view={preview} />}
       <Problem problem={problem} />
       <div class="row">
-        <Busy busy={busy} class="btn primary" onClick={add} disabled={noWorkflow}>
-          {status ? "Update the project" : `Add to ${hubName}`}
+        <Busy busy={busy === "add"} class="btn primary" onClick={add} disabled={noWorkflow || busy !== null}>
+          {inOneGo ? "Add, commit, push and merge" : status ? "Update the project" : `Add to ${hubName}`}
         </Busy>
+        {inOneGo && !preview && (
+          <Busy busy={busy === "preview"} class="btn secondary" disabled={noWorkflow || busy !== null} onClick={() => act("preview", async () => setPreview(await post<DiffView>("/api/projects/preview", { hub: hubName, path: info.path, options })))}>
+            <Icon name="eye" />
+            Check the changes first
+          </Busy>
+        )}
         {onCancel && (
           <button type="button" class="btn quiet" onClick={onCancel}>
             Cancel
@@ -307,6 +350,29 @@ function AddForm({ info, hubName, status, onAdded, onCancel }: { info: InspectVi
         )}
       </div>
     </>
+  );
+}
+
+function RunSteps({ run }: { run: OneGo }) {
+  const stopped = run.steps.find((x) => x.state === "attention");
+  return (
+    <section class="stack tight" aria-labelledby="one-go">
+      <h3 id="one-go" class="section-title">
+        In one go
+      </h3>
+      <ol class="checks" aria-live="polite">
+        {run.steps.map((x) => (
+          <li key={x.id}>
+            <Mark state={x.state} />
+            <span class="stack tight" style="gap: 0.3rem; flex: 1; min-width: 0">
+              <span>{x.label}</span>
+              {x.problem && <Problem problem={x.problem} />}
+            </span>
+          </li>
+        ))}
+      </ol>
+      {stopped && <p class="muted small">tapster stopped there and did nothing after it. The steps below finish it by hand.</p>}
+    </section>
   );
 }
 
@@ -338,6 +404,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
   const [problem, setProblem] = useState<ProblemView | null>(null);
   const [editing, setEditing] = useState(false);
   const [added, setAdded] = useState<AddView | null>(null);
+  const [run, setRun] = useState<OneGo | null>(null);
   const inspect = (dir: string) => post<InspectView>("/api/projects/inspect", { hub: hubName, path: dir }).then(setInfo, (e) => setProblem(problemOf(e)));
   useEffect(() => {
     setInfo(null);
@@ -355,6 +422,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
     setPath(p);
     setEditing(false);
     setAdded(null);
+    setRun(null);
   };
   const onAdded = (a: AddView) => {
     setAdded(a);
@@ -363,11 +431,23 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
     void loadClones().catch(() => undefined);
     void statusOf(target.repo).then(setStatus, (e) => setProblem(problemOf(e)));
   };
+  const oneGo = async (options: AddOptionsView) => {
+    if (!info) return;
+    setEditing(false);
+    const done = await addInOneGo(post, { hub: hubName, info, options }, (r) => {
+      setRun(r);
+      if (r.added) setAdded(r.added);
+    });
+    if (done.added) onAdded(done.added);
+    void loadHub();
+    if (done.done) say("ok", `Added ${target.repo} and merged its hub entry.`);
+  };
+  const running = run !== null && run.steps.some((x) => x.state === "wait");
   const addFixes = status !== null && (status.entry.state === "missing" || (!status.protection.ok && !status.protection.off) || (!status.setup.ok && (!info || !info.ready)));
   const fix = (id: ProjectStepId): ComponentChildren => {
     if (!path) return id === "setup" || addFixes ? <span class="muted small">No clone of it turned up on this computer. Add its folder in Projects or run tapster add in a clone.</span> : null;
     if (id !== "setup" || !info) return null;
-    if (added?.files.length) return <span class="muted small">Commit and push the changes above{info.branch === info.defaultBranch ? "" : `, then merge them into ${info.defaultBranch}`}. Then click Refresh.</span>;
+    if (added?.files.length && !run?.done) return <span class="muted small">Commit and push the changes above{info.branch === info.defaultBranch ? "" : `, then merge them into ${info.defaultBranch}`}. Then click Refresh.</span>;
     if (!info.ready) return <span class="muted small">The clone does not have tapster's release files yet. Update the project below.</span>;
     if (info.dirty.length) {
       return (
@@ -397,11 +477,12 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
       )}
       <Problem problem={problem} />
       {path && others.length > 0 && !added && <OtherClones path={path} others={others} onPick={pick} />}
+      {run && <RunSteps run={run} />}
       {waiting ? (
         <p class="row muted" role="status">
           <Spinner /> Reading where {target.repo} stands
         </p>
-      ) : added ? (
+      ) : running && !added ? null : added ? (
         <>
           <Note tone="ok" title={`tapster prepared ${target.repo}`} />
           <ul class="checks small">
@@ -421,11 +502,13 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
               </li>
             ))}
           </ul>
-          <section class="stack tight">
-            <h3 class="section-title">Review and commit the changes</h3>
-            <Changes repo={target.repo} path={path!} files={added.files} ahead={info?.ahead ?? null} />
-          </section>
-          {card ?? <Spinner label="Reading the project's status" />}
+          {!running && !run?.done && (
+            <section class="stack tight">
+              <h3 class="section-title">Review and commit the changes</h3>
+              <Changes repo={target.repo} path={path!} files={added.files} ahead={info?.ahead ?? null} />
+            </section>
+          )}
+          {!running && (card ?? <Spinner label="Reading the project's status" />)}
         </>
       ) : status && !editing ? (
         <>
@@ -442,7 +525,19 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
           {addFixes && !path && <Cmd text="bunx @doguyilmaz/tapster add" />}
         </>
       ) : (
-        info && <AddForm info={info} hubName={hubName} status={status} onAdded={onAdded} onCancel={status ? () => setEditing(false) : null} />
+        info && (
+          <AddForm
+            info={info}
+            hubName={hubName}
+            status={status}
+            onAdded={(a) => {
+              setRun(null);
+              onAdded(a);
+            }}
+            onOneGo={(o) => void oneGo(o)}
+            onCancel={status ? () => setEditing(false) : null}
+          />
+        )
       )}
     </Frame>
   );

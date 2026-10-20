@@ -70,7 +70,7 @@ export type InspectView = {
 
 export type AddOptionsView = { workflow: string; autoTag: boolean; dependabot: boolean; force: boolean };
 
-export type AddView = { lines: string[]; pr: string | null; entry: string | null; installUrl: string; files: string[] };
+export type AddView = { lines: string[]; pr: string | null; head: string | null; entry: string | null; installUrl: string; files: string[] };
 
 export type DiffView = { files: { path: string; before: string | null; after: string | null; change: "create" | "update" | "same" | "remove" }[] };
 
@@ -94,7 +94,7 @@ export type ProjectStatus = {
   defaultBranch: string;
   setup: { ok: boolean; problems: string[] };
   protection: { ok: boolean; off: boolean; problems: string[] };
-  entry: { state: "merged" | "proposed" | "missing"; pr: string | null };
+  entry: { state: "merged" | "proposed" | "missing"; pr: string | null; proposal: { head: string; entry: string } | null; blocked: string | null };
   app: ReachView & { installUrl: string };
   release: {
     latest: { tag: string; url: string; byHub: boolean } | null;

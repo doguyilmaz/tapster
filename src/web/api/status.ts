@@ -11,6 +11,7 @@ import { type HubEntry, type TagRef, hubEntries, hubFacts, installLink, releaseS
 import type { CommitView, FollowView, ProjectStatus, StatusView } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
 import { highestTag, nextTag, tagProblem } from "../status";
+import { proposal } from "./entry";
 import { checkHub, hubRunList, me, startHubRun } from "./hub";
 import { type HubChecks, hubChecks, reachOf, reachRoutes, stateOf } from "./reach";
 
@@ -74,7 +75,7 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
   const project = await gh.getRepo(e.repo);
   const branch = project.default_branch;
   const read = (path: string) => readHubFile(gh, e.repo, path, encodeURIComponent(branch));
-  const [goreleaser, workflow, problems, keys, releases, refs, head, secrets] = await Promise.all([
+  const [goreleaser, workflow, problems, keys, releases, refs, head, secrets, proposed] = await Promise.all([
     e.kind === "go" ? read(".goreleaser.yaml").then((t) => t ?? read(".goreleaser.yml")) : Promise.resolve(null),
     read(`.github/workflows/${e.workflow}`),
     e.protection === "off" ? Promise.resolve([]) : protectionProblems(gh, e.repo, branch, "admin", e.protection === "dependabot").catch(() => ["GitHub did not show the repository's rulesets"]),
@@ -83,6 +84,12 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
     tagRefs(gh, e.repo).catch(() => [] as TagRef[]),
     headOf(gh, e.repo, branch),
     gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${e.repo}/actions/secrets?per_page=100`).then((r) => releaseSecrets(r.secrets.map((x) => x.name)), () => []),
+    e.state === "proposed"
+      ? proposal(gh, sh.hub, e.name).then(
+          (p) => ({ proposal: { head: p.head, entry: p.entry }, blocked: null }),
+          (err) => (err instanceof TapsterError ? { proposal: null, blocked: `${err.reason}. ${err.fix}` } : Promise.reject(err)),
+        )
+      : Promise.resolve({ proposal: null, blocked: null }),
   ]);
   const published = sh.state.packages[e.name] ?? [];
   const latest = newest(releases.filter((r) => !r.draft));
@@ -98,7 +105,7 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
     defaultBranch: branch,
     setup: { ok: setup.length === 0, problems: setup },
     protection: { ok: problems.length === 0, off: e.protection === "off", problems },
-    entry: { state: e.state, pr: e.pr },
+    entry: { state: e.state, pr: e.pr, ...proposed },
     app: { ...reachOf(sh.checks, e.name, e.repo, sh.state), installUrl: sh.slug ? installLink(sh.slug, sh.ownerId, project.id) : "" },
     release: {
       latest: latest ? { tag: latest.tag_name, url: latest.html_url, byHub: published.some((p) => p.tag === latest.tag_name && p.status === "published") } : null,
@@ -129,7 +136,7 @@ async function statusOrReason(sh: Shared, e: Listed): Promise<ProjectStatus> {
       defaultBranch: "main",
       setup: { ok: false, problems: [] },
       protection: { ok: false, off: false, problems: [] },
-      entry: { state: e.state, pr: e.pr },
+      entry: { state: e.state, pr: e.pr, proposal: null, blocked: null },
       app: { reaches: null, how: null, at: null, since: null, reason: null, run: null, running: false, installUrl: "" },
       release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, atHead: null, head: null },
       secrets: { names: [], published: false },
