@@ -37,10 +37,14 @@ test("the app gets its own entitlements, not the tool's", () => {
 
 const withLinux = (asset = "ebb_{version}_linux_amd64.tar.gz") => ebb.replace('_darwin_universal.tar.gz"', `_darwin_universal.tar.gz"\n      linux-amd64: "${asset}"`);
 
+const helperHook = (text: string) => text.replace("binaries: [Contents/MacOS/ebb]", "binaries: [Contents/MacOS/ebb, Contents/Resources/ebb-helper]").replace("binary: ebb,", "binary: ebb-helper,");
+
 test("a tool with an app may also ship Linux archives, which keep the bare binary", () => {
   const p = parseConfig(withLinux(), "o").packages[0] as CliPackage;
   expect(p.app!.name).toBe("ebb.app");
   expect(Object.keys(p.assets)).toEqual(["darwin-universal", "linux-amd64"]);
+  expect(p.cask.postflight!.binary).toBe("ebb");
+  expect((parseConfig(helperHook(ebb), "o").packages[0] as CliPackage).cask.postflight!.binary).toBe("ebb-helper");
 });
 
 test.each([
@@ -49,6 +53,7 @@ test.each([
   ["an app named in a Linux asset", withLinux("ebb.app_{version}_linux_amd64.tar.gz"), /linux-amd64 asset names ebb.app/],
   ["a Linux archive beside an app that is not a .tar.gz", withLinux("ebb_{version}_linux_amd64.zip"), /linux-amd64 asset must be a .tar.gz/],
   ["a binary inside the app beside a Linux archive", withLinux().replace("binaries: [ebb]", "binaries: [ebb, ebb.app/Contents/MacOS/ebb]"), /inside ebb.app/],
+  ["a hook beside a Linux archive that runs a command only the app links", helperHook(withLinux()), /ebb-helper, which the cask does not link on Linux/],
   ["a binary inside the app", ebb.replace("binaries: [ebb]", "binaries: [ebb, ebb.app/Contents/MacOS/ebb]"), /inside ebb.app/],
   ["a binary named like the app", ebb.replace("binaries: [ebb]", "binaries: [ebb.app]"), /inside ebb.app/],
   ["an app name that is not an .app", ebb.replace("name: ebb.app", "name: ebb"), /app.name/],

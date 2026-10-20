@@ -142,6 +142,10 @@ function checkPackage(p: PackageConfig, top: Omit<HubConfig, "packages">, hubOwn
   if (post && !linked(p).includes(post.binary)) {
     throw new TapsterError(`${p.name}: cask.postflight runs ${post.binary}, which the cask does not link`, `Name one of the commands the cask links: ${linked(p).join(", ") || "none yet"}.`);
   }
+  const linuxNames = !isApp(p) && p.app && Object.keys(p.assets).some((k) => k.startsWith("linux")) ? p.binaries.map((b) => b.split("/").pop()!) : null;
+  if (post && linuxNames && !linuxNames.includes(post.binary)) {
+    throw new TapsterError(`${p.name}: cask.postflight runs ${post.binary}, which the cask does not link on Linux`, `Name one of binaries, which the cask links on macOS and Linux: ${linuxNames.join(", ")}.`);
+  }
   if (p.repo.split("/")[0]!.toLowerCase() !== hubOwner.toLowerCase()) {
     throw new TapsterError(`${p.name}: ${p.repo} is not owned by ${hubOwner}`, "tapster publishes only repositories of the hub's owner.");
   }
