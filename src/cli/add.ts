@@ -516,7 +516,8 @@ export async function add(args: string[]): Promise<void> {
   const facts = await hubFacts(gh, hub);
   await remember();
   await addProject(gh, dir, repo, hub, facts, opts, (line) => console.log(line));
-  console.log(`\nReview the changes with git diff, then commit and push them.\n${await releaseHint(gh, repo)}`);
+  const hint = await releaseHint(gh, repo).catch(() => "Once they are on the default branch, release from tapster setup, under Projects.");
+  console.log(`\nReview the changes with git diff, then commit and push them.\n${hint}`);
 }
 
 export async function releaseHint(gh: GitHub, repo: string): Promise<string> {
