@@ -128,7 +128,8 @@ Without a workflow you can push the branch yourself with the tag:
 
 1. Run `tapster add`, merge the hub's pull request and push the project's changes, as in
    [Add a project](/tutorial/project/).
-2. Push the next tag. GoReleaser opens a draft and the hub publishes it.
+2. Release the next version: in tapster setup, open the project under **Projects** and click **Release**. tapster tags
+   the latest commit of the default branch on GitHub. GoReleaser opens a draft and the hub publishes it.
 3. The hub writes `Casks/mytool.rb`. If GoReleaser wrote the cask to the same tap before, the hub's version replaces
    it. If GoReleaser wrote a formula (`brews`), delete `Formula/mytool.rb` from the tap: Homebrew installs a formula
    before a cask of the same name.

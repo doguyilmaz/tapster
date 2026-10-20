@@ -2,6 +2,9 @@ import { isSeq, parse, parseDocument } from "yaml";
 import { NAME, PLATFORMS, type Platform, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
+import { readHubFile } from "../hubcommit";
+import { TAG, compareSemver, parseTag } from "../semver";
+import { highestTag } from "../web/status";
 import { hubEnv } from "./gh";
 import { descProblems } from "../render";
 
@@ -232,13 +235,39 @@ export function entryExtras(entry: string, o: { kind: string; workflow: string; 
   return out;
 }
 
-export function descriptionNote(desc: string | null, name: string): { line?: string; add?: string } {
+export function descriptionNote(desc: string | null, name: string, existing = false): { line?: string; add?: string } {
   if (!desc) return { line: "- the repository has no description, which Homebrew needs; set one on GitHub or add description: to the hub entry before the first release" };
   const problems = descProblems(desc, name);
   if (!problems.length) return {};
   const better = suggestDescription(desc, name);
   if (!better) return { line: `- Homebrew would reject the repository's description (${problems.join(" and ")}); add description: to the hub entry before the first release` };
+  if (existing) return { line: `- Homebrew would reject the repository's description (${problems.join(" and ")}); add description: ${JSON.stringify(better)} to the hub entry before the next release` };
   return { line: `- Homebrew would reject the repository's description (${problems.join(" and ")}); the entry says "${better}" instead`, add: `    description: ${JSON.stringify(better)}` };
+}
+
+export type TagRef = { name: string; sha: string; type: string };
+
+export async function tagRefs(gh: GitHub, repo: string): Promise<TagRef[]> {
+  const refs = await gh.json<{ ref: string; object: { sha: string; type?: string } }[]>("GET", `/repos/${repo}/git/matching-refs/tags/v`);
+  return refs.map((r) => ({ name: r.ref.replace(/^refs\/tags\//, ""), sha: r.object.sha, type: r.object.type ?? "commit" }));
+}
+
+export async function repoTags(gh: GitHub, repo: string, strict = false): Promise<string[]> {
+  const soft = <T>(p: Promise<T>, empty: T) => (strict ? p : p.catch(() => empty));
+  const [refs, releases] = await Promise.all([soft(tagRefs(gh, repo), [] as TagRef[]), soft(gh.json<{ tag_name: string }[]>("GET", `/repos/${repo}/releases?per_page=100`), [])]);
+  return [...refs.map((r) => r.name), ...releases.map((r) => r.tag_name)];
+}
+
+export const tagCommit = async (gh: GitHub, repo: string, ref: Pick<TagRef, "sha" | "type">): Promise<string | null> =>
+  ref.type === "tag" ? gh.json<{ object: { sha: string } }>("GET", `/repos/${repo}/git/tags/${ref.sha}`).then((t) => t.object.sha, () => null) : ref.sha;
+
+export async function tagAt(gh: GitHub, repo: string, refs: TagRef[], sha: string): Promise<string | null> {
+  const versions = refs.filter((r) => TAG.test(r.name));
+  const direct = highestTag(versions.filter((r) => r.type === "commit" && r.sha === sha).map((r) => r.name));
+  if (direct) return direct;
+  const annotated = versions.filter((r) => r.type === "tag").sort((a, b) => compareSemver(parseTag(b.name)!, parseTag(a.name)!)).slice(0, 5);
+  for (const r of annotated) if ((await tagCommit(gh, repo, r)) === sha) return r.name;
+  return null;
 }
 
 export const releaseSecrets = (names: string[]) => names.filter((n) => /^(HOMEBREW_TAP_|MACOS_)/.test(n));
@@ -290,6 +319,49 @@ export async function proposeEntry(gh: GitHub, hub: string, name: string, repo: 
   const body = [`tapster add prepared this entry for ${repo}:`, "", "```yaml", entry, "```", "", `Merge it to let the hub publish ${repo}.`].join("\n");
   const pr = await gh.json<{ html_url: string }>("POST", `/repos/${hub}/pulls`, { title: `Add ${name}`, head: branch, base: "main", body });
   return pr.html_url;
+}
+
+export type HubEntry = { name: string; repo: string; kind: "go" | "bun" | "app"; workflow: string; protection: string; description: string | null; state: "merged" | "proposed"; pr: string | null };
+
+const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+
+export function entriesIn(text: string | null, owner: string): Omit<HubEntry, "state" | "pr">[] {
+  let doc: unknown = null;
+  try {
+    doc = text ? parse(text) : null;
+  } catch {
+    doc = null;
+  }
+  const list = (doc as { packages?: unknown } | null)?.packages;
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((p) => {
+    const o = (p && typeof p === "object" ? p : {}) as Record<string, unknown>;
+    if (typeof o.name !== "string" || !NAME.test(o.name) || typeof o.repo !== "string" || !REPO.test(o.repo)) return [];
+    if (o.repo.split("/")[0]!.toLowerCase() !== owner.toLowerCase()) return [];
+    return [
+      {
+        name: o.name,
+        repo: o.repo,
+        kind: o.kind === "bun" || o.kind === "app" ? o.kind : "go",
+        workflow: typeof o.workflow === "string" && /^[A-Za-z0-9._-]+\.ya?ml$/.test(o.workflow) ? o.workflow : "release.yml",
+        protection: o.protection === "off" || o.protection === "dependabot" ? o.protection : "on",
+        description: typeof o.description === "string" ? o.description : null,
+      },
+    ];
+  });
+}
+
+export async function hubEntries(gh: GitHub, hub: string): Promise<HubEntry[]> {
+  const owner = hub.split("/")[0]!;
+  const out: HubEntry[] = entriesIn(await readHubFile(gh, hub, "tapster.yml", "main"), owner).map((e) => ({ ...e, state: "merged", pr: null }));
+  const pulls = await gh.json<{ html_url: string; head: { ref: string } }[]>("GET", `/repos/${hub}/pulls?state=open&per_page=100`).catch(() => []);
+  for (const p of pulls) {
+    const name = /^tapster-add-([a-z0-9][a-z0-9-]*)$/.exec(p.head?.ref ?? "")?.[1];
+    if (!name || out.some((e) => e.name === name)) continue;
+    const found = entriesIn(await readHubFile(gh, hub, "tapster.yml", p.head.ref).catch(() => null), owner).find((e) => e.name === name);
+    if (found && !out.some((e) => e.repo.toLowerCase() === found.repo.toLowerCase())) out.push({ ...found, state: "proposed", pr: p.html_url });
+  }
+  return out;
 }
 
 export async function hubFacts(gh: GitHub, hub: string): Promise<{ slug: string; apple: boolean }> {

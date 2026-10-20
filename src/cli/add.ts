@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { isMap, isSeq, parse, parseDocument, type Scalar, YAMLMap } from "yaml";
 import { BUNDLE_ID } from "../config";
 import { GitHubError, TapsterError } from "../errors";
+import { readGit } from "../clone";
 import { run, runPath } from "../run";
 import type { GitHub } from "../github";
 import { parsePlist } from "../plist";
@@ -16,7 +17,8 @@ import appTemplate from "../../templates/project/app-release.yml" with { type: "
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
-import { YAML_OUT, appInstallUrl, autoTagSteps, goreleaserCask, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubFacts, hubName, installSentence, proposeEntry, releaseEntry, releaseSecrets, withoutMac } from "./hubpr";
+import { highestTag, nextTag, tagCommand } from "../web/status";
+import { YAML_OUT, appInstallUrl, autoTagSteps, goreleaserCask, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubEntries, hubFacts, hubName, installSentence, proposeEntry, releaseEntry, releaseSecrets, repoTags, withoutMac } from "./hubpr";
 import { ask } from "./prompt";
 import { mustRead, readRegular, readSmall, writeInside } from "./paths";
 
@@ -283,7 +285,7 @@ export async function protectProject(gh: GitHub, repo: string, deployKeys = fals
   const keptNote = kept.length ? ` It keeps what an earlier ${kept.join(" and ")} opened.` : "";
   if (done.status === "exists") return `- ${repo} is already protected: only an admin can create, move or delete its branches and tags.${keptNote}`;
   if (done.status === "created") {
-    return `- protected ${repo}: only you can create, move or delete branches and tags; workflows and Apps, the hub's included, cannot. Push release tags yourself; GitHub then notes "Bypassed rule violations", which is your admin right at work.${done.dependabot ? " Branches named dependabot/... stay open, so Dependabot can open pull requests; the hub accepts that only with protection: dependabot in its entry." : ""}${keptNote}`;
+    return `- protected ${repo}: only you can create, move or delete branches and tags; workflows and Apps, the hub's included, cannot. Release tags come from you; GitHub then notes "Bypassed rule violations", which is your admin right at work.${done.dependabot ? " Branches named dependabot/... stay open, so Dependabot can open pull requests; the hub accepts that only with protection: dependabot in its entry." : ""}${keptNote}`;
   }
   return `- GitHub does not enforce rulesets on ${repo} (private repositories need a paid plan for them). A stolen App key could tag code the hub would sign. Make it public or use a paid plan. To accept the risk, set protection: off for this package in the hub's tapster.yml; until then the hub refuses it.`;
 }
@@ -316,6 +318,30 @@ async function writeTemplate(dir: string, file: string, text: string, force: boo
   return `- wrote .github/workflows/${file} (build, attest, draft, ring the hub)`;
 }
 
+const hasHomebrew = (text: string) => {
+  try {
+    const cfg = parse(text) as { homebrew_casks?: unknown[]; brews?: unknown[] } | null;
+    return Boolean(cfg?.homebrew_casks?.[0] ?? cfg?.brews?.[0]);
+  } catch {
+    return false;
+  }
+};
+
+const quietGit = (dir: string, args: string[], maxOutput: number) => readGit(dir, args, { timeoutMs: 10_000, maxOutput }).catch(() => null);
+
+// rev-list and cat-file never run the clone's filters, textconv, hooks or fsmonitor; log -S/-G, diff and status can.
+export async function homebrewFromHistory(dir: string): Promise<string | null> {
+  const files = [".goreleaser.yaml", ".goreleaser.yml"];
+  const revs = await quietGit(dir, ["rev-list", "--max-count=50", "HEAD", "--", ...files], 1 << 16);
+  for (const sha of revs?.code === 0 ? revs.stdout.split("\n").filter((l) => /^[0-9a-f]{40,64}$/.test(l)) : []) {
+    for (const f of files) {
+      const blob = await quietGit(dir, ["cat-file", "blob", `${sha}:${f}`], 1 << 20);
+      if (blob?.code === 0 && hasHomebrew(blob.stdout)) return blob.stdout;
+    }
+  }
+  return null;
+}
+
 type Prepared = { kind: "go" | "bun" | "app"; entry: string | null; reason: string | null; notes: string[]; goreleaser: string | null; original?: string | null; bin?: string | null; files: string[] };
 
 export async function prepare(dir: string, repo: string, name: string, opts: AddOptions, mac = true): Promise<Prepared> {
@@ -339,7 +365,8 @@ export async function prepare(dir: string, repo: string, name: string, opts: Add
     if (!existsSync(flowPath)) throw new TapsterError(`no .github/workflows/${opts.workflow} found`, "Name the workflow that runs GoReleaser with --workflow.");
     const w = adaptReleaseWorkflow(mustRead(flowPath, `.github/workflows/${opts.workflow}`), pinsJson["actions/attest-build-provenance"].sha, pinsJson["actions/attest-build-provenance"].tag);
     await writeInside(dir, `.github/workflows/${opts.workflow}`, w.text);
-    return { kind: "go", entry: null, reason: null, notes: [...g.notes, ...w.notes].map((n) => `- ${n}`), goreleaser: g.text, original, files: [goreleaser, `.github/workflows/${opts.workflow}`] };
+    const homebrew = hasHomebrew(original) ? original : await homebrewFromHistory(dir);
+    return { kind: "go", entry: null, reason: null, notes: [...g.notes, ...w.notes].map((n) => `- ${n}`), goreleaser: g.text, original: homebrew ?? original, files: [goreleaser, `.github/workflows/${opts.workflow}`] };
   }
   if (existsSync(join(dir, "package.json")) && (existsSync(join(dir, "bun.lock")) || existsSync(join(dir, "bun.lockb")))) {
     let manifest: unknown;
@@ -359,7 +386,7 @@ export async function prepare(dir: string, repo: string, name: string, opts: Add
 }
 
 async function resolveHub(dir: string, flag: string | null): Promise<{ hub: string; remember: () => Promise<void> }> {
-  const saved = (await run("git", ["-C", dir, "config", "--get", "tapster.hub"], { allowFail: true })).stdout.trim();
+  const saved = (await readGit(dir, ["config", "--get", "tapster.hub"])).stdout.trim();
   const hub = flag ?? (saved ? hubName(saved) : hubName(await ask("Which hub publishes this project (owner/repo)? ")));
   return { hub, remember: async () => void (hub !== saved && (await run("git", ["-C", dir, "config", "tapster.hub", hub]))) };
 }
@@ -425,16 +452,24 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
     say("  To keep it, run tapster add --allow-dependabot. Branches named dependabot/... then stay open to anything with write access, the hub's App included, so a stolen App key could run your workflows on its own code there.");
   }
   if (opts.autoTag) say(await setupAutoTag(gh, repo, project.default_branch));
+  const existing = (await hubEntries(gh, hub)).find((e) => e.name === name || e.repo.toLowerCase() === repo.toLowerCase());
   let { entry, reason } = prepared;
-  if (prepared.kind === "go") ({ entry, reason } = goEntry(name, repo, prepared.goreleaser, await latestDraftOrRelease(gh, repo)));
-  if (prepared.kind === "bun" && prepared.bin) ({ entry, reason } = releaseEntry(name, repo, "bun", [prepared.bin], await latestDraftOrRelease(gh, repo)));
+  if (existing) {
+    entry = null;
+    say(existing.pr ? `- the hub entry for ${existing.name} waits in ${existing.pr}; merge it to start publishing` : `- ${hub} already has the entry for ${existing.name}; tapster leaves it as it is`);
+    if (!existing.description) {
+      const desc = descriptionNote(project.description, name, true);
+      if (desc.line) say(desc.line);
+    }
+  } else if (prepared.kind === "go") ({ entry, reason } = goEntry(name, repo, prepared.goreleaser, await latestDraftOrRelease(gh, repo)));
+  else if (prepared.kind === "bun" && prepared.bin) ({ entry, reason } = releaseEntry(name, repo, "bun", [prepared.bin], await latestDraftOrRelease(gh, repo)));
   if (entry && !apple) {
     entry = withoutMac(entry);
     if (entry) say("- the hub has no Apple credentials, so the entry leaves out the macOS builds");
     else reason = "the hub has no Apple credentials and the project builds only for macOS; run tapster init --rotate certificate and tapster init --rotate notary in the hub, then tapster add again";
     if (prepared.kind === "go" || prepared.bin) say(`  Remove the macOS builds from ${prepared.kind === "go" ? "the GoReleaser builds (goos: darwin)" : ".github/workflows/release.yml"} too: the hub refuses macOS code it cannot sign.`);
   }
-  let pr: string | null = null;
+  let pr = existing?.pr ?? null;
   if (entry) {
     entry = entryExtras(entry, { kind: prepared.kind, workflow: opts.workflow, dependabot: opts.dependabot });
     const cask = goreleaserCask(prepared.original ?? null, { mac: apple, bundleId: (app) => bundleIdIn(dir, app) });
@@ -458,7 +493,7 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
       say(`- the hub entry was not proposed: ${e.reason}. ${e.fix}\n  The entry for ${hub}'s tapster.yml:\n${entry}`);
       if (opts.dependabot && e.reason.includes("is already in")) say("  Its existing entry needs protection: dependabot, or the hub refuses the project.");
     }
-  } else say(`- no hub entry yet: ${reason}`);
+  } else if (!existing) say(`- no hub entry yet: ${reason}`);
   const bell = await hubDoorbell(gh, hub);
   if (bell) {
     await setRepoVariable(repo, "TAPSTER_DOORBELL", bell);
@@ -482,5 +517,17 @@ export async function add(args: string[]): Promise<void> {
   const facts = await hubFacts(gh, hub);
   await remember();
   await addProject(gh, dir, repo, hub, facts, opts, (line) => console.log(line));
-  console.log("\nReview the changes with git diff, commit and push them, then push a tag to release.");
+  const hint = await releaseHint(gh, repo).catch(() => "Once they are on the default branch, release from tapster setup, under Projects.");
+  console.log(`\nReview the changes with git diff, then commit and push them.\n${hint}`);
+}
+
+export async function releaseHint(gh: GitHub, repo: string): Promise<string> {
+  const keys = await gh.json<{ title: string }[]>("GET", `/repos/${repo}/keys`).catch(() => []);
+  if (keys.some((k) => k.title === "tapster tags")) return "Your release workflow tags each release by itself.";
+  const branch = (await gh.getRepo(repo)).default_branch;
+  const tag = nextTag(highestTag(await repoTags(gh, repo)));
+  const cmd = tagCommand(repo, tag, { branch });
+  return cmd
+    ? `Once they are on ${branch} and the hub entry is merged, release ${tag} by tagging the latest commit of ${branch} on GitHub:\n  ${cmd}`
+    : `Once they are on ${branch} and the hub entry is merged, release ${tag} from tapster setup, under Projects.`;
 }

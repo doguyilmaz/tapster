@@ -3,9 +3,10 @@ import { z } from "zod";
 import { TapsterError } from "./errors";
 import { descProblems } from "./render";
 
+export { TAG, compareSemver, parseTag, type Semver } from "./semver";
+
 export const PLATFORMS = ["darwin-universal", "darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", "windows-amd64", "windows-arm64"] as const;
 export type Platform = (typeof PLATFORMS)[number];
-export const TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*))?$/;
 export const NAME = /^[a-z0-9][a-z0-9-]*$/;
 export const ENTITLEMENTS = [
   "com.apple.security.cs.allow-jit",
@@ -129,7 +130,6 @@ export const isApp = (p: PackageConfig): p is AppPackage => p.kind === "app";
 export const linked = (p: PackageConfig) => (isApp(p) ? (p.cask.binaries ?? []) : [...p.binaries, ...(p.app?.binaries ?? [])]).map((b) => b.split("/").pop()!);
 export const macosCode = (p: PackageConfig) => isApp(p) || Object.keys(p.assets).some((k) => k.startsWith("darwin"));
 export type HubConfig = Omit<z.infer<typeof hub>, "packages"> & { packages: PackageConfig[] };
-export type Semver = { major: number; minor: number; patch: number; pre: string | null };
 
 export type InvalidPackage = { name: string; repo: string | null; reason: string; fix: string };
 
@@ -277,33 +277,6 @@ function checkApp(p: AppPackage): void {
       throw new TapsterError(`${p.name}: the identifier for ${path} is outside ${p.bundle_id}`, `Use an identifier that starts with ${p.bundle_id}.`);
     }
   }
-}
-
-export function parseTag(tag: string): Semver | null {
-  const m = TAG.exec(tag);
-  if (!m) return null;
-  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), pre: m[4] ?? null };
-}
-
-export function compareSemver(a: Semver, b: Semver): number {
-  for (const k of ["major", "minor", "patch"] as const) if (a[k] !== b[k]) return a[k] - b[k];
-  if (a.pre === b.pre) return 0;
-  if (a.pre === null) return 1;
-  if (b.pre === null) return -1;
-  const x = a.pre.split(".");
-  const y = b.pre.split(".");
-  for (let i = 0; i < Math.max(x.length, y.length); i++) {
-    const p = x[i];
-    const q = y[i];
-    if (p === undefined) return -1;
-    if (q === undefined) return 1;
-    const pn = /^\d+$/.test(p);
-    const qn = /^\d+$/.test(q);
-    if (pn && qn && Number(p) !== Number(q)) return Number(p) - Number(q);
-    if (pn !== qn) return pn ? -1 : 1;
-    if (p !== q) return p < q ? -1 : 1;
-  }
-  return 0;
 }
 
 export const versionOf = (tag: string) => tag.slice(1);

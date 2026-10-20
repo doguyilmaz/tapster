@@ -2,16 +2,16 @@ import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { isAbsolute, join, normalize, resolve } from "node:path";
 import { z } from "zod";
 import { TapsterError } from "../../errors";
-import { readHubFile } from "../../hubcommit";
-import { parseHub } from "../../config";
 import { protectionProblems } from "../../rulesets";
+import { readGit } from "../../clone";
 import { TOOLS, runPath } from "../../run";
 import { addOptions, addProject, findApp, projectName } from "../../cli/add";
-import { binName, hubFacts } from "../../cli/hubpr";
+import { binName, hubEntries, hubFacts } from "../../cli/hubpr";
 import type { AddView, DiffView, InspectView, ScanView } from "../contract";
-import { defaultRoots, insideHome, originRepo, projectKind, readSmall, scanClones } from "../scan";
+import { defaultRoots, insideHome, oneClonePerRepo, originRepo, projectKind, readSmall, scanClones } from "../scan";
 import { type Ctx, type Routes, readJson } from "../server";
 import { checkHub, me } from "./hub";
+import { setupProblems } from "./status";
 
 const COMMIT_MESSAGE = "Release through the tapster hub";
 
@@ -38,14 +38,14 @@ function cloneRepo(dir: string, login: string): string {
 }
 
 async function git(dir: string, args: string[], o: { user?: boolean; timeoutMs?: number } = {}) {
-  const env: Record<string, string> = o.user ? { ...(process.env as Record<string, string>), GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes" } : { GIT_TERMINAL_PROMPT: "0", GIT_NO_LAZY_FETCH: "1", GIT_ALLOW_PROTOCOL: "none" };
+  if (!o.user) return readGit(dir, args, o);
+  const env: Record<string, string> = { ...(process.env as Record<string, string>), GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes" };
   return runPath(TOOLS.git, "git", ["-C", dir, ...args], { env, allowFail: true, timeoutMs: o.timeoutMs ?? 20_000, maxOutput: 4 << 20 });
 }
 
-// Reading a clone must not run its own config: status and diff would run clean filters and fsmonitor from .git/config,
-// and a partial clone would fetch a missing object through any remote its config names, ext:: included.
+// Reading a clone must not run its own config: status and diff would run clean filters and fsmonitor from .git/config.
 async function committed(dir: string, path: string): Promise<string | null> {
-  const res = await git(dir, ["cat-file", "-p", `HEAD:${path}`]);
+  const res = await readGit(dir, ["cat-file", "-p", `HEAD:${path}`]);
   return res.code === 0 ? res.stdout : null;
 }
 
@@ -72,14 +72,12 @@ async function scan(c: Ctx): Promise<ScanView> {
   const extra = body.extra.map((p) => resolve(p)).filter((p) => isAbsolute(p) && insideHome(p, c.s.deps.home) && existsSync(p));
   const roots = [...new Set([...extra, ...defaultRoots(c.s.deps.home, c.s.deps.cwd)])].filter((p) => existsSync(p));
   const { found, truncated } = scanClones(roots);
-  const config = await readHubFile(gh, hub, "tapster.yml", "main").catch(() => null);
-  const listed = new Set((config ? parseHub(config, login).config.packages.map((p) => p.repo.toLowerCase()) : []));
-  const pulls = await gh.json<{ html_url: string; head: { ref: string } }[]>("GET", `/repos/${hub}/pulls?state=open&per_page=100`).catch(() => []);
-  const proposed = new Map(pulls.filter((p) => p.head?.ref?.startsWith("tapster-add-")).map((p) => [p.head.ref.slice("tapster-add-".length), p.html_url]));
+  const entries = await hubEntries(gh, hub).catch(() => []);
+  const entry = (repo: string) => entries.find((e) => e.repo.toLowerCase() === repo.toLowerCase());
   const mine = found.filter((f) => f.owner.toLowerCase() === login.toLowerCase() && f.repo.toLowerCase() !== hub.toLowerCase());
-  const unique = [...new Map(mine.map((f) => [f.path, f])).values()];
+  const unique = oneClonePerRepo([...new Map(mine.map((f) => [f.path, f])).values()]);
   return {
-    projects: unique.map(({ owner: _, ...p }) => ({ ...p, inHub: listed.has(p.repo.toLowerCase()), proposed: proposed.get(projectName(p.repo)) ?? null })).sort((a, b) => Number(b.kind !== null) - Number(a.kind !== null) || a.repo.localeCompare(b.repo)),
+    projects: unique.map(({ owner: _, ...p }) => ({ ...p, inHub: entry(p.repo)?.state === "merged", proposed: entry(p.repo)?.pr ?? null })).sort((a, b) => Number(b.kind !== null) - Number(a.kind !== null) || a.repo.localeCompare(b.repo)),
     roots,
     others: found.length - mine.length,
     truncated,
@@ -128,11 +126,16 @@ async function inspect(c: Ctx): Promise<InspectView> {
   const release = readSmall(join(dir, ".github", "workflows", "release.yml"));
   const dirty = await changed(dir, [".github/workflows/release.yml", ".goreleaser.yaml", ".goreleaser.yml", ...workflows.map((w) => `.github/workflows/${w}`)]);
   const branch = branchOf(dir);
-  const [project, facts, config] = await Promise.all([gh.getRepo(repo), hubFacts(gh, hub).catch(() => null), readHubFile(gh, hub, "tapster.yml", "main").catch(() => null)]);
+  const [project, facts, listed] = await Promise.all([gh.getRepo(repo), hubFacts(gh, hub).catch(() => null), hubEntries(gh, hub).catch(() => [])]);
   const problems = await protectionProblems(gh, repo, project.default_branch, "admin").catch(() => ["unknown"]);
-  const pulls = await gh.json<{ html_url: string }[]>("GET", `/repos/${hub}/pulls?state=open&head=${encodeURIComponent(`${login}:tapster-add-${name}`)}`).catch(() => []);
-  const listed = config ? parseHub(config, login).config.packages.some((p) => p.repo.toLowerCase() === repo.toLowerCase()) : false;
+  const entry = listed.find((e) => e.repo.toLowerCase() === repo.toLowerCase());
   if (!facts) throw new TapsterError(`${hub} has no App yet`, "Finish the hub's setup first.");
+  const workflow = workflows.includes("release.yml") ? "release.yml" : (workflows[0] ?? (kind === "go" ? null : "release.yml"));
+  const local = (path: string) => readSmall(join(dir, path));
+  const ready =
+    workflow !== null &&
+    setupProblems({ kind, branch, workflowName: workflow, goreleaser: kind === "go" ? (local(".goreleaser.yaml") ?? local(".goreleaser.yml")) : null, workflow: local(`.github/workflows/${workflow}`) }).length === 0;
+  const upstream = await git(dir, ["rev-list", "--count", "@{u}..HEAD"]);
   return {
     path: dir,
     repo,
@@ -142,14 +145,16 @@ async function inspect(c: Ctx): Promise<InspectView> {
     defaultBranch: project.default_branch,
     dirty: [...new Set(dirty)],
     workflows,
-    workflow: workflows.includes("release.yml") ? "release.yml" : (workflows[0] ?? null),
+    workflow: kind === "go" ? workflow : null,
     releaseFlow: release === null ? "missing" : release.includes("Ring the tapster hub") ? "ours" : "other",
     dependabot: [".github/dependabot.yml", ".github/dependabot.yaml"].some((f) => existsSync(join(dir, f))),
     private: project.private,
     protected: problems.length === 0,
-    inHub: listed,
-    proposed: pulls[0]?.html_url ?? null,
+    inHub: entry?.state === "merged",
+    proposed: entry?.pr ?? null,
     apple: facts.apple,
+    ready,
+    ahead: upstream.code === 0 && /^\d+$/.test(upstream.stdout.trim()) ? Number(upstream.stdout.trim()) : null,
   };
 }
 
@@ -169,7 +174,7 @@ async function add(c: Ctx): Promise<AddView> {
   await git(dir, ["config", "tapster.hub", hub], { user: true });
   const lines: string[] = [];
   const added = await addProject(gh, dir, repo, hub, facts, opts, (line) => lines.push(line));
-  return { lines, pr: added.pr, entry: added.entry, installUrl: added.installUrl, files: added.files };
+  return { lines, pr: added.pr, entry: added.entry, installUrl: added.installUrl, files: await changed(dir, added.files) };
 }
 
 function relFiles(files: string[]): string[] {
@@ -187,7 +192,11 @@ async function diff(c: Ctx): Promise<DiffView> {
   const dir = clonePath(body.path, c.s.deps.home);
   cloneRepo(dir, login);
   const out: DiffView["files"] = [];
-  for (const f of relFiles(body.files)) out.push({ path: f, before: await committed(dir, f), after: readSmall(join(dir, f)) });
+  for (const f of relFiles(body.files)) {
+    const before = await committed(dir, f);
+    const after = readSmall(join(dir, f));
+    out.push({ path: f, before, after, change: before === null ? "create" : after === null ? "remove" : before === after ? "same" : "update" });
+  }
   return { files: out };
 }
 

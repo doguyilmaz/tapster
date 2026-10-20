@@ -1,6 +1,6 @@
 import { signal } from "@preact/signals";
-import type { AccountView, HubChoice, HubView, Problem, SessionView } from "../contract";
-import { ApiError, get } from "./api";
+import type { AccountView, HubChoice, HubView, Problem, ProjectStatus, ScanView, SessionView, StatusView } from "../contract";
+import { ApiError, get, post } from "./api";
 
 const HUB_KEY = "tapster.hub";
 
@@ -74,7 +74,69 @@ export function chooseHub(name: string | null): void {
   remember(HUB_KEY, name);
   hub.value = null;
   hubError.value = null;
+  statuses.value = null;
+  statusError.value = null;
+  clones.value = null;
   if (name) void loadHub();
+}
+
+export const statuses = signal<{ hub: string; list: ProjectStatus[] } | null>(null);
+export const statusError = signal<Problem | null>(null);
+
+let loading: { hub: string; done: Promise<void> } | null = null;
+
+export function loadStatuses(): Promise<void> {
+  const name = hubName.value;
+  if (!name) return Promise.resolve();
+  if (loading?.hub === name) return loading.done;
+  const done = (async () => {
+    try {
+      const view = await get<StatusView>(`/api/projects/status?hub=${encodeURIComponent(name)}`);
+      if (hubName.value !== name) return;
+      statuses.value = { hub: name, list: view.projects };
+      statusError.value = null;
+    } catch (e) {
+      if (hubName.value === name) statusError.value = problemOf(e);
+    } finally {
+      loading = null;
+    }
+  })();
+  loading = { hub: name, done };
+  return done;
+}
+
+export async function statusOf(repo: string): Promise<ProjectStatus | null> {
+  const name = hubName.value;
+  if (!name) return null;
+  const s = (await get<StatusView>(`/api/projects/status?hub=${encodeURIComponent(name)}&repo=${encodeURIComponent(repo)}`)).projects[0] ?? null;
+  const now = statuses.value;
+  if (s && now?.hub === name && s.entry.state !== "missing") {
+    const known = now.list.some((x) => x.repo === s.repo);
+    statuses.value = { hub: name, list: known ? now.list.map((x) => (x.repo === s.repo ? s : x)) : [...now.list, s] };
+  }
+  return s;
+}
+
+const ROOTS_KEY = "tapster.roots";
+
+export function savedRoots(): string[] {
+  try {
+    const v = JSON.parse(recall(ROOTS_KEY) ?? "[]") as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 10) : [];
+  } catch {
+    return [];
+  }
+}
+
+export const saveRoots = (roots: string[]) => remember(ROOTS_KEY, JSON.stringify(roots));
+
+export const clones = signal<{ hub: string; scan: ScanView } | null>(null);
+
+export async function loadClones(extra = savedRoots()): Promise<void> {
+  const name = hubName.value;
+  if (!name) return;
+  const scan = await post<ScanView>("/api/projects/scan", { hub: name, extra });
+  if (hubName.value === name) clones.value = { hub: name, scan };
 }
 
 export async function loadHub(): Promise<void> {

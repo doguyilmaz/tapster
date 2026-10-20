@@ -1,4 +1,5 @@
-import type { HubView } from "./contract";
+import type { HubView, ProjectStatus } from "./contract";
+import { projectStop } from "./status";
 
 export type StopId = "protect" | "app" | "macos" | "certificate" | "notary" | "files" | "project";
 export type StopState = "done" | "now" | "later" | "skipped" | "attention";
@@ -16,9 +17,10 @@ export function macNeeded(h: HubView, choice: "yes" | "no" | null): boolean | nu
   return choice === null ? null : choice === "yes";
 }
 
-export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now()): Stop[] {
+export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now(), projects: ProjectStatus[] | null = null): Stop[] {
   const mac = macNeeded(h, choice);
   const passed = h.protect.checks.filter((c) => c.ok).length;
+  const mine = projectStop(projects, h.packages.length);
   const raw: { id: StopId; name: string; done: boolean; skipped?: boolean; attention?: boolean; status: string; open: string }[] = [
     {
       id: "protect",
@@ -80,8 +82,8 @@ export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now())
     {
       id: "project",
       name: "Your projects",
-      done: h.packages.length > 0,
-      status: h.packages.length ? `${h.packages.length} in the hub` : "None yet",
+      done: mine.done,
+      status: mine.status,
       open: "None yet",
     },
   ];

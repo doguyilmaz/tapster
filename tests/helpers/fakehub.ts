@@ -1,8 +1,13 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
+import { parse } from "yaml";
 import { TapsterError } from "../../src/errors";
+import { REACH_TITLE, reachNote } from "../../src/reachnote";
 
 type Ruleset = { id: number; name: string; target: string; enforcement: string; conditions?: { ref_name?: { include?: string[]; exclude?: string[] } }; rules?: { type: string }[]; bypass_actors?: unknown[] };
-type Release = { id: number; tag_name: string; draft: boolean; prerelease: boolean; created_at: string; published_at: string | null; assets: { id: number; name: string }[]; body: string };
+type Release = { id: number; tag_name: string; draft: boolean; prerelease: boolean; created_at: string; published_at: string | null; assets: { id: number; name: string }[]; body: string; html_url?: string };
+
+export type FakeJob = { id: number; name: string; status: string; conclusion: string | null; completed_at: string | null; html_url: string; annotations: { annotation_level: string; title: string; message: string }[] };
+export type FakeRun = { id: number; event: string; status: string; conclusion: string | null; created_at: string; html_url: string; head_branch?: string; head_sha?: string; jobs?: FakeJob[]; listedAt?: number };
 
 export type FakeRepo = {
   id: number;
@@ -21,8 +26,12 @@ export type FakeRepo = {
   keys: { title: string; read_only: boolean }[];
   repoVars: Map<string, string>;
   actionSecrets: string[];
-  runs: { id: number; event: string; status: string; conclusion: string | null; created_at: string; html_url: string }[];
+  runs: FakeRun[];
   dispatches: number;
+  tags: Map<string, string>;
+  annotated: Map<string, string>;
+  branches: Map<string, Map<string, string>>;
+  commit: { message: string; date: string };
 };
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => new Response(status === 204 ? null : JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
@@ -32,6 +41,9 @@ export class FakeHub {
   readonly repos = new Map<string, FakeRepo>();
   readonly pem = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString();
   installation: { id: number; repos: string[] } | null = null;
+  runDelay: number | null = null;
+  listDelay = 0;
+  appKeyWorks = true;
   failWrites = false;
   calls: string[] = [];
   private nextId = 100;
@@ -59,6 +71,10 @@ export class FakeHub {
       actionSecrets: [],
       runs: [],
       dispatches: 0,
+      tags: new Map(),
+      annotated: new Map(),
+      branches: new Map(),
+      commit: { message: "Start", date: "2026-10-01T09:00:00Z" },
       ...o,
     };
     this.repos.set(full.toLowerCase(), r);
@@ -67,6 +83,28 @@ export class FakeHub {
 
   get(full: string): FakeRepo | undefined {
     return this.repos.get(full.toLowerCase());
+  }
+
+  completeRun(full: string, o: { note?: boolean } = {}): FakeRun {
+    const r = this.get(full)!;
+    let run = r.runs.find((x) => !x.head_branch && x.status !== "completed");
+    if (!run) {
+      const id = this.nextId++;
+      run = { id, event: "schedule", status: "queued", conclusion: null, created_at: new Date().toISOString(), html_url: `https://github.com/${full}/actions/runs/${id}`, head_sha: r.head };
+      r.runs.unshift(run);
+    }
+    const listed = ((parse(r.files?.get("tapster.yml") ?? "") as { packages?: { name: string; repo: string }[] } | null)?.packages ?? []).filter((p) => p?.name && p?.repo);
+    const reached = new Set((this.installation?.repos ?? []).map((x) => x.toLowerCase()));
+    const annotations = !this.installation
+      ? [{ annotation_level: "failure", title: "", message: "tapster: the App is not installed on any of your repositories" }]
+      : listed.filter((p) => !reached.has(p.repo.toLowerCase())).map((p) => ({ annotation_level: "failure", title: "", message: `${p.name}: the hub's App is not installed on ${p.repo}` }));
+    const conclusion = annotations.length ? "failure" : "success";
+    if (this.installation && o.note !== false && listed.length) {
+      annotations.push({ annotation_level: "notice", title: REACH_TITLE, message: reachNote(listed.map((p) => ({ name: p.name, reached: reached.has(p.repo.toLowerCase()) }))) });
+    }
+    const id = this.nextId++;
+    Object.assign(run, { status: "completed", conclusion, jobs: [{ id, name: "check", status: "completed", conclusion, completed_at: new Date().toISOString(), html_url: `${run.html_url}/job/${id}`, annotations }] });
+    return run;
   }
 
   ghWrite = async (args: string[], stdin?: string): Promise<void> => {
@@ -112,11 +150,12 @@ export class FakeHub {
     }
     const manifest = /^\/app-manifests\/([^/]+)\/conversions$/.exec(p);
     if (manifest && method === "POST") return json({ id: 777, slug: `tapster-${this.login}-tap`, pem: this.pem, owner: { login: this.login } }, 201);
-    if (p === `/users/${this.login}/installation`) return this.installation ? json({ id: this.installation.id }) : json({}, 404);
+    if (p === `/users/${this.login}/installation`) return !this.appKeyWorks ? json({ message: "Bad credentials" }, 401) : this.installation ? json({ id: this.installation.id }) : json({}, 404);
     const instToken = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(p);
     if (instToken) return json({ token: "ghs_fake" }, 201);
     if (p === "/installation/repositories") return json({ repositories: (this.installation?.repos ?? []).map((full_name) => ({ full_name })) });
     if (p === "/installation/token") return json({}, 204);
+    if (p.startsWith("/user/installations")) return json({ message: "You must authenticate with an access token authorized to a GitHub App in order to list installations" }, 403);
     if (p.startsWith("/repos/doguyilmaz/tapster/compare/")) return json({ status: "identical" });
     const m = /^\/repos\/([^/]+\/[^/]+)(\/.*)?$/.exec(p);
     if (!m) return json({ message: "not found" }, 404);
@@ -131,6 +170,23 @@ export class FakeHub {
     if (rest === "") return json({ id: r.id, private: r.private, description: r.description, html_url: `https://github.com/${full}`, default_branch: "main" });
     if (rest === "/installation") return this.installation?.repos.some((x) => x.toLowerCase() === full.toLowerCase()) ? json({ id: this.installation.id }) : json({}, 404);
     if (rest === "/git/ref/heads/main") return r.files ? json({ object: { sha: r.head } }) : json({}, 409);
+    const headRef = /^\/git\/ref\/heads\/(.+)$/.exec(rest);
+    if (headRef) return r.branches.has(decodeURIComponent(headRef[1]!)) ? json({ object: { sha: sha(`${full}${headRef[1]}`) } }) : json({}, 404);
+    const tagRef = /^\/git\/ref\/tags\/(.+)$/.exec(rest);
+    if (tagRef) {
+      const tag = decodeURIComponent(tagRef[1]!);
+      const at = r.tags.get(tag);
+      return at ? json({ ref: `refs/tags/${tag}`, object: { sha: at, type: r.annotated.has(at) ? "tag" : "commit" } }) : json({}, 404);
+    }
+    const matching = /^\/git\/matching-refs\/tags\/?(.*)$/.exec(rest);
+    if (matching) return json([...r.tags].filter(([t]) => t.startsWith(decodeURIComponent(matching[1]!))).map(([t, at]) => ({ ref: `refs/tags/${t}`, object: { sha: at, type: r.annotated.has(at) ? "tag" : "commit" } })));
+    const tagObject = /^\/git\/tags\/([0-9a-f]+)$/.exec(rest);
+    if (tagObject) return r.annotated.has(tagObject[1]!) ? json({ sha: tagObject[1], object: { sha: r.annotated.get(tagObject[1]!), type: "commit" } }) : json({}, 404);
+    const commit = /^\/commits\/([^/]+)$/.exec(rest);
+    if (commit) {
+      const at = commit[1] === "main" ? r.head : commit[1]!;
+      return json({ sha: at, html_url: `https://github.com/${full}/commit/${at}`, commit: { message: r.commit.message, committer: { date: r.commit.date } } });
+    }
     if (rest.startsWith("/git/commits/")) return json({ tree: { sha: `tree-${r.head}` } });
     if (rest === "/git/trees" && method === "POST") {
       for (const t of body.tree as { path: string; content?: string; sha?: null }[]) {
@@ -144,20 +200,37 @@ export class FakeHub {
       r.head = String(body.sha);
       return json({});
     }
-    if (rest === "/git/refs" && method === "POST") return json({}, 201);
+    if (rest === "/git/refs" && method === "POST") {
+      const ref = String(body.ref);
+      if (ref.startsWith("refs/tags/")) {
+        const tag = ref.slice("refs/tags/".length);
+        if (r.tags.has(tag)) return json({ message: "Reference already exists" }, 422);
+        r.tags.set(tag, String(body.sha));
+        r.runs.unshift({ id: this.nextId++, event: "push", status: "queued", conclusion: null, created_at: new Date().toISOString(), html_url: `https://github.com/${full}/actions/runs/${this.nextId}`, head_branch: tag });
+        return json({ ref, object: { sha: body.sha } }, 201);
+      }
+      const branch = ref.slice("refs/heads/".length);
+      if (r.branches.has(branch)) return json({ message: "Reference already exists" }, 422);
+      r.branches.set(branch, new Map(r.files ?? []));
+      return json({ ref, object: { sha: body.sha } }, 201);
+    }
     if (rest === "/activity") return json([{ after: r.head }]);
     if (rest.startsWith("/compare/")) return json({ status: "identical", files: [] });
     const content = /^\/contents\/(.+)$/.exec(rest);
     if (content) {
       const path = decodeURIComponent(content[1]!);
       if (method === "PUT") {
-        if (body.branch && body.branch !== "main") return json({}, 201);
+        if (body.branch && body.branch !== "main") {
+          r.branches.get(String(body.branch))?.set(path, Buffer.from(String(body.content), "base64").toString("utf8"));
+          return json({}, 201);
+        }
         r.files ??= new Map();
         r.files.set(path, Buffer.from(String(body.content), "base64").toString("utf8"));
         r.head = sha(`${r.head}${path}`);
         return json({}, 201);
       }
-      const files = r.files ?? new Map<string, string>();
+      const ref = q.get("ref");
+      const files = (ref && r.branches.get(ref)) || (r.files ?? new Map<string, string>());
       if (files.has(path)) return json({ content: Buffer.from(files.get(path)!).toString("base64"), sha: sha(files.get(path)!) });
       const dir = [...files.keys()].filter((f) => f.startsWith(`${path}/`) && !f.slice(path.length + 1).includes("/"));
       if (dir.length) return json(dir.map((f) => ({ name: f.slice(path.length + 1), type: "file" })));
@@ -229,11 +302,21 @@ export class FakeHub {
       return json({ variables: [...r.repoVars].map(([n, value]) => ({ name: n, value })) });
     }
     if (rest === "/actions/workflows/tapster.yml") return r.files?.has(".github/workflows/tapster.yml") ? json({ state: "active" }) : json({}, 404);
-    if (rest.startsWith("/actions/workflows/tapster.yml/runs")) return json({ workflow_runs: r.runs });
+    if (rest.startsWith("/actions/workflows/tapster.yml/runs")) return json({ workflow_runs: r.runs.filter((x) => !x.head_branch && (x.listedAt ?? 0) <= Date.now()).map(({ listedAt: _, ...x }) => x) });
+    if (rest === "/actions/runs") return json({ workflow_runs: r.runs.filter((x) => x.head_branch !== undefined && (!q.get("branch") || x.head_branch === q.get("branch"))) });
     if (rest === "/actions/workflows/tapster.yml/dispatches") {
       r.dispatches++;
-      r.runs.unshift({ id: this.nextId++, event: "workflow_dispatch", status: "queued", conclusion: null, created_at: new Date().toISOString(), html_url: `https://github.com/${full}/actions` });
+      const id = this.nextId++;
+      r.runs.unshift({ id, event: "workflow_dispatch", status: "queued", conclusion: null, created_at: new Date().toISOString(), html_url: `https://github.com/${full}/actions/runs/${id}`, head_sha: r.head, listedAt: Date.now() + this.listDelay });
+      if (this.runDelay !== null) setTimeout(() => this.completeRun(full), this.runDelay);
       return json({}, 204);
+    }
+    const runJobs = /^\/actions\/runs\/(\d+)\/jobs$/.exec(rest);
+    if (runJobs) return json({ jobs: (r.runs.find((x) => x.id === Number(runJobs[1]))?.jobs ?? []).map(({ annotations: _, ...j }) => j) });
+    const notes = /^\/check-runs\/(\d+)\/annotations$/.exec(rest);
+    if (notes) {
+      const job = r.runs.flatMap((x) => x.jobs ?? []).find((j) => j.id === Number(notes[1]));
+      return job ? json(job.annotations) : json({ message: "not found" }, 404);
     }
     if (rest === "/pages") return json({}, 404);
     return json({ message: `fake has no ${method} ${rest}` }, 404);

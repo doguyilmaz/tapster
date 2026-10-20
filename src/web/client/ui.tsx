@@ -130,15 +130,15 @@ export function Copy({ text, label = "Copy" }: { text: string; label?: string })
 export function Cmd({ text }: { text: string }) {
   return (
     <div class="cmd">
-      <code>{text}</code>
+      <code tabIndex={0}>{text}</code>
       <Copy text={text} />
     </div>
   );
 }
 
-export function Out({ href, children, class: cls = "btn secondary" }: { href: string; children: ComponentChildren; class?: string }) {
+export function Out({ href, children, class: cls = "btn secondary", onClick }: { href: string; children: ComponentChildren; class?: string; onClick?: () => void }) {
   return (
-    <a class={cls} href={href} target="_blank" rel="noopener noreferrer">
+    <a class={cls} href={href} target="_blank" rel="noopener noreferrer" onClick={onClick}>
       {children}
       <Icon name="external" />
     </a>

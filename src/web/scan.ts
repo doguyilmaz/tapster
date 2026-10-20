@@ -96,7 +96,7 @@ export function scanClones(roots: string[], o: { depth?: number; maxDirs?: numbe
       }
       const config = git?.isDirectory() ? readSmall(join(canonical, ".git", "config"), 64 * 1024) : null;
       const repo = config ? originRepo(config) : null;
-      if (repo) found.push({ path: dir, repo, owner: repo.split("/")[0]!, inHub: false, proposed: null, ...projectKind(canonical, entries) });
+      if (repo) found.push({ path: dir, repo, owner: repo.split("/")[0]!, inHub: false, proposed: null, others: [], ...projectKind(canonical, entries) });
       return;
     }
     if (level >= depth) return;
@@ -112,4 +112,29 @@ export function scanClones(roots: string[], o: { depth?: number; maxDirs?: numbe
   };
   for (const root of roots) walk(root, 0);
   return { found, truncated };
+}
+
+export type CloneFacts = { branch: string | null; defaultBranch: string | null; changed: number };
+
+export function cloneFacts(dir: string): CloneFacts {
+  const ref = (path: string, prefix: string) => new RegExp(`^ref: ${prefix}(.+)$`).exec(readSmall(join(dir, ".git", path), 4096)?.trim() ?? "")?.[1] ?? null;
+  const mtime = (path: string) => {
+    try {
+      return lstatSync(join(dir, ".git", path)).mtimeMs;
+    } catch {
+      return 0;
+    }
+  };
+  return { branch: ref("HEAD", "refs/heads/"), defaultBranch: ref(join("refs", "remotes", "origin", "HEAD"), "refs/remotes/origin/"), changed: Math.max(mtime("HEAD"), mtime("index"), mtime(join("logs", "HEAD"))) };
+}
+
+const onDefault = (c: CloneFacts) => c.branch !== null && c.branch === (c.defaultBranch ?? (c.branch === "main" || c.branch === "master" ? c.branch : null));
+
+export function oneClonePerRepo<T extends { path: string; repo: string }>(found: T[], facts: (dir: string) => CloneFacts = cloneFacts): (T & { others: string[] })[] {
+  const groups = new Map<string, T[]>();
+  for (const f of found) groups.set(f.repo.toLowerCase(), [...(groups.get(f.repo.toLowerCase()) ?? []), f]);
+  return [...groups.values()].map((list) => {
+    const ranked = list.length === 1 ? list : list.map((f) => ({ f, c: facts(f.path) })).sort((a, b) => Number(onDefault(b.c)) - Number(onDefault(a.c)) || b.c.changed - a.c.changed).map((x) => x.f);
+    return { ...ranked[0]!, others: ranked.slice(1).map((f) => f.path) };
+  });
 }
