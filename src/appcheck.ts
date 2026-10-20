@@ -2,7 +2,7 @@ import { closeSync, existsSync, lstatSync, openSync, readSync, readdirSync, stat
 import { basename, dirname, join, relative, sep } from "node:path";
 import { type TarEntry, isMachO } from "./archive";
 import type { ChecksumLine } from "./checksums";
-import { type AppPackage, type PackageConfig, type Platform, assetName, isApp, versionOf } from "./config";
+import { type AppPackage, type PackageConfig, type Platform, type ToolApp, assetName, isApp, versionOf } from "./config";
 import { TapsterError } from "./errors";
 import { bundleIdAllowed } from "./identity";
 import { type PlistValue, parsePlist } from "./plist";
@@ -112,7 +112,9 @@ function localizedKey(d: Dict): string | undefined {
   return undefined;
 }
 
-export async function appFacts(appDir: string, pkg: AppPackage, all: PackageConfig[], tag: string, readPlist: ReadPlist): Promise<AppFacts> {
+type Reader = { read: (path: string) => Promise<Dict>; rel: (p: string) => string };
+
+function plistReader(appDir: string, readPlist: ReadPlist): Reader {
   const rel = (p: string) => relative(appDir, p).split(sep).join("/");
   let reads = 0;
   const read = async (path: string): Promise<Dict> => {
@@ -126,6 +128,14 @@ export async function appFacts(appDir: string, pkg: AppPackage, all: PackageConf
       throw refuse(`tapster cannot read ${rel(path)}`, "Write it as an XML or binary property list in UTF-8.");
     }
   };
+  return { read, rel };
+}
+
+const regular = (appDir: string, p: string) => existsSync(join(appDir, p)) && lstatSync(join(appDir, p)).isFile();
+
+export async function appFacts(appDir: string, pkg: AppPackage, all: PackageConfig[], tag: string, readPlist: ReadPlist): Promise<AppFacts> {
+  const reader = plistReader(appDir, readPlist);
+  const { read } = reader;
   const infoPath = join(appDir, "Contents", "Info.plist");
   const info = await read(infoPath);
   const version = versionOf(tag);
@@ -162,7 +172,25 @@ export async function appFacts(appDir: string, pkg: AppPackage, all: PackageConf
       if (typeof sv !== "string" || !versionAtLeast(sv, SPARKLE_FLOOR)) throw refuse(`the embedded Sparkle is ${String(sv)}, older than 2.9.0, which ignores SURequireSignedFeed`, "Update Sparkle in the project.");
     }
   }
-  const appNames = new Set(all.filter(isApp).map((p) => p.app.replace(/\.app$/i, "").toLowerCase()));
+  await checkContents(appDir, infoPath, pkg.bundle_id, pkg.cask.binaries ?? [], "cask.binaries", all, reader);
+  if (pkg.dmg.volume_icon && !regular(appDir, pkg.dmg.volume_icon)) throw refuse(`${pkg.dmg.volume_icon}, set as dmg.volume_icon, is not a file in the app`, "Fix dmg.volume_icon in tapster.yml.");
+  return { version, build: version, minimumSystemVersion: minimum, macos, publicKey };
+}
+
+export async function checkToolApp(appDir: string, app: ToolApp, all: PackageConfig[], readPlist: ReadPlist): Promise<void> {
+  const reader = plistReader(appDir, readPlist);
+  const infoPath = join(appDir, "Contents", "Info.plist");
+  const info = await reader.read(infoPath);
+  const id = typeof info.CFBundleIdentifier === "string" ? info.CFBundleIdentifier : null;
+  if (id !== app.bundle_id) throw refuse(`${app.name}'s bundle id is ${id ?? "missing"}, not ${app.bundle_id}`, "Fix the app's Info.plist or app.bundle_id in tapster.yml.");
+  for (const k of ["SUFeedURL", "SUPublicEDKey", ...FORBIDDEN]) {
+    if (k in info) throw refuse(`${app.name} sets ${k}, but the hub signs no update feed for a tool's app`, "Remove it from the app's Info.plist; Homebrew updates the tool.");
+  }
+  await checkContents(appDir, infoPath, app.bundle_id, app.binaries, "app.binaries", all, reader);
+}
+
+async function checkContents(appDir: string, infoPath: string, bundleId: string, links: string[], field: string, all: PackageConfig[], { read, rel }: Reader): Promise<void> {
+  const appNames = new Set(all.flatMap((p) => (isApp(p) ? [p.app] : p.app ? [p.app.name] : [])).map((a) => a.replace(/\.app$/i, "").toLowerCase()));
   const lower = (p: string) => basename(p).toLowerCase();
   for (const { path, kind } of walk(appDir)) {
     const name = lower(path);
@@ -182,16 +210,15 @@ export async function appFacts(appDir: string, pkg: AppPackage, all: PackageConf
     const ownerRel = rel(owner);
     const nested = await read(path);
     const id = nested.CFBundleIdentifier;
-    if (id !== undefined && (typeof id !== "string" || !bundleIdAllowed(ownerRel, id, pkg))) throw refuse(`${ownerRel} claims the identifier ${String(id)}, outside ${pkg.bundle_id}`);
+    if (id !== undefined && (typeof id !== "string" || !bundleIdAllowed(ownerRel, id, { bundle_id: bundleId }))) throw refuse(`${ownerRel} claims the identifier ${String(id)}, outside ${bundleId}`);
     for (const k of ["SUFeedURL", "SUPublicEDKey", ...FORBIDDEN]) if (k in nested) throw refuse(`${ownerRel} carries its own ${k}`);
     for (const k of ["CFBundleName", "CFBundleDisplayName"]) {
       const v = nested[k];
       if (typeof v === "string" && appNames.has(v.toLowerCase())) throw refuse(`${ownerRel} is named ${v}, like an app the hub publishes`);
     }
   }
-  const regular = (p: string) => existsSync(join(appDir, p)) && lstatSync(join(appDir, p)).isFile();
-  for (const b of pkg.cask.binaries ?? []) {
-    if (!regular(b)) throw refuse(`${b}, listed in cask.binaries, is not a file in the app`, "Fix cask.binaries in tapster.yml.");
+  for (const b of links) {
+    if (!regular(appDir, b)) throw refuse(`${b}, listed in ${field}, is not a file in the app`, `Fix ${field} in tapster.yml.`);
     const fd = openSync(join(appDir, b), "r");
     const head = Buffer.alloc(8);
     try {
@@ -199,8 +226,6 @@ export async function appFacts(appDir: string, pkg: AppPackage, all: PackageConf
     } finally {
       closeSync(fd);
     }
-    if (!isMachO(head)) throw refuse(`${b}, listed in cask.binaries, is not a Mach-O executable`, "Fix cask.binaries in tapster.yml.");
+    if (!isMachO(head)) throw refuse(`${b}, listed in ${field}, is not a Mach-O executable`, `Fix ${field} in tapster.yml.`);
   }
-  if (pkg.dmg.volume_icon && !regular(pkg.dmg.volume_icon)) throw refuse(`${pkg.dmg.volume_icon}, set as dmg.volume_icon, is not a file in the app`, "Fix dmg.volume_icon in tapster.yml.");
-  return { version, build: version, minimumSystemVersion: minimum, macos, publicKey };
 }

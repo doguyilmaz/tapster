@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { appAsset, dmgName } from "../appcheck";
 import { readTarGz, writeTarGz } from "../archive";
 import { type ChecksumLine, sha256, writeChecksums } from "../checksums";
+import { readTree } from "../extract";
 import { type AppPackage, isApp, versionOf } from "../config";
 import { TapsterError } from "../errors";
 import { GitHub } from "../github";
@@ -13,7 +14,7 @@ import { type Outgoing, assertFinal, assertRecorded, makeLatest, resumeSwap, sta
 import { failure, info, record, warn } from "../report";
 import { STATE_PATH, type State, type StateEntry, parseState, recordedChecksums, serializeState, upsert } from "../state";
 import { type InstallationToken, installationToken } from "../token";
-import { loadManifest, workdir } from "../workdir";
+import { type DarwinArchive, loadManifest, workdir } from "../workdir";
 import type { Context } from "./context";
 
 async function recordState(gh: GitHub, hub: string, pkg: string, entry: StateEntry): Promise<void> {
@@ -36,6 +37,13 @@ function recordedApp(state: State, pkg: string, releaseId: number): StateEntry["
   const app = state.packages[pkg]?.find((e) => e.releaseId === releaseId)?.app;
   if (!app) throw new TapsterError("the state has no app facts for this release", "Delete the draft and release again.");
   return app;
+}
+
+export async function repackTool(original: Buffer, a: DarwinArchive, mtime: number): Promise<Buffer> {
+  const entries = readTarGz(original).filter((e) => a.app === undefined || e.name.split("/")[0] !== a.app);
+  for (const e of entries) if (a.binaries.includes(e.name)) e.data = await readFile(join(a.dir, e.name));
+  if (a.app) await readTree(join(a.dir, a.app), a.app, entries);
+  return writeTarGz(entries, mtime);
 }
 
 export const attestLines = (files: Outgoing[]) => writeChecksums(files.map((f) => ({ sha256: sha256(f.data), name: f.name })));
@@ -81,9 +89,7 @@ export async function publishMode(ctx: Context): Promise<void> {
         const lines = item.checksums.map((l) => ({ ...l }));
         const files: Outgoing[] = [];
         for (const a of item.archives) {
-          const entries = readTarGz(await readFile(join(dir, "assets", a.asset)));
-          for (const e of entries) if (a.binaries.includes(e.name)) e.data = await readFile(join(a.dir, e.name));
-          const data = writeTarGz(entries, mtime);
+          const data = await repackTool(await readFile(join(dir, "assets", a.asset)), a, mtime);
           files.push({ name: a.asset, data });
           signed.push({ name: a.asset, data });
           lines.find((l) => l.name === a.asset)!.sha256 = sha256(data);

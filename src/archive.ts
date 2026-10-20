@@ -142,13 +142,14 @@ export function readTar(tar: Buffer, limits: Limits = LIMITS): TarEntry[] {
     if (kind === "symlink") checkLink(name, rawLink);
     entries.push({ name, type: kind, mode: octal(h, 100, 8) & 0o7777, data: Buffer.from(data), uid, gid, uname, gname, ...(kind === "symlink" ? { linkname: rawLink } : {}) });
   }
-  checkSymlinks(entries);
+  resolveSymlinks(entries);
   return entries;
 }
 
-function checkSymlinks(entries: TarEntry[]) {
+export function resolveSymlinks(entries: TarEntry[]): Map<string, string> {
+  const resolved = new Map<string, string>();
   const links = new Map(entries.filter((e) => e.type === "symlink").map((e) => [e.name.toLowerCase(), e.linkname!] as const));
-  if (links.size === 0) return;
+  if (links.size === 0) return resolved;
   const names = entries.map((e) => e.name.toLowerCase()).sort();
   for (const link of links.keys()) {
     const below = `${link}/`;
@@ -185,7 +186,9 @@ function checkSymlinks(entries: TarEntry[]) {
       stack.pop();
       queue.unshift(...components(target));
     }
+    resolved.set(e.name, stack.join("/"));
   }
+  return resolved;
 }
 
 function put(h: Buffer, off: number, len: number, value: string) {

@@ -23,9 +23,11 @@ packages:
     binaries: [ebb]
     assets:
       darwin-universal: "ebb_{version}_darwin_universal.tar.gz"
+    app: { name: ebb.app, bundle_id: com.doguyilmaz.ebb, binaries: [Contents/MacOS/ebb] }
     cask:
       uninstall: { launchctl: [com.doguyilmaz.ebb] }
       zap: { trash: ["~/.config/ebb", "~/.local/state/ebb"] }
+      postflight: { binary: ebb, args: [daemon, restore] }
 `,
   "o",
 );
@@ -49,7 +51,7 @@ test("cask with per-arch macOS and Linux blocks", () => {
   expect(renderCask(aimsInput)).toBe(golden("aims.rb"));
 });
 
-test("universal cask with uninstall and zap, hostile description escaped", () => {
+test("universal cask with an app, a hook, uninstall and zap, hostile description escaped", () => {
   const out = renderCask({
     pkg: ebb,
     version: "0.1.1",
@@ -59,6 +61,17 @@ test("universal cask with uninstall and zap, hostile description escaped", () =>
     downloads: [{ platform: "darwin-universal", url: downloadUrl("o/ebb", "v0.1.1", "ebb_0.1.1_darwin_universal.tar.gz"), sha256: "4".repeat(64) }],
   });
   expect(out).toBe(golden("ebb.rb"));
+});
+
+test("a command linked from the app takes its name; others keep their own line", () => {
+  const two = { ...ebb, binaries: ["ebb", "bin/ebbctl"], app: { ...ebb.app!, binaries: ["Contents/MacOS/ebb", "Contents/Resources/ebb-helper"] } };
+  const out = renderCask({ pkg: two, version: "0.1.1", description: "Disk space", homepage: "https://x.y", license: null, downloads: [{ platform: "darwin-universal", url: "", sha256: "4".repeat(64) }] })!;
+  expect(out).toContain('  app "ebb.app"\n  binary "bin/ebbctl"\n  binary "#{appdir}/ebb.app/Contents/MacOS/ebb"\n  binary "#{appdir}/ebb.app/Contents/Resources/ebb-helper"\n');
+  expect(out).not.toContain('binary "ebb"');
+  const plain = renderCask({ ...aimsInput, pkg: { ...aims, cask: { postflight: { binary: "aims", args: [] } } } })!;
+  expect(plain).toContain('  postflight_steps do\n    run "bin/aims",\n        base:         :homebrew_prefix,\n        must_succeed: false\n  end\n');
+  expect(plain).not.toContain("  app ");
+  expect(plain).not.toContain("depends_on :macos");
 });
 
 test("scoop manifest", () => {
@@ -94,6 +107,7 @@ packages:
     sparkle: { key: shared, public_key: "${"A".repeat(43)}=" }
     cask:
       binaries: [Contents/Resources/bin/hafif]
+      postflight: { binary: hafif, args: [--install-helper] }
       zap: { trash: ["~/Library/Preferences/com.doguyilmaz.HafifPix.plist"] }
   - name: battistics
     repo: doguyilmaz/battistics

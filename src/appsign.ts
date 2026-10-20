@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { type CodeItem, findCode } from "./bundle";
-import type { AppPackage } from "./config";
+import type { AppPackage, ToolApp } from "./config";
 import { type Entitlements, entitlementsFor, parseEntitlements, renderEntitlements } from "./entitlements";
 import { TapsterError } from "./errors";
 import { identifierFor } from "./identity";
@@ -20,8 +20,14 @@ export async function readEntitlements(path: string): Promise<Entitlements> {
 }
 
 export type SignedApp = { items: string[]; identifiers: string[]; dropped: string[] };
+export type Bundle = Pick<AppPackage, "bundle_id" | "code">;
 
-export function checkPlan(items: CodeItem[], pkg: AppPackage): string[] {
+export const toolBundle = (app: ToolApp): Bundle => ({
+  bundle_id: app.bundle_id,
+  code: app.entitlements.length ? { ".": { entitlements: Object.fromEntries(app.entitlements.map((k) => [k, true])) } } : {},
+});
+
+export function checkPlan(items: CodeItem[], pkg: Bundle): string[] {
   const paths = new Set(items.map((i) => i.path));
   for (const path of Object.keys(pkg.code)) {
     if (!paths.has(path)) throw new TapsterError(`code in tapster.yml names ${path}, which the app does not contain`, "Fix the path under code.");
@@ -35,7 +41,7 @@ export function checkPlan(items: CodeItem[], pkg: AppPackage): string[] {
   return ids;
 }
 
-export async function signApp(kc: Keychain, appDir: string, pkg: AppPackage, team: string): Promise<SignedApp> {
+export async function signApp(kc: Keychain, appDir: string, pkg: Bundle, team: string): Promise<SignedApp> {
   const items = findCode(appDir);
   const planned = checkPlan(items, pkg);
   const dir = await mkdtemp(join(process.env.RUNNER_TEMP ?? tmpdir(), "ent-"));
@@ -59,6 +65,15 @@ export async function signApp(kc: Keychain, appDir: string, pkg: AppPackage, tea
     await rm(dir, { recursive: true, force: true });
   }
   return { items: items.map((i) => i.path), identifiers, dropped };
+}
+
+export async function stapleApp(app: string, exec = run): Promise<void> {
+  await exec("xcrun", ["stapler", "staple", app]);
+  await exec("xcrun", ["stapler", "validate", app]);
+  const assessed = await exec("spctl", ["-a", "-t", "execute", "-vv", app], { allowFail: true });
+  if (assessed.code !== 0 || !assessed.stderr.includes("Notarized Developer ID")) {
+    throw new TapsterError(`${basename(app)} is not accepted by Gatekeeper after notarization`, "Check the notarization log in App Store Connect.");
+  }
 }
 
 export async function verifyApp(appDir: string, signed: SignedApp, team: string): Promise<void> {

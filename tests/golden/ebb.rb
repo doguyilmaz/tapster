@@ -15,7 +15,17 @@ cask "ebb" do
     skip "tapster"
   end
 
-  binary "ebb"
+  depends_on :macos
+
+  app "ebb.app"
+  binary "#{appdir}/ebb.app/Contents/MacOS/ebb"
+
+  postflight_steps do
+    run "bin/ebb",
+        base:         :homebrew_prefix,
+        args:         ["daemon", "restore"],
+        must_succeed: false
+  end
 
   uninstall launchctl: "com.doguyilmaz.ebb"
 

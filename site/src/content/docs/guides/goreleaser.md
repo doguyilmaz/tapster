@@ -33,18 +33,35 @@ each attestation.
 ## What moves into the hub entry
 
 The hub writes the cask from its own entry in `tapster.yml`. `add` fills that entry from GoReleaser's
-`homebrew_casks` (or `brews`) section: the description, homepage, license, shell completions, `uninstall launchctl`,
-`zap trash` and caveats. Template values such as `{{ .Env.X }}` are left out.
+`homebrew_casks` (or `brews`) section. Template values such as `{{ .Env.X }}` are left out.
 
-Some things have no place in a tapster cask yet. Check for them before the switch-over release:
+| In GoReleaser | In the hub entry |
+| --- | --- |
+| `description`, `homepage`, `license` and `completions` | the same keys |
+| `custom_block` with `app "MyTool.app"` | `app.name` |
+| `binaries` under `#{appdir}/MyTool.app/` | `app.binaries` |
+| `uninstall` with `launchctl` and `quit` | `cask.uninstall` |
+| `zap` with `trash` | `cask.zap` |
+| `caveats` | `cask.caveats` |
+| `hooks.post.install` that runs one of the tool's commands | `cask.postflight` |
 
-- **An `.app` inside a command line tool's archive.** The hub signs the binaries you list, not an app bundle next to
-  them. The cask installs only the binaries.
-- **Cask hooks** such as `postflight` or a `post install` command.
-- **A release workflow that moves a branch** with the workflow's own token. `add` protects every branch of the
-  project, so that step fails. Move the step to a tag or keep it on a branch that you push yourself.
+The app's bundle id comes from an `Info.plist` in the project that names the app. tapster lists what it does not
+carry, such as other hooks or other lines of `custom_block`. A hook is carried only in this form:
 
-A project that needs one of these keeps its own release for now.
+```ruby
+system_command "#{HOMEBREW_PREFIX}/bin/mytool", args: ["setup"], must_succeed: false
+```
+
+The new cask runs it as Homebrew's `postflight_steps`, in Homebrew's sandbox: without network or your home folder. A
+command that needs them does nothing there, so let the tool do that work the next time it runs. See
+[`tapster.yml`](/reference/config/#a-command-after-install).
+
+When the archive holds an app, the hub signs, notarizes and staples it. A build hook that signed or notarized the app
+with the old secrets must now sign it ad hoc only:
+
+```sh
+codesign --force --sign - dist/MyTool.app
+```
 
 ## Archive names
 
@@ -61,6 +78,51 @@ project with no release yet gets GoReleaser's default names:
 macOS archives must be `.tar.gz`. Windows builds may stay `.zip`; with them the entry also gets `scoop: true`. A
 project with `universal_binaries` gets one `darwin-universal` archive. If you set your own `name_template` for archives
 and have no release yet, tapster cannot guess the names: run `tapster add` again after the first draft.
+
+## A branch that follows releases
+
+A release workflow that moves a branch after GoReleaser, for example so that a site deploys from it, fails after
+`tapster add`: the project's rules let only you move branches. `tapster add` names such a step. Instead:
+
+1. Run `tapster add --auto-tag`. It makes a deploy key that only the default branch's workflows can use and lets
+   deploy keys pass the rules. See [workflow tags](/guides/auto-tag/).
+2. Remove the step and add a workflow that moves the branch once the hub has published:
+
+```yaml
+name: Follow releases
+on:
+  release: { types: [published] }
+  workflow_dispatch:
+permissions: {}
+jobs:
+  dispatch:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    permissions: { actions: write }
+    steps:
+      - run: gh workflow run follow.yml --repo "$GITHUB_REPOSITORY" --ref main
+        env: { GH_TOKEN: "${{ github.token }}" }
+  move:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@<commit> # <version>
+        with: { ssh-key: "${{ secrets.TAPSTER_TAG_KEY }}", fetch-depth: 0 }
+      - name: Move the release branch to the latest release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          git push origin "$(git rev-parse "$tag^{commit}"):refs/heads/release"
+```
+
+Save it as `.github/workflows/follow.yml`. The hub publishes with its App, which starts the `dispatch` job. That job
+runs on the tag, which the `release` environment does not admit, so it starts `move` on `main`. `move` reads the
+latest published release itself, so the branch never runs ahead of what users can install.
+
+Without a workflow you can push the branch yourself with the tag:
+`git push origin v1.2.3 "v1.2.3^{commit}:refs/heads/release"`. The site then goes live before the hub publishes.
 
 ## The switch-over release
 

@@ -4,7 +4,7 @@ import { TapsterError } from "./errors";
 
 const refuse = (what: string) => new TapsterError(what, "Set the identifier under code in tapster.yml or fix the bundle's CFBundleIdentifier.");
 
-export function identifierFor(item: CodeItem, pkg: AppPackage): string {
+export function identifierFor(item: CodeItem, pkg: Pick<AppPackage, "bundle_id" | "code">): string {
   if (item.path === ".") {
     if (item.bundleId !== pkg.bundle_id) throw refuse(`the app's CFBundleIdentifier is ${item.bundleId ?? "missing"}, not ${pkg.bundle_id}`);
     return pkg.bundle_id;
@@ -24,7 +24,7 @@ export function identifierFor(item: CodeItem, pkg: AppPackage): string {
 
 const SPARKLE = /^Contents\/Frameworks\/Sparkle\.framework\/Versions\/[^/]+(\/|$)/;
 
-export function bundleIdAllowed(path: string, id: string, pkg: AppPackage): boolean {
+export function bundleIdAllowed(path: string, id: string, pkg: Pick<AppPackage, "bundle_id">): boolean {
   if (id.startsWith(`${pkg.bundle_id}.`)) return true;
   return id.startsWith("org.sparkle-project.") && SPARKLE.test(path);
 }
