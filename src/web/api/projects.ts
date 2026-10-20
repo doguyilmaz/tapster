@@ -138,6 +138,7 @@ async function inspect(c: Ctx): Promise<InspectView> {
     name,
     kind,
     branch,
+    defaultBranch: project.default_branch,
     dirty: [...new Set(dirty)],
     workflows,
     workflow: workflows.includes("release.yml") ? "release.yml" : (workflows[0] ?? null),

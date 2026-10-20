@@ -322,6 +322,11 @@ function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: str
                   <Out href={info.proposed} class="btn secondary small">Review the pull request</Out>
                 </Note>
               )}
+              {info.branch !== info.defaultBranch && (
+                <Note tone="warn" title={`This clone is on ${info.branch}, not ${info.defaultBranch}`}>
+                  <span>tapster changes the files on {info.branch}. Releases use the workflow on {info.defaultBranch}, so the change counts once it is merged there.</span>
+                </Note>
+              )}
               {relevant.length > 0 && (
                 <Note tone="warn" title="Uncommitted changes in files tapster edits">
                   <span>{relevant.join(", ")}. Commit or stash them first, so tapster's changes stay apart from yours.</span>

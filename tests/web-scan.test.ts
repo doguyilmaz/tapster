@@ -83,6 +83,8 @@ test("home checks hold for paths outside and tricks with dot-dot", () => {
   expect(insideHome("/Users/me/../other/x", "/Users/me")).toBe(false);
   expect(insideHome("/Users/meow/x", "/Users/me")).toBe(false);
   expect(defaultRoots("/Users/me", "/Users/me/Developer/tool")).toContain("/Users/me/Developer");
+  expect(defaultRoots("/Users/me", "/tmp/elsewhere/tool")).not.toContain("/tmp/elsewhere");
+  expect(defaultRoots("/Users/me", "/Users/me/tool")).not.toContain("/Users/me");
 });
 
 test("a clone whose build files link to devices cannot hang tapster", async () => {

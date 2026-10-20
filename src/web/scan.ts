@@ -40,7 +40,7 @@ export function projectKind(dir: string, entries: string[]): { kind: ProjectKind
 }
 
 export function defaultRoots(home: string, cwd: string): string[] {
-  return [cwd, dirname(cwd), ...HOME_ROOTS.map((r) => join(home, r))];
+  return [cwd, dirname(cwd), ...HOME_ROOTS.map((r) => join(home, r))].filter((r) => insideHome(r, home) && r !== resolve(home));
 }
 
 const within = (p: string, root: string) => p === root || p.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);

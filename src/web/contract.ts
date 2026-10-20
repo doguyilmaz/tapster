@@ -52,6 +52,7 @@ export type InspectView = {
   name: string;
   kind: ProjectKind;
   branch: string;
+  defaultBranch: string;
   dirty: string[];
   workflows: string[];
   workflow: string | null;
