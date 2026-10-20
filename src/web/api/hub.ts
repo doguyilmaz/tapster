@@ -175,7 +175,7 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
     url: repo.html_url,
     private: repo.private,
     empty,
-    protect: { done: checks.every((x) => x.ok), environment: env !== null, checks, others: otherWorkflows(flows) },
+    protect: { done: checks.every((x) => x.ok), environment: policyOk, checks, others: otherWorkflows(flows) },
     app: { id: appId, slug: v("TAPSTER_APP_SLUG"), key: names(secrets).includes("TAPSTER_APP_PRIVATE_KEY"), held: Boolean(held), installed: held ? await installView(s, hub) : null },
     apple: {
       needed: hasApple || macPackages ? true : null,
@@ -211,6 +211,13 @@ async function installView(s: Session, hub: string): Promise<InstallView> {
   return { checked: true, id: state.id, onHub: state.onHub, repos };
 }
 
+async function lockedEnvironment(gh: GitHub, hub: string): Promise<void> {
+  const env = await or404(gh.json<{ deployment_branch_policy: { custom_branch_policies: boolean } | null }>("GET", `/repos/${hub}/environments/tapster`));
+  const policies = env ? await gh.json<{ branch_policies: { name: string; type?: string }[] }>("GET", `/repos/${hub}/environments/tapster/deployment-branch-policies`) : { branch_policies: [] };
+  const locked = Boolean(env?.deployment_branch_policy?.custom_branch_policies) && policies.branch_policies.length === 1 && policies.branch_policies[0]!.name === "main" && (policies.branch_policies[0]!.type ?? "branch") === "branch";
+  if (!locked) throw new TapsterError(`${hub}'s tapster environment is not locked to main`, "Protect the hub first: keys go into that environment only once workflows on other branches cannot open it.");
+}
+
 async function guardMain(gh: GitHub, hub: string, owner: string): Promise<void> {
   const writes = await foreignWrites(gh, hub, owner).catch((e) => {
     if (e instanceof GitHubError && e.status === 404) return [];
@@ -238,9 +245,7 @@ async function protect(c: Ctx) {
 async function appStart(c: Ctx): Promise<AppStart> {
   const { hub } = await readJson(c.req, hubBody);
   const { gh, login } = await hubFrom(c, hub);
-  if ((await or404(gh.json("GET", `/repos/${hub}/environments/tapster`))) === null) {
-    throw new TapsterError(`${hub} is not protected yet`, "Protect it first: the App's key goes into the tapster environment that step creates.");
-  }
+  await lockedEnvironment(gh, hub);
   const state = randomBytes(16).toString("hex");
   for (const [k, p] of c.s.pending) if (Date.now() - p.at > 3_600_000) c.s.pending.delete(k);
   c.s.pending.set(state, { hub, owner: login, at: Date.now() });
@@ -264,6 +269,7 @@ export async function appCallback(c: Ctx): Promise<Response> {
   }
   c.s.apps.set(pending.hub, { id: String(created.id), pem: created.pem, slug: created.slug });
   try {
+    await lockedEnvironment(await c.s.deps.github(), pending.hub);
     await storeApp(pending.hub, created);
     return back({ app: "created", hub: pending.hub });
   } catch (e) {
@@ -274,7 +280,8 @@ export async function appCallback(c: Ctx): Promise<Response> {
 
 async function appStore(c: Ctx) {
   const { hub } = await readJson(c.req, hubBody);
-  await hubFrom(c, hub);
+  const { gh } = await hubFrom(c, hub);
+  await lockedEnvironment(gh, hub);
   const held = c.s.apps.get(hub);
   if (!held) throw new TapsterError("this setup no longer holds the App's key", "GitHub hands the key over only once. Delete the App at https://github.com/settings/apps, then create it again here.");
   await storeApp(hub, { id: Number(held.id), slug: held.slug, pem: held.pem });
@@ -305,7 +312,8 @@ async function form(c: Ctx): Promise<Form> {
 
 async function certificate(c: Ctx) {
   const f = await form(c);
-  const { hub } = await hubFrom(c, f.get("hub"));
+  const { gh, hub } = await hubFrom(c, f.get("hub"));
+  await lockedEnvironment(gh, hub);
   const data = await file(f, "p12", P12_LIMIT);
   const password = String(f.get("password") ?? "");
   const cert = await inspectP12(data, password);
@@ -315,7 +323,8 @@ async function certificate(c: Ctx) {
 
 async function notary(c: Ctx) {
   const f = await form(c);
-  const { hub } = await hubFrom(c, f.get("hub"));
+  const { gh, hub } = await hubFrom(c, f.get("hub"));
+  await lockedEnvironment(gh, hub);
   const key = notaryKey(await file(f, "p8", P8_LIMIT), String(f.get("keyId") ?? ""), String(f.get("issuerId") ?? ""));
   const checked = await c.s.deps.notary(key);
   await saveNotary(hub, key);
@@ -405,6 +414,7 @@ async function sparkleStore(c: Ctx) {
   if (!held || Date.now() - held.at > 30 * 60_000) throw new TapsterError("read the key from your keychain first", "Click Read it from my keychain again.");
   if (body.pasted.trim() !== held.seed) throw new TapsterError("that is not the key shown above", "Paste the key itself, so the copy your password manager keeps is the right one.");
   const config = await sparkleConfig(gh, hub, body.label);
+  await lockedEnvironment(gh, hub);
   await guardMain(gh, hub, login);
   await setEnvSecret(hub, `SPARKLE_KEY_${body.label.toUpperCase()}`, held.seed);
   const result = await commitToHub(gh, hub, `Pass the Sparkle key ${body.label} to the hub workflow`, async (read) => {

@@ -168,7 +168,7 @@ function Installation({ h, slug }: { h: HubView; slug: string }) {
 function ProtectFirst({ h, what, onGo }: { h: HubView; what: string; onGo: () => void }) {
   return (
     <div class="panel">
-      <Head title={what} lead={`This step stores a key in ${h.name}'s tapster environment, which Protect the hub creates.`} />
+      <Head title={what} lead={`This step stores a key in ${h.name}'s tapster environment. Protect the hub first, so only workflows on main can open it.`} />
       <Note tone="info" title="Protect the hub first">
         <span>Then come back here.</span>
       </Note>

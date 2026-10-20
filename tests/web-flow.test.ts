@@ -76,7 +76,7 @@ test("a fresh tap shows every step open and warns about its old workflows", asyn
 test("the App waits for the protection, which creates the environment its key goes into", async () => {
   const early = await call("POST", "/api/hub/app", { hub: "octo/homebrew-tap" });
   expect(early.status).toBe(400);
-  expect((early.data.error as { reason: string }).reason).toBe("octo/homebrew-tap is not protected yet");
+  expect((early.data.error as { reason: string }).reason).toBe("octo/homebrew-tap's tapster environment is not locked to main");
 });
 
 test("protecting the hub turns every protection on", async () => {
@@ -240,6 +240,16 @@ test("a new tap starts empty, gets protected and receives tapster's README as it
   const files = fake.get("octo/homebrew-fresh")!.files!;
   expect(files.get("README.md")).toContain("brew trust octo/fresh");
   expect(files.has(".github/workflows/tapster.yml")).toBe(true);
+  fake.get("octo/homebrew-fresh")!.env!.policies.push("dev");
+  const notary = new FormData();
+  notary.set("hub", "octo/homebrew-fresh");
+  notary.set("keyId", "ABCDE12345");
+  notary.set("issuerId", "00000000-0000-4000-8000-000000000000");
+  notary.set("p8", new File(["-----BEGIN PRIVATE KEY-----\nMIG\n-----END PRIVATE KEY-----\n"], "AuthKey.p8"));
+  const refused = await call("POST", "/api/hub/notary", notary);
+  expect((refused.data.error as { reason: string }).reason).toBe("octo/homebrew-fresh's tapster environment is not locked to main");
+  expect(fake.get("octo/homebrew-fresh")!.env!.secrets.has("MACOS_NOTARY_KEY")).toBe(false);
+  expect(((await call("GET", "/api/hub?hub=octo/homebrew-fresh")).data as unknown as HubView).protect.environment).toBe(false);
 });
 
 test("a Sparkle key goes to the hub only after the user pasted the very key the keychain holds", async () => {
