@@ -441,15 +441,21 @@ export type HubRunState = { id: number; status: string; conclusion: string | nul
 export const hubRunList = (gh: GitHub, hub: string) =>
   gh.json<{ workflow_runs: HubRunState[] }>("GET", `/repos/${hub}/actions/workflows/tapster.yml/runs?per_page=10`).then((r) => r.workflow_runs, () => [] as HubRunState[]);
 
-// A dispatched run takes a few seconds to show in the list, so the session waits up to a minute for its own dispatch to appear.
+// A dispatched run takes a few seconds to show in the list, so the session waits up to a minute for a run it has not seen yet.
 export async function startHubRun(s: Session, gh: GitHub, hub: string): Promise<{ started: boolean; run: string | null }> {
   const runs = await hubRunList(gh, hub);
   const live = runs.find((r) => r.status !== "completed");
   if (live) return { started: false, run: live.html_url };
-  const sent = s.dispatched.get(hub) ?? 0;
-  if (Date.now() - sent < 60_000 && !runs.some((r) => Date.parse(r.created_at) >= sent - 10_000)) return { started: false, run: null };
-  await gh.json("POST", `/repos/${hub}/actions/workflows/tapster.yml/dispatches`, { ref: "main" });
-  s.dispatched.set(hub, Date.now());
+  const sent = s.dispatched.get(hub);
+  if (sent && Date.now() - sent.at < 60_000 && runs.every((r) => sent.known.includes(r.id))) return { started: false, run: null };
+  s.dispatched.set(hub, { at: Date.now(), known: runs.map((r) => r.id) });
+  try {
+    await gh.json("POST", `/repos/${hub}/actions/workflows/tapster.yml/dispatches`, { ref: "main" });
+  } catch (e) {
+    if (sent) s.dispatched.set(hub, sent);
+    else s.dispatched.delete(hub);
+    throw e;
+  }
   return { started: true, run: null };
 }
 

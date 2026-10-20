@@ -30,7 +30,7 @@ export type Session = {
   pending: Map<string, { hub: string; owner: string; at: number }>;
   apps: Map<string, { id: string; pem: string; slug: string }>;
   sparkle: Map<string, { seed: string; at: number }>;
-  dispatched: Map<string, number>;
+  dispatched: Map<string, { at: number; known: number[] }>;
   touched: number;
   login: string | null;
   link(): string;

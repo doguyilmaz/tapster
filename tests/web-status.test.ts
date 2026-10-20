@@ -144,6 +144,23 @@ test("a hub whose check job writes no reach note leaves the App's reach open eve
   expect((await call("GET", `/api/projects/reach?hub=${HUB}&repo=octo/aims`)).data).toMatchObject({ reaches: true, how: "run" });
 });
 
+test("two requests at once start one hub run, and so does a second click before GitHub lists the first", async () => {
+  const hub = fake.get(HUB)!;
+  fake.completeRun(HUB);
+  fake.listDelay = 300;
+  const before = hub.dispatches;
+  const ask = async () => ((await call("POST", "/api/projects/check", { hub: HUB })).data as { started: boolean }).started;
+  expect((await Promise.all([ask(), ask()])).sort()).toEqual([false, true]);
+  expect(await ask()).toBe(false);
+  expect(hub.dispatches).toBe(before + 1);
+  await Bun.sleep(350);
+  expect(await ask()).toBe(false);
+  fake.listDelay = 0;
+  fake.completeRun(HUB);
+  expect(await ask()).toBe(true);
+  fake.completeRun(HUB);
+});
+
 test("right after creating the App, the session's key answers at once", async () => {
   app.s.apps.set(HUB, { id: "777", pem: fake.pem, slug: "tapster-octo-tap" });
   fake.installation = { id: 9, repos: ["octo/ebb"] };

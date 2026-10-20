@@ -7,7 +7,7 @@ type Ruleset = { id: number; name: string; target: string; enforcement: string; 
 type Release = { id: number; tag_name: string; draft: boolean; prerelease: boolean; created_at: string; published_at: string | null; assets: { id: number; name: string }[]; body: string; html_url?: string };
 
 export type FakeJob = { id: number; name: string; status: string; conclusion: string | null; completed_at: string | null; html_url: string; annotations: { annotation_level: string; title: string; message: string }[] };
-export type FakeRun = { id: number; event: string; status: string; conclusion: string | null; created_at: string; html_url: string; head_branch?: string; head_sha?: string; jobs?: FakeJob[] };
+export type FakeRun = { id: number; event: string; status: string; conclusion: string | null; created_at: string; html_url: string; head_branch?: string; head_sha?: string; jobs?: FakeJob[]; listedAt?: number };
 
 export type FakeRepo = {
   id: number;
@@ -42,6 +42,7 @@ export class FakeHub {
   readonly pem = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString();
   installation: { id: number; repos: string[] } | null = null;
   runDelay: number | null = null;
+  listDelay = 0;
   appKeyWorks = true;
   failWrites = false;
   calls: string[] = [];
@@ -301,12 +302,12 @@ export class FakeHub {
       return json({ variables: [...r.repoVars].map(([n, value]) => ({ name: n, value })) });
     }
     if (rest === "/actions/workflows/tapster.yml") return r.files?.has(".github/workflows/tapster.yml") ? json({ state: "active" }) : json({}, 404);
-    if (rest.startsWith("/actions/workflows/tapster.yml/runs")) return json({ workflow_runs: r.runs.filter((x) => !x.head_branch) });
+    if (rest.startsWith("/actions/workflows/tapster.yml/runs")) return json({ workflow_runs: r.runs.filter((x) => !x.head_branch && (x.listedAt ?? 0) <= Date.now()).map(({ listedAt: _, ...x }) => x) });
     if (rest === "/actions/runs") return json({ workflow_runs: r.runs.filter((x) => x.head_branch !== undefined && (!q.get("branch") || x.head_branch === q.get("branch"))) });
     if (rest === "/actions/workflows/tapster.yml/dispatches") {
       r.dispatches++;
       const id = this.nextId++;
-      r.runs.unshift({ id, event: "workflow_dispatch", status: "queued", conclusion: null, created_at: new Date().toISOString(), html_url: `https://github.com/${full}/actions/runs/${id}`, head_sha: r.head });
+      r.runs.unshift({ id, event: "workflow_dispatch", status: "queued", conclusion: null, created_at: new Date().toISOString(), html_url: `https://github.com/${full}/actions/runs/${id}`, head_sha: r.head, listedAt: Date.now() + this.listDelay });
       if (this.runDelay !== null) setTimeout(() => this.completeRun(full), this.runDelay);
       return json({}, 204);
     }
