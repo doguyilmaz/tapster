@@ -244,7 +244,6 @@ function Follow({ s, tag, onStatus }: { s: ProjectStatus; tag: string; onStatus:
         : kick?.doorbell
           ? "The doorbell starts the hub"
           : "The hub signs and publishes it on its next run";
-  const every = hub.value?.files.every ?? 10;
   const item = (state: ProjectStep["state"], text: ComponentChildren, link?: { href: string; label: string }) => (
     <li>
       <Mark state={state} />
@@ -268,7 +267,7 @@ function Follow({ s, tag, onStatus }: { s: ProjectStatus; tag: string; onStatus:
         {item(view?.draft?.note ? "attention" : draftOpen ? "done" : "wait", view?.draft?.note ? view.draft.note : draftOpen ? "The workflow opened the draft" : "The workflow opens a draft", view?.draft ? { href: view.draft.url, label: "Open the draft" } : undefined)}
         {item(view?.published ? "done" : view?.draft?.note ? "open" : "wait", publishing, view?.published ? { href: view.published.url, label: "Open the release" } : hubBusy && hubRun ? { href: hubRun.url, label: "Open the hub's run" } : { href: view?.hub ?? "#", label: "Hub runs" })}
       </ol>
-      {!view?.published && <p class="muted small">Without this page open, the hub still publishes it on its schedule, within about {every} minutes.</p>}
+      {!view?.published && <p class="muted small">Without this page open, the hub publishes it on its next scheduled run. GitHub can start those hours late; the doorbell starts the hub right away.</p>}
     </div>
   );
 }
