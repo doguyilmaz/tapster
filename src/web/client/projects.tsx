@@ -209,7 +209,7 @@ function Diff({ view }: { view: DiffView }) {
 }
 
 function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: string; onClose: () => void; onAdded: () => void }) {
-  const sheetRef = useRef<HTMLElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
     sheetRef.current?.querySelector<HTMLElement>("button")?.focus();
@@ -281,7 +281,7 @@ function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: str
   return (
     <>
       <div class="sheet-back" onClick={onClose} />
-      <aside class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" ref={sheetRef}>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" ref={sheetRef}>
         <div class="sheet-head">
           <div class="stack tight" style="flex: 1; min-width: 0; gap: 0.1rem">
             <h2 id="sheet-title" class="section-title mono" style="font-size: 1.05rem; overflow-wrap: anywhere">
@@ -488,7 +488,7 @@ function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: str
             </>
           )}
         </div>
-      </aside>
+      </div>
     </>
   );
 }
