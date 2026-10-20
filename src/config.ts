@@ -258,7 +258,11 @@ export function parseConfig(text: string, hubOwner: string): HubConfig {
 function checkToolApp(p: CliPackage, app: ToolApp): void {
   const platforms = Object.keys(p.assets);
   if (!platforms.some((k) => k.startsWith("darwin"))) throw new TapsterError(`${p.name}: app needs a macOS archive that holds ${app.name}`, "Map a darwin-* asset or remove app.");
-  if (platforms.some((k) => k.startsWith("linux"))) throw new TapsterError(`${p.name}: a tool with an app has a cask for macOS only, but it also has a Linux archive`, "Remove the linux-* assets or remove app.");
+  for (const [platform, asset] of Object.entries(p.assets)) {
+    if (!platform.startsWith("linux")) continue;
+    if (asset.toLowerCase().includes(app.name.toLowerCase())) throw new TapsterError(`${p.name}: the ${platform} asset names ${app.name}, but a Linux archive holds the bare binaries`, "Pack the app only into the macOS archives.");
+    if (!asset.endsWith(".tar.gz")) throw new TapsterError(`${p.name}: the ${platform} asset must be a .tar.gz`, "Pack Linux builds as tar.gz; tapster checks that they hold no app.");
+  }
   const inside = p.binaries.find((b) => b === app.name || b.startsWith(`${app.name}/`));
   if (inside) throw new TapsterError(`${p.name}: ${inside} is inside ${app.name}`, "Remove it from binaries: the hub signs the app as a whole. List commands to link under app.binaries.");
 }

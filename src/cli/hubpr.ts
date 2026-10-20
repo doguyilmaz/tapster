@@ -186,10 +186,17 @@ export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { l
   skipped.push(...Object.keys(c.uninstall ?? {}).filter((k) => k !== "launchctl" && k !== "quit").map((k) => `uninstall.${k}`));
   skipped.push(...Object.keys(c.zap ?? {}).filter((k) => k !== "trash").map((k) => `zap.${k}`));
   let app: string | null = null;
+  let os: string | null = null;
+  const fromBlock: { line: string; path: string }[] = [];
   for (const line of String(c.custom_block ?? "").split("\n").map((l) => l.trim()).filter(Boolean)) {
-    const found = /^app\s+"([A-Za-z0-9 ._-]+\.app)"$/.exec(line)?.[1];
-    if (found && !app) app = found;
-    else skipped.push(`custom_block: ${line}`);
+    const opened: string | undefined = os === null ? /^on_(macos|linux)\s+do$/.exec(line)?.[1] : undefined;
+    const found = os !== "linux" ? /^app\s+"([A-Za-z0-9 ._-]+\.app)"$/.exec(line)?.[1] : undefined;
+    const bin = /^binary\s+"([^"]+)"$/.exec(line)?.[1];
+    if (opened) os = opened;
+    else if (os !== null && line === "end") os = null;
+    else if (found && !app) app = found;
+    else if (bin && os !== "linux" && bin.startsWith("#{appdir}/")) fromBlock.push({ line, path: bin });
+    else if (!bin || os !== "linux" || !REL.test(bin)) skipped.push(`custom_block: ${line}`);
   }
   let postflight: { binary: string; args: string[] } | null = null;
   for (const [when, hooks] of Object.entries(c.hooks ?? {})) {
@@ -214,9 +221,11 @@ export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { l
     lines.push("    completions:", ...completions.map(([shell, path]) => `      ${shell}: ${str(path)}`));
     carried.push("completions");
   }
+  const inside = `#{appdir}/${app}/`;
+  const inApp = (b: string) => app !== null && b.startsWith(inside) && REL.test(b.slice(inside.length));
+  for (const b of fromBlock) if (!inApp(b.path)) skipped.push(`custom_block: ${b.line}`);
   if (app && opts.mac !== false) {
-    const inside = `#{appdir}/${app}/`;
-    const binaries = list(c.binaries, /^#\{appdir\}\//).filter((b) => b.startsWith(inside) && REL.test(b.slice(inside.length))).map((b) => b.slice(inside.length));
+    const binaries = [...new Set([...list(c.binaries, /^#\{appdir\}\//), ...fromBlock.map((b) => b.path)])].filter(inApp).map((b) => b.slice(inside.length));
     const id = opts.bundleId?.(app) ?? null;
     lines.push("    app:", `      name: ${JSON.stringify(app)}`, `      bundle_id: ${id ?? "<bundle id>"}`, ...(binaries.length ? [`      binaries: ${JSON.stringify(binaries)}`] : []));
     carried.push("app");

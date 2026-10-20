@@ -56,7 +56,7 @@ function block(lines: string[], indent: string, pkg: PackageConfig, d: Download)
   lines.push(`${indent}sha256 ${rubyString(d.sha256)}`, `${indent}url ${caskUrl(pkg, d)}`);
 }
 
-function os(lines: string[], name: "macos" | "linux", pkg: PackageConfig, downloads: Download[]) {
+function os(lines: string[], name: "macos" | "linux", pkg: PackageConfig, downloads: Download[], artifacts: string[] = []) {
   const pick = (p: string) => downloads.find((d) => d.platform === `${name === "macos" ? "darwin" : "linux"}-${p}`);
   const universal = name === "macos" ? downloads.find((d) => d.platform === "darwin-universal") : undefined;
   const arm = pick("arm64");
@@ -76,6 +76,7 @@ function os(lines: string[], name: "macos" | "linux", pkg: PackageConfig, downlo
       lines.push("    end");
     }
   }
+  if (artifacts.length) lines.push("", ...artifacts.map((a) => a.replace(/^(?=.)/gm, "  ")));
   lines.push("  end");
 }
 
@@ -84,46 +85,46 @@ export const hasCask = (pkg: PackageConfig) => isApp(pkg) || Object.keys(pkg.ass
 export function renderCask(i: RenderInput): string | null {
   const { pkg } = i;
   if (!hasCask(pkg)) return null;
-  const lines = [`cask ${rubyString(pkg.name)} do`, `  version ${rubyString(i.version)}`, ""];
-  os(lines, "macos", pkg, i.downloads);
-  os(lines, "linux", pkg, i.downloads);
-  lines.push(
-    "",
-    `  name ${rubyString(pkg.name)}`,
-    `  desc ${rubyString(tidyDesc(i.description))}`,
-    `  homepage ${rubyString(i.homepage)}`,
-    "",
-    "  livecheck do",
-    '    skip "tapster"',
-    "  end",
-    "",
-  );
-  if (pkg.app) lines.push("  depends_on :macos", "");
-  const fromApp = pkg.app?.binaries ?? [];
+  const { app } = pkg;
+  const quit = pkg.cask.uninstall?.quit ?? [];
+  const fromApp = app?.binaries ?? [];
   const taken = new Set(fromApp.map((b) => basename(b)));
-  if (pkg.app) lines.push(`  app ${rubyString(pkg.app.name)}`);
-  for (const b of pkg.binaries) if (!taken.has(basename(b))) lines.push(`  binary ${rubyString(b)}`);
-  for (const b of fromApp) lines.push(appBinary(pkg.app!.name, b));
+  const appLines = app ? [`  app ${rubyString(app.name)}`, ...fromApp.map((b) => appBinary(app.name, b))] : [];
+  const own = pkg.binaries.filter((b) => !taken.has(basename(b))).map((b) => `  binary ${rubyString(b)}`);
+  // With Linux builds, the macOS-only app and its uninstall go into on_macos and Linux links the bare binaries instead.
+  const split = app !== undefined && i.downloads.some((d) => d.platform.startsWith("linux-"));
+  const lines = [`cask ${rubyString(pkg.name)} do`, `  version ${rubyString(i.version)}`, ""];
+  const uninstall = split ? uninstallStanza(pkg.cask, quit) : null;
+  os(lines, "macos", pkg, i.downloads, split ? [...appLines, ...(uninstall ? ["", uninstall] : [])] : []);
+  os(lines, "linux", pkg, i.downloads, split ? pkg.binaries.filter((b) => taken.has(basename(b))).map((b) => `  binary ${rubyString(b)}`) : []);
+  lines.push("", `  name ${rubyString(pkg.name)}`, `  desc ${rubyString(tidyDesc(i.description))}`, `  homepage ${rubyString(i.homepage)}`, "", "  livecheck do", '    skip "tapster"', "  end");
+  const top = !app || split ? own : ["  depends_on :macos", "", appLines[0]!, ...own, ...appLines.slice(1)];
   const c = pkg.completions;
-  if (c?.bash) lines.push(`  bash_completion ${rubyString(c.bash)}`);
-  if (c?.zsh) lines.push(`  zsh_completion ${rubyString(c.zsh)}`);
-  if (c?.fish) lines.push(`  fish_completion ${rubyString(c.fish)}`);
-  tail(lines, pkg.cask, pkg.cask.uninstall?.quit ?? []);
+  if (c?.bash) top.push(`  bash_completion ${rubyString(c.bash)}`);
+  if (c?.zsh) top.push(`  zsh_completion ${rubyString(c.zsh)}`);
+  if (c?.fish) top.push(`  fish_completion ${rubyString(c.fish)}`);
+  if (top.length) lines.push("", ...top);
+  tail(lines, pkg.cask, quit, !split);
   return lines.join("\n");
 }
 
 const appBinary = (app: string, b: string) => `  binary "#{appdir}/${rubyString(`${app}/${b}`).slice(1)}`;
 
-function tail(lines: string[], cask: CliPackage["cask"], quit: string[]): void {
+function uninstallStanza(cask: CliPackage["cask"], quit: string[]): string | null {
+  const parts = ([["launchctl", cask.uninstall?.launchctl ?? []], ["quit", quit]] as const).filter(([, v]) => v.length > 0);
+  const width = Math.max(0, ...parts.map(([k]) => k.length)) + 2;
+  return parts.length ? `  uninstall ${parts.map(([k, v]) => `${`${k}:`.padEnd(width)}${list([...v])}`).join(",\n            ")}` : null;
+}
+
+function tail(lines: string[], cask: CliPackage["cask"], quit: string[], withUninstall = true): void {
   const post = cask.postflight;
   if (post) {
     lines.push("", "  postflight_steps do", `    run ${rubyString(`bin/${post.binary}`)},`, "        base:         :homebrew_prefix,");
     if (post.args.length) lines.push(`        args:         [${post.args.map(rubyString).join(", ")}],`);
     lines.push("        must_succeed: false", "  end");
   }
-  const parts = ([["launchctl", cask.uninstall?.launchctl ?? []], ["quit", quit]] as const).filter(([, v]) => v.length > 0);
-  const width = Math.max(0, ...parts.map(([k]) => k.length)) + 2;
-  if (parts.length) lines.push("", `  uninstall ${parts.map(([k, v]) => `${`${k}:`.padEnd(width)}${list([...v])}`).join(",\n            ")}`);
+  const uninstall = withUninstall ? uninstallStanza(cask, quit) : null;
+  if (uninstall) lines.push("", uninstall);
   if (cask.zap?.trash.length) lines.push("", `  zap trash: ${list(cask.zap.trash)}`);
   if (cask.caveats) lines.push("", `  caveats ${rubyString(cask.caveats)}`);
   lines.push("end", "");

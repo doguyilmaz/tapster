@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { unpackTool } from "../src/action/fetch";
+import { unpackArchives, unpackTool } from "../src/action/fetch";
 import { repackTool } from "../src/action/publish";
 import { checkToolApp } from "../src/appcheck";
 import { type TarEntry, readTarGz, writeTarGz } from "../src/archive";
@@ -81,6 +81,40 @@ test.each([
   ["a linked command that is not Mach-O", tree({ "ebb.app/Contents/MacOS/ebb": "#!/bin/sh\n" }), /app.binaries/],
 ])("refuses %s", async (_, gz, reason) => {
   await expect(unpack(gz)).rejects.toThrow(reason);
+});
+
+const LINUX = "ebb_1.2.0_linux_amd64.tar.gz";
+const ELF = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00]);
+const withLinux = { ...ebb, assets: { ...ebb.assets, "linux-amd64": "ebb_{version}_linux_amd64.tar.gz" } };
+const release = (linux: Buffer, mac = tree()) => {
+  const dir = mkdtempSync(join(tmpdir(), "tool-release-"));
+  mkdirSync(join(dir, "assets"));
+  writeFileSync(join(dir, "assets", ARCHIVE), mac);
+  writeFileSync(join(dir, "assets", LINUX), linux);
+  return dir;
+};
+
+test("beside Linux builds only the macOS archive is unpacked for signing; the Linux archive keeps its bytes", async () => {
+  const linux = writeTarGz([file("ebb", ELF, 0o755), file("README.md", "# ebb\n")], 0);
+  const dir = release(linux);
+  const archives = await unpackArchives(withLinux, cfg.packages, "1.2.0", dir, agree);
+  expect(archives).toEqual([{ asset: ARCHIVE, platform: "darwin-universal", dir: join(dir, "bin", ARCHIVE), binaries: ["ebb"], app: "ebb.app" }]);
+  expect(readFileSync(join(dir, "assets", LINUX)).equals(linux)).toBe(true);
+});
+
+test("a tool without an app keeps today's checks: its Linux archive is not opened", async () => {
+  const dir = release(Buffer.from("not a tar"), writeTarGz([file("ebb", MACHO, 0o755)], 0));
+  const archives = await unpackArchives({ ...withLinux, app: undefined }, cfg.packages, "1.2.0", dir, agree);
+  expect(archives).toEqual([{ asset: ARCHIVE, platform: "darwin-universal", dir: join(dir, "bin", ARCHIVE), binaries: ["ebb"] }]);
+});
+
+test.each([
+  ["the app", [file("ebb", ELF, 0o755), file("ebb.app/Contents/Info.plist", plist(info))], /holds ebb.app/],
+  ["the app in another spelling", [file("ebb", ELF, 0o755), file("EBB.app/x", "x")], /holds EBB.app/],
+  ["no bare binary", [file("README.md", "x")], /does not contain ebb/],
+  ["the binary as a symlink", [file("bin/ebb", ELF, 0o755), link("ebb", "bin/ebb")], /does not contain ebb/],
+])("a Linux archive beside an app is refused when it holds %s", async (_, entries, reason) => {
+  await expect(unpackArchives(withLinux, cfg.packages, "1.2.0", release(writeTarGz(entries, 0)), agree)).rejects.toThrow(reason);
 });
 
 test("the app checks read the configured identity, not the archive's", async () => {

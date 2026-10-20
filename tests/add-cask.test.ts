@@ -91,6 +91,45 @@ test("without a bundle id the entry asks for one, and without Apple credentials 
   expect(noMac.carried).not.toContain("app");
 });
 
+const crossPlatform = `version: 2
+project_name: aims
+builds:
+  - binary: aims
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+homebrew_casks:
+  - name: aims
+    custom_block: |
+      on_macos do
+        app "aims.app"
+        binary "#{appdir}/aims.app/Contents/MacOS/aims"
+      end
+      on_linux do
+        binary "aims"
+      end
+    uninstall:
+      launchctl: [com.o.aims.keepalive]
+`;
+const crossRelease = { assets: ["darwin_amd64", "darwin_arm64", "linux_amd64", "linux_arm64"].map((p) => `aims_0.2.0_${p}.tar.gz`), version: "0.2.0" };
+const aimsIds = { bundleId: (app: string) => (app === "aims.app" ? "com.o.aims" : null) };
+
+test("an app in on_macos and the bare binary in on_linux carry over as an app beside Linux archives, which the hub accepts", () => {
+  const c = goreleaserCask(crossPlatform, aimsIds);
+  expect(c.carried).toEqual(["app", "uninstall"]);
+  expect(c.notes.join("\n")).not.toContain("not carried");
+  const entry = goEntry("aims", "o/aims", crossPlatform, crossRelease).entry!;
+  const { config, invalid } = parseHub(`version: 1\ntap: o/tap\npackages:\n${[entry, ...c.lines].join("\n")}\n`, "o");
+  expect(invalid).toEqual([]);
+  const p = config.packages[0] as CliPackage;
+  expect(Object.keys(p.assets).sort()).toEqual(["darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64"]);
+  expect(p.app).toEqual({ name: "aims.app", bundle_id: "com.o.aims", binaries: ["Contents/MacOS/aims"], entitlements: [] });
+  expect(p.cask.uninstall).toEqual({ launchctl: ["com.o.aims.keepalive"] });
+  const flat = goreleaserCask(crossPlatform.replace(/ {6}on_macos do\n([\s\S]*?) {6}end\n {6}on_linux do\n {8}binary "aims"\n {6}end\n/, (_, body: string) => body.replaceAll("        ", "      ")), aimsIds);
+  expect(flat.lines).toEqual(c.lines);
+  const odd = goreleaserCask(crossPlatform.replace('binary "aims"', 'binary "aims"\n        manpage "aims.1"').replace("#{appdir}/aims.app/", "#{appdir}/other.app/"), aimsIds);
+  expect(odd.notes.at(-1)).toBe('not carried from GoReleaser\'s Homebrew section: custom_block: manpage "aims.1", custom_block: binary "#{appdir}/other.app/Contents/MacOS/aims"');
+});
+
 test("Homebrew parts tapster does not render are named, not carried", () => {
   const odd = goreleaser
     .replace('app "ebb.app"', 'app "ebb.app"\n      depends_on macos: ">= :ventura"')

@@ -6,7 +6,7 @@ import { isMachO, readTarGz, resolveSymlinks } from "../archive";
 import { verifyAttestation } from "../attest";
 import { macCodeIn } from "../maccode";
 import { parseChecksums, sha256 } from "../checksums";
-import { type AppPackage, type CliPackage, type PackageConfig, type Platform, assetName, isApp, versionOf } from "../config";
+import { type AppPackage, type CliPackage, type PackageConfig, type Platform, type ToolApp, assetName, isApp, versionOf } from "../config";
 import { TapsterError } from "../errors";
 import { GitHub, type Release } from "../github";
 import { type WorkItem, draftOrigin } from "../plan";
@@ -14,7 +14,7 @@ import { writeTree } from "../extract";
 import { readSecret, requireVar } from "../mask";
 import { failure, warn } from "../report";
 import { type InstallationToken, attestationToken, installationToken } from "../token";
-import { type Fetched, type Manifest, saveManifest, workdir } from "../workdir";
+import { type DarwinArchive, type Fetched, type Manifest, saveManifest, workdir } from "../workdir";
 import { type Context, parseWork } from "./context";
 
 async function unpackApp(ctx: Context, pkg: AppPackage, tag: string, archive: Buffer, dir: string, created: string): Promise<Fetched["app"]> {
@@ -60,6 +60,27 @@ export async function unpackTool(pkg: CliPackage, all: PackageConfig[], name: st
   await writeTree(own, binDir);
   await checkToolApp(join(binDir, app.name), app, all, readPlist);
   return { binaries: found, app: app.name };
+}
+
+function checkLinuxArchive(pkg: CliPackage, app: ToolApp, name: string, archive: Buffer): void {
+  const entries = readTarGz(archive);
+  const held = entries.map((e) => e.name.split("/")[0]!).find((top) => top.toLowerCase() === app.name.toLowerCase());
+  if (held) throw new TapsterError(`${name} holds ${held}, but a Linux archive holds the bare binaries`, "Pack the app only into the macOS archives.");
+  const missing = pkg.binaries.filter((b) => !entries.some((e) => e.type === "file" && e.name === b));
+  if (missing.length) throw new TapsterError(`${name} does not contain ${missing.join(", ")}`, "Check binaries in tapster.yml.");
+}
+
+export async function unpackArchives(pkg: CliPackage, all: PackageConfig[], version: string, dir: string, readPlist: ReadPlist = systemPlist): Promise<DarwinArchive[]> {
+  const archives: DarwinArchive[] = [];
+  for (const platform of Object.keys(pkg.assets) as Platform[]) {
+    const name = assetName(pkg, platform, version)!;
+    if (platform.startsWith("linux") && pkg.app) checkLinuxArchive(pkg, pkg.app, name, await readFile(join(dir, "assets", name)));
+    if (!platform.startsWith("darwin")) continue;
+    const binDir = join(dir, "bin", name);
+    const unpacked = await unpackTool(pkg, all, name, await readFile(join(dir, "assets", name)), binDir, readPlist);
+    archives.push({ asset: name, platform, dir: binDir, ...unpacked });
+  }
+  return archives;
 }
 
 export function assertFetchable(release: Release, item: WorkItem, owner: string): void {
@@ -118,12 +139,7 @@ export async function fetchMode(ctx: Context): Promise<void> {
         if (isApp(pkg)) {
           const name = assetName(pkg, Object.keys(pkg.assets)[0] as Platform, version)!;
           fetched.app = await unpackApp(ctx, pkg, item.tag, await readFile(join(dir, "assets", name)), dir, release.created_at);
-        } else for (const platform of (Object.keys(pkg.assets) as Platform[]).filter((p) => p.startsWith("darwin"))) {
-          const name = assetName(pkg, platform, version)!;
-          const binDir = join(dir, "bin", name);
-          const unpacked = await unpackTool(pkg, ctx.config.packages, name, await readFile(join(dir, "assets", name)), binDir);
-          fetched.archives.push({ asset: name, platform, dir: binDir, ...unpacked });
-        }
+        } else fetched.archives = await unpackArchives(pkg, ctx.config.packages, version, dir);
       }
       manifest.items.push(fetched);
     } catch (e) {

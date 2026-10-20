@@ -35,9 +35,20 @@ test("the app gets its own entitlements, not the tool's", () => {
   expect(() => parseConfig(ebb.replace("binaries: [Contents/MacOS/ebb]", "binaries: [Contents/MacOS/ebb]\n      entitlements: [com.apple.security.get-task-allow]"), "o")).toThrow();
 });
 
+const withLinux = (asset = "ebb_{version}_linux_amd64.tar.gz") => ebb.replace('_darwin_universal.tar.gz"', `_darwin_universal.tar.gz"\n      linux-amd64: "${asset}"`);
+
+test("a tool with an app may also ship Linux archives, which keep the bare binary", () => {
+  const p = parseConfig(withLinux(), "o").packages[0] as CliPackage;
+  expect(p.app!.name).toBe("ebb.app");
+  expect(Object.keys(p.assets)).toEqual(["darwin-universal", "linux-amd64"]);
+});
+
 test.each([
   ["an app without a macOS archive", ebb.replace('darwin-universal: "ebb_{version}_darwin_universal.tar.gz"', 'windows-amd64: "ebb_{version}_windows_amd64.zip"'), /macOS archive/],
-  ["an app with a Linux archive", ebb.replace('_darwin_universal.tar.gz"', '_darwin_universal.tar.gz"\n      linux-amd64: "ebb_{version}_linux_amd64.tar.gz"'), /Linux/],
+  ["an app with only a Linux archive", ebb.replace('darwin-universal: "ebb_{version}_darwin_universal.tar.gz"', 'linux-amd64: "ebb_{version}_linux_amd64.tar.gz"'), /macOS archive/],
+  ["an app named in a Linux asset", withLinux("ebb.app_{version}_linux_amd64.tar.gz"), /linux-amd64 asset names ebb.app/],
+  ["a Linux archive beside an app that is not a .tar.gz", withLinux("ebb_{version}_linux_amd64.zip"), /linux-amd64 asset must be a .tar.gz/],
+  ["a binary inside the app beside a Linux archive", withLinux().replace("binaries: [ebb]", "binaries: [ebb, ebb.app/Contents/MacOS/ebb]"), /inside ebb.app/],
   ["a binary inside the app", ebb.replace("binaries: [ebb]", "binaries: [ebb, ebb.app/Contents/MacOS/ebb]"), /inside ebb.app/],
   ["a binary named like the app", ebb.replace("binaries: [ebb]", "binaries: [ebb.app]"), /inside ebb.app/],
   ["an app name that is not an .app", ebb.replace("name: ebb.app", "name: ebb"), /app.name/],
