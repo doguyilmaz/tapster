@@ -1,6 +1,6 @@
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import { readSmall } from "../cli/paths";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import type { LocalProject, ProjectKind } from "./contract";
 
 const SKIP = new Set(["node_modules", "Library", "Applications", "Pictures", "Music", "Movies", "Documents", "Desktop", "Downloads", "Public", "vendor", "Pods", "DerivedData", "build", "dist", "target", "out"]);
@@ -130,11 +130,13 @@ export function cloneFacts(dir: string): CloneFacts {
 
 const onDefault = (c: CloneFacts) => c.branch !== null && c.branch === (c.defaultBranch ?? (c.branch === "main" || c.branch === "master" ? c.branch : null));
 
+const named = (f: { path: string; repo: string }) => basename(f.path).toLowerCase() === f.repo.split("/")[1]!.toLowerCase();
+
 export function oneClonePerRepo<T extends { path: string; repo: string }>(found: T[], facts: (dir: string) => CloneFacts = cloneFacts): (T & { others: string[] })[] {
   const groups = new Map<string, T[]>();
   for (const f of found) groups.set(f.repo.toLowerCase(), [...(groups.get(f.repo.toLowerCase()) ?? []), f]);
   return [...groups.values()].map((list) => {
-    const ranked = list.length === 1 ? list : list.map((f) => ({ f, c: facts(f.path) })).sort((a, b) => Number(onDefault(b.c)) - Number(onDefault(a.c)) || b.c.changed - a.c.changed).map((x) => x.f);
+    const ranked = list.length === 1 ? list : list.map((f) => ({ f, c: facts(f.path) })).sort((a, b) => Number(named(b.f)) - Number(named(a.f)) || Number(onDefault(b.c)) - Number(onDefault(a.c)) || b.c.changed - a.c.changed).map((x) => x.f);
     return { ...ranked[0]!, others: ranked.slice(1).map((f) => f.path) };
   });
 }

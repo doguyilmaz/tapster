@@ -5,6 +5,7 @@ import { type ProjectStep, type ProjectStepId, canRelease, projectNext, projectS
 import { get, post } from "./api";
 import { hub, hubName, problemOf, say, statusOf, tilde } from "./state";
 import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner } from "./ui";
+import { capFirst } from "../steps";
 
 export const KIND: Record<string, string> = { go: "Go with GoReleaser", bun: "Bun", app: "Mac app with Sparkle" };
 
@@ -57,7 +58,7 @@ function Mark({ state }: { state: ProjectStep["state"] }) {
 
 const sentence = (parts: string[]) => {
   const text = parts.join("; ");
-  return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
+  return `${capFirst(text)}.`;
 };
 
 function Step({ state, title, children }: { state: ProjectStep["state"]; title: string; children: ComponentChildren }) {

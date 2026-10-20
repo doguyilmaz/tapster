@@ -149,6 +149,9 @@ const dedent = (lines: string[]) => {
   return lines.map((l) => l.slice(indent)).join("\n").trimEnd();
 };
 
+// Names such as doguyilmaz/ebb or tapster.yml keep their case; only a plain first word gets a capital.
+export const capFirst = (s: string) => (/^[a-z]+[\s:;,]/.test(s) ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
 export function notes(lines: string[]): NoteItem[] {
   const out: NoteItem[] = [];
   for (const said of lines) {
@@ -161,7 +164,7 @@ export function notes(lines: string[]): NoteItem[] {
       item = last;
       item.text += `${/[.:;!?]$/.test(item.text) ? "" : "."} ${head}`;
     } else {
-      item = { text: /^[a-z]+[\s:;,]/.test(head) ? head.charAt(0).toUpperCase() + head.slice(1) : head, block: null };
+      item = { text: capFirst(head), block: null };
       out.push(item);
     }
     let i = 0;
