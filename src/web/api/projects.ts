@@ -55,10 +55,12 @@ async function scan(c: Ctx): Promise<ScanView> {
   const { found, truncated } = scanClones(roots);
   const config = await readHubFile(gh, hub, "tapster.yml", "main").catch(() => null);
   const listed = new Set((config ? parseHub(config, login).config.packages.map((p) => p.repo.toLowerCase()) : []));
+  const pulls = await gh.json<{ html_url: string; head: { ref: string } }[]>("GET", `/repos/${hub}/pulls?state=open&per_page=100`).catch(() => []);
+  const proposed = new Map(pulls.filter((p) => p.head?.ref?.startsWith("tapster-add-")).map((p) => [p.head.ref.slice("tapster-add-".length), p.html_url]));
   const mine = found.filter((f) => f.owner.toLowerCase() === login.toLowerCase() && f.repo.toLowerCase() !== hub.toLowerCase());
   const unique = [...new Map(mine.map((f) => [f.path, f])).values()];
   return {
-    projects: unique.map(({ owner: _, ...p }) => ({ ...p, inHub: listed.has(p.repo.toLowerCase()) })).sort((a, b) => Number(b.kind !== null) - Number(a.kind !== null) || a.repo.localeCompare(b.repo)),
+    projects: unique.map(({ owner: _, ...p }) => ({ ...p, inHub: listed.has(p.repo.toLowerCase()), proposed: proposed.get(projectName(p.repo)) ?? null })).sort((a, b) => Number(b.kind !== null) - Number(a.kind !== null) || a.repo.localeCompare(b.repo)),
     roots,
     others: found.length - mine.length,
     truncated,

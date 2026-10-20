@@ -41,9 +41,18 @@ export function defaultRoots(home: string, cwd: string): string[] {
   return [cwd, dirname(cwd), ...HOME_ROOTS.map((r) => join(home, r))];
 }
 
+const within = (p: string, root: string) => p === root || p.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+
+const real = (p: string) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+};
+
 export function insideHome(path: string, home: string): boolean {
-  const p = resolve(path);
-  return p === home || p.startsWith(home.endsWith(sep) ? home : `${home}${sep}`);
+  return within(resolve(path), resolve(home)) || within(real(path), real(home));
 }
 
 export type ScanResult = { found: (LocalProject & { owner: string })[]; truncated: boolean };
@@ -61,42 +70,42 @@ export function scanClones(roots: string[], o: { depth?: number; maxDirs?: numbe
       truncated = true;
       return;
     }
-    let real: string;
+    let canonical: string;
     try {
-      real = realpathSync(dir);
+      canonical = realpathSync(dir);
     } catch {
       return;
     }
-    if (seen.has(real)) return;
-    seen.add(real);
+    if (seen.has(canonical)) return;
+    seen.add(canonical);
     visited++;
     let entries: string[];
     try {
-      entries = readdirSync(real);
+      entries = readdirSync(canonical);
     } catch {
       return;
     }
     if (entries.includes(".git")) {
       let git: ReturnType<typeof lstatSync> | null = null;
       try {
-        git = lstatSync(join(real, ".git"));
+        git = lstatSync(join(canonical, ".git"));
       } catch {
         git = null;
       }
-      const config = git?.isDirectory() ? readSmall(join(real, ".git", "config"), 64 * 1024) : null;
+      const config = git?.isDirectory() ? readSmall(join(canonical, ".git", "config"), 64 * 1024) : null;
       const repo = config ? originRepo(config) : null;
-      if (repo) found.push({ path: real, repo, owner: repo.split("/")[0]!, inHub: false, ...projectKind(real, entries) });
+      if (repo) found.push({ path: dir, repo, owner: repo.split("/")[0]!, inHub: false, proposed: null, ...projectKind(canonical, entries) });
       return;
     }
     if (level >= depth) return;
     for (const name of entries) {
       if (name.startsWith(".") || SKIP.has(name)) continue;
       try {
-        if (!lstatSync(join(real, name)).isDirectory()) continue;
+        if (!lstatSync(join(canonical, name)).isDirectory()) continue;
       } catch {
         continue;
       }
-      walk(join(real, name), level + 1);
+      walk(join(dir, name), level + 1);
     }
   };
   for (const root of roots) walk(root, 0);

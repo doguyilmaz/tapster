@@ -80,7 +80,7 @@ try {
   await shot("16-phone-dark");
   await page.size(1280, 860);
   await page.clickText("Projects", "nav a");
-  await page.waitFor("document.body.textContent.includes('In the hub')");
+  await page.waitFor("document.body.textContent.includes('Merge the entry')");
   await shot("17-projects-dark");
 } catch (e) {
   if ((e as Error).message !== "stop") {

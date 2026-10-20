@@ -13,6 +13,8 @@ const when = (iso: string) => {
   return d.toLocaleDateString();
 };
 
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 const RESULT: Record<string, { tone?: "ok" | "warn" | "error"; text: string }> = {
   success: { tone: "ok", text: "Done" },
   failure: { tone: "error", text: "Failed" },
@@ -95,15 +97,15 @@ export function Health() {
                 <Icon name={c.ok ? "check" : "alert"} label={c.ok ? "ok" : "needs a fix"} />
               </span>
               <div class="stack tight" style="gap: 0.2rem">
-                <span style="font-weight: 550">{c.name}</span>
+                <span style="font-weight: 550">{cap(c.name)}</span>
                 {!c.ok && <span class="muted small">{c.fix}</span>}
-                {c.note && <span class="faint small">{c.note}</span>}
+                {c.note && <span class="faint small">{cap(c.note)}.</span>}
               </div>
             </div>
           ))}
         </div>
       )}
-      {view?.note && <p class="muted small">{view.note}</p>}
+      {view?.note && <p class="muted small">{cap(view.note.replace(/^note: /, ""))}.</p>}
       {view && (
         <section class="stack tight">
           <h2 class="section-title">Recent hub runs</h2>

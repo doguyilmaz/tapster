@@ -146,6 +146,7 @@ export class FakeHub {
     if (content) {
       const path = decodeURIComponent(content[1]!);
       if (method === "PUT") {
+        if (body.branch && body.branch !== "main") return json({}, 201);
         r.files ??= new Map();
         r.files.set(path, Buffer.from(String(body.content), "base64").toString("utf8"));
         r.head = sha(`${r.head}${path}`);
@@ -212,7 +213,7 @@ export class FakeHub {
       r.pulls.push(pr);
       return json(pr, 201);
     }
-    if (rest === "/pulls") return json(r.pulls.filter((x) => !q.get("head") || q.get("head")!.endsWith(`:${x.head}`)));
+    if (rest === "/pulls") return json(r.pulls.filter((x) => !q.get("head") || q.get("head")!.endsWith(`:${x.head}`)).map((x) => ({ ...x, head: { ref: x.head } })));
     if (rest === "/issues") return json(r.issues);
     if (rest === "/keys") return json(r.keys);
     if (rest.startsWith("/collaborators")) return json([]);

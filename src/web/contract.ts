@@ -1,6 +1,6 @@
 export type Problem = { reason: string; fix: string };
 
-export type SessionView = { version: string; dev: boolean; platform: string; here: { hub: string | null; repo: string | null; path: string } };
+export type SessionView = { version: string; dev: boolean; platform: string; home: string; here: { hub: string | null; repo: string | null; path: string } };
 
 export type AccountView = { state: "no-gh" } | { state: "signed-out" } | { state: "ok"; login: string; missing: string[] };
 
@@ -30,7 +30,7 @@ export type AppStart = { action: string; manifest: string; permissions: string[]
 
 export type FilePlan = { path: string; content: string; before: string | null; change: "create" | "update" | "same" | "remove" };
 
-export type FilesView = { files: FilePlan[]; kept: string[]; pin: string; notes: string[]; foreign: string[] };
+export type FilesView = { files: FilePlan[]; kept: string[]; pin: string; notes: string[]; foreign: string[]; readme: boolean };
 
 export type ProjectKind = "go" | "bun" | "app";
 
@@ -40,6 +40,7 @@ export type LocalProject = {
   kind: ProjectKind | null;
   why: string | null;
   inHub: boolean;
+  proposed: string | null;
 };
 
 export type ScanView = { projects: LocalProject[]; roots: string[]; others: number; truncated: boolean };

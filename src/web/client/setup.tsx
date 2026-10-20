@@ -152,8 +152,8 @@ function Installation({ h, slug }: { h: HubView; slug: string }) {
       )}
       {!view && <p class="muted small">GitHub shows an App's repositories only to the App itself. Each hub run reports a project the App cannot reach.</p>}
       <div class="row">
-        <Out href={install} class="btn primary">
-          Install the App
+        <Out href={install} class={view?.id ? "btn secondary" : "btn primary"}>
+          {view?.id ? "Change its repositories" : "Install the App"}
         </Out>
         <Out href={`https://github.com/settings/apps/${slug}`} class="btn quiet">
           App settings
@@ -484,18 +484,19 @@ function FileCard({ f }: { f: FilesView["files"][number] }) {
 function Files({ h }: { h: HubView }) {
   const [every, setEvery] = useState<number | null>(h.files.every);
   const [remove, setRemove] = useState<string[]>([]);
+  const [readme, setReadme] = useState(false);
   const [view, setView] = useState<FilesView | null>(null);
   const [loading, loadProblem, load] = useAction();
   const [busy, problem, run] = useAction();
   const [written, setWritten] = useState(false);
   const others = h.protect.others.map((o) => o.file);
   useEffect(() => {
-    void load(async () => setView(await post<FilesView>("/api/hub/files/preview", { hub: h.name, every, remove })));
-  }, [h.name, every, remove.join(",")]);
+    void load(async () => setView(await post<FilesView>("/api/hub/files/preview", { hub: h.name, every, remove, readme })));
+  }, [h.name, every, remove.join(","), readme]);
   const changes = view?.files.filter((f) => f.change !== "same") ?? [];
   const write = () =>
     run(async () => {
-      const res = await post<{ result: string }>("/api/hub/files", { hub: h.name, every, remove });
+      const res = await post<{ result: string }>("/api/hub/files", { hub: h.name, every, remove, readme });
       setWritten(true);
       await loadHub();
       say("ok", res.result === "committed" ? `Wrote the hub files to ${h.name}.` : "The hub files were already up to date.");
@@ -530,6 +531,15 @@ function Files({ h }: { h: HubView }) {
           ))}
         </div>
       )}
+      {(view?.readme || readme) && (
+        <label class="switch">
+          <input type="checkbox" checked={readme} onChange={(e) => setReadme((e.currentTarget as HTMLInputElement).checked)} />
+          <span>
+            <strong>Replace README.md with tapster's</strong>
+            <span>It tells your users how to install from the hub, including brew trust, which Homebrew asks for before it loads casks from a tap. Your current README goes away; the diff below shows both.</span>
+          </span>
+        </label>
+      )}
       {loading && !view && (
         <p class="row muted">
           <Spinner /> Comparing with {h.name}
@@ -546,11 +556,13 @@ function Files({ h }: { h: HubView }) {
             <FileCard key={f.path} f={f} />
           ))}
           {view.kept.length > 0 && <p class="muted small">Kept as they are: {view.kept.join(", ")}.</p>}
-          {view.notes.map((n) => (
-            <p class="muted small" key={n}>
-              {n.replace(/tapster init --workflow --every <minutes>/, "this list")}
-            </p>
-          ))}
+          {view.notes
+            .filter((n) => !n.startsWith("The hub looks for new drafts every"))
+            .map((n) => (
+              <p class="muted small" key={n}>
+                {n}
+              </p>
+            ))}
         </div>
       )}
       {view && view.foreign.length > 0 && (
@@ -711,8 +723,22 @@ export function Setup() {
             </li>
           ))}
         </ol>
-        <div class="card pad" ref={panelRef}>
+        <div class="card pad stack" ref={panelRef} style="gap: 1.5rem">
           {panel[current]}
+          {(() => {
+            const at = list.findIndex((s) => s.id === current);
+            const here = list[at];
+            const after = list.slice(at + 1).find((s) => s.state !== "done" && s.state !== "skipped");
+            if (!here || (here.state !== "done" && here.state !== "skipped") || !after) return null;
+            return (
+              <div class="row" style="border-top: 1px solid var(--line); padding-top: 1.25rem">
+                <button type="button" class="btn primary" onClick={() => pick(after.id)}>
+                  Continue: {after.name}
+                  <Icon name="arrow" />
+                </button>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

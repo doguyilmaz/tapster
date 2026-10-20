@@ -106,3 +106,9 @@ export function setMac(name: string, choice: "yes" | "no"): void {
 }
 
 export const appResult = signal<{ kind: "created" } | { kind: "failed"; problem: Problem } | { kind: "unknown" } | null>(null);
+
+export function tilde(path: string): string {
+  const home = session.value?.home;
+  if (!home) return path;
+  return path === home ? "~" : path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { AddView, DiffView, InspectView, LocalProject, Problem as ProblemView, ScanView } from "../contract";
 import { post } from "./api";
-import { hub, loadHub, problemOf, recall, remember, say } from "./state";
+import { hub, loadHub, problemOf, recall, remember, say, tilde } from "./state";
 import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner } from "./ui";
 
 const ROOTS_KEY = "tapster.roots";
@@ -21,12 +21,16 @@ function Row({ p, onOpen }: { p: LocalProject; onOpen: (p: LocalProject) => void
     <div class="item">
       <button type="button" class="link" onClick={() => onOpen(p)} disabled={!p.kind}>
         <span class="name">{p.repo}</span>
-        <span class="path">{p.path}</span>
+        <span class="path">{tilde(p.path)}</span>
       </button>
       <span class="row">
         {p.kind ? <Badge>{KIND[p.kind]}</Badge> : <span class="muted small">{p.why}</span>}
         {p.inHub ? (
           <Badge tone="ok">In the hub</Badge>
+        ) : p.proposed ? (
+          <Out href={p.proposed} class="btn secondary small">
+            Merge the entry
+          </Out>
         ) : p.kind ? (
           <button type="button" class="btn secondary small" onClick={() => onOpen(p)}>
             Add
@@ -152,13 +156,24 @@ export function Projects() {
             </section>
           )}
           <p class="faint small">
-            Looked in {scan.roots.length} folders{scan.truncated ? ", stopped early because there were many" : ""}. {scan.others ? `${scan.others} clones of other owners' repositories are not listed.` : ""}
+            Looked in {scan.roots.map(tilde).join(", ")}{scan.truncated ? ", and stopped early because there were many folders" : ""}. {scan.others ? `${scan.others} ${scan.others === 1 ? "clone belongs" : "clones belong"} to other owners and ${scan.others === 1 ? "is" : "are"} not listed.` : ""}
           </p>
         </>
       )}
       {open && <Sheet p={open} hubName={h.name} onClose={() => setOpen(null)} onAdded={() => void run()} />}
     </div>
   );
+}
+
+export function notes(lines: string[]): string[] {
+  const out: string[] = [];
+  for (const raw of lines.flatMap((l) => l.split("\n"))) {
+    const line = raw.trim().replace(/^- /, "");
+    if (!line || /^proposed the hub entry in |^open this page and choose Install|^https:\/\//.test(line)) continue;
+    if (raw.startsWith("  ") && out.length) out[out.length - 1] += ` ${line}`;
+    else out.push(line.charAt(0).toUpperCase() + line.slice(1));
+  }
+  return out;
 }
 
 function Switch({ checked, onChange, title, children }: { checked: boolean; onChange: (v: boolean) => void; title: string; children: preact.ComponentChildren }) {
@@ -255,7 +270,7 @@ function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: str
               {p.repo}
             </h2>
             <span class="faint small" style="overflow-wrap: anywhere">
-              {p.path}
+              {tilde(p.path)}
             </span>
           </div>
           <button type="button" class="btn quiet small" onClick={onClose} aria-label="Close">
@@ -364,9 +379,12 @@ function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: str
           {added && (
             <>
               <Note tone="ok" title={`tapster prepared ${p.repo}`} />
-              <ul class="log muted">
-                {added.lines.map((l, i) => (
-                  <li key={i}>{l.replace(/^- /, "")}</li>
+              <ul class="checks small">
+                {notes(added.lines).map((l, i) => (
+                  <li key={i}>
+                    <Icon name="right" />
+                    <span class="muted" style="overflow-wrap: anywhere">{l}</span>
+                  </li>
                 ))}
               </ul>
               <section class="stack tight">

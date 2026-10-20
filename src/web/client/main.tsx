@@ -128,7 +128,7 @@ function Toast() {
   const t = toast.value;
   if (!t) return null;
   return (
-    <div class="toast" role="status">
+    <div class="toast" role="status" onClick={() => (toast.value = null)}>
       <Note tone={t.tone === "ok" ? "ok" : "error"}>
         <span>{t.text}</span>
       </Note>

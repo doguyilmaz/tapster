@@ -288,25 +288,28 @@ async function notary(c: Ctx) {
   return { checked };
 }
 
-const filesQuery = z.object({ hub: z.string(), every: z.number().int().nullable(), remove: z.array(z.string()).max(20) }).strict();
+const filesQuery = z.object({ hub: z.string(), every: z.number().int().nullable(), remove: z.array(z.string()).max(20), readme: z.boolean() }).strict();
 
-async function filePlan(c: Ctx, gh: GitHub, hub: string, every: number | null, remove: string[], read: (p: string) => Promise<string | null>): Promise<FilesView> {
+async function filePlan(c: Ctx, gh: GitHub, hub: string, every: number | null, remove: string[], readme: boolean, read: (p: string) => Promise<string | null>): Promise<FilesView> {
   const repo = await gh.json<{ private: boolean }>("GET", `/repos/${hub}`);
   const plan = await hubFiles(gh, hub, read, c.s.deps.pin, { every, isPrivate: repo.private });
   const files: FilePlan[] = [];
   for (const f of plan.files) files.push({ path: f.path, content: f.content, before: f.before, change: f.before === null ? "create" : f.before === f.content ? "same" : "update" });
+  const ours = starterFiles(hub).find((f) => f.path === "README.md")!;
+  const current = plan.kept.includes("README.md") ? await read("README.md") : null;
+  if (readme && current !== null && current !== ours.content) files.push({ path: "README.md", content: ours.content, before: current, change: "update" });
   const others = remove.filter((r) => /^[A-Za-z0-9._-]+\.ya?ml$/.test(r) && r !== "tapster.yml");
   for (const r of others) {
     const before = await read(`.github/workflows/${r}`);
     if (before !== null) files.push({ path: `.github/workflows/${r}`, content: "", before, change: "remove" });
   }
-  return { files, kept: plan.kept, pin: plan.change, notes: plan.notes, foreign: [] };
+  return { files, kept: plan.kept, pin: plan.change, notes: plan.notes, foreign: [], readme: current !== null && current !== ours.content };
 }
 
 async function filesPreview(c: Ctx): Promise<FilesView> {
   const q = await readJson(c.req, filesQuery);
   const { gh, hub, login } = await hubFrom(c, q.hub);
-  const view = await filePlan(c, gh, hub, q.every, q.remove, (p) => readHubFile(gh, hub, p, "main"));
+  const view = await filePlan(c, gh, hub, q.every, q.remove, q.readme, (p) => readHubFile(gh, hub, p, "main"));
   const foreign = await foreignWrites(gh, hub, login).catch(() => []);
   return { ...view, foreign: foreign.filter((w) => !w.startsWith("GitHub shows no push by")) };
 }
@@ -320,7 +323,7 @@ async function filesCommit(c: Ctx) {
   }
   await guardMain(gh, hub, login);
   const result = await commitToHub(gh, hub, "Set up tapster", async (read) => {
-    const plan = await filePlan(c, gh, hub, q.every, q.remove, read);
+    const plan = await filePlan(c, gh, hub, q.every, q.remove, q.readme, read);
     return plan.files.filter((f) => f.change !== "same").map((f) => ({ path: f.path, content: f.change === "remove" ? null : f.content }));
   });
   return { result };
