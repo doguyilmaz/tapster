@@ -156,7 +156,7 @@ function AppStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatu
   return (
     <>
       <span class="muted">{reachLine(s)}</span>
-      {s.app.reaches === false && <span class="muted">The hub cannot publish {s.repo} until its App reaches it. GitHub preselects the project; keep "Only select repositories".</span>}
+      {s.app.reaches === false && <span class="muted">The hub cannot publish {s.repo} until its App reaches it.</span>}
       {running && (
         <p class="row muted small" role="status">
           <Spinner label="Checking" /> The hub checks its App now. This updates by itself when its run ends.
@@ -173,6 +173,11 @@ function AppStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatu
         </p>
       )}
       <Problem problem={problem} />
+      {s.app.reaches !== true && s.app.installUrl && (
+        <span class="muted small">
+          GitHub preselects {s.repo}. Keep "Only select repositories". With "All repositories" the App would also reach {hubName.value}, which holds your keys. The hub then refuses to run.
+        </span>
+      )}
       {s.app.reaches !== true && (
         <div class="row">
           {s.app.installUrl ? (
