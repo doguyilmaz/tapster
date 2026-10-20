@@ -30,6 +30,22 @@ In the workflow that runs `goreleaser/goreleaser-action` (`release.yml` unless y
 When you name another workflow with `--workflow`, the hub entry records it, because the hub checks which workflow made
 each attestation.
 
+## What moves into the hub entry
+
+The hub writes the cask from its own entry in `tapster.yml`. `add` fills that entry from GoReleaser's
+`homebrew_casks` (or `brews`) section: the description, homepage, license, shell completions, `uninstall launchctl`,
+`zap trash` and caveats. Template values such as `{{ .Env.X }}` are left out.
+
+Some things have no place in a tapster cask yet. Check for them before the switch-over release:
+
+- **An `.app` inside a command line tool's archive.** The hub signs the binaries you list, not an app bundle next to
+  them. The cask installs only the binaries.
+- **Cask hooks** such as `postflight` or a `post install` command.
+- **A release workflow that moves a branch** with the workflow's own token. `add` protects every branch of the
+  project, so that step fails. Move the step to a tag or keep it on a branch that you push yourself.
+
+A project that needs one of these keeps its own release for now.
+
 ## Archive names
 
 The hub needs to know the archive of each platform. tapster takes the names from the project's latest release. A
