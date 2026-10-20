@@ -16,7 +16,10 @@ export default defineConfig({
         { tag: "link", attrs: { rel: "preload", href: "/fonts/geist.woff2", as: "font", type: "font/woff2", crossorigin: "" } },
         { tag: "link", attrs: { rel: "preload", href: "/fonts/geist-mono.woff2", as: "font", type: "font/woff2", crossorigin: "" } },
       ],
-      social: [{ icon: "github", label: "tapster on GitHub", href: "https://github.com/doguyilmaz/tapster" }],
+      social: [
+        { icon: "github", label: "tapster on GitHub", href: "https://github.com/doguyilmaz/tapster" },
+        { icon: "npm", label: "tapster on npm", href: "https://www.npmjs.com/package/@doguyilmaz/tapster" },
+      ],
       customCss: ["./src/styles/theme.css"],
       components: { Hero: "./src/components/Hero.astro", Search: "./src/components/Search.astro" },
       sidebar: [
