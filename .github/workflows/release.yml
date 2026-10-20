@@ -26,7 +26,7 @@ jobs:
           printf 'export const TAPSTER: { version: string; sha: string | null } = { version: "%s", sha: "%s" };\n' "$v" "$GITHUB_SHA" > src/version.ts
           mkdir -p out
           for t in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
-            bun build src/cli/main.ts --compile --target="bun-$t" --outfile "out/$t/tapster"
+            bun scripts/build.ts compile "bun-$t" "out/$t/tapster"
             p="${t/x64/amd64}"
             tar -C "out/$t" -czf "out/tapster_${v}_${p/-/_}.tar.gz" tapster
           done
