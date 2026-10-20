@@ -41,6 +41,10 @@ The project's release workflow builds the archives, writes `checksums.txt`, atte
 release. The sheet follows it: the workflow's run, then the draft, then the hub's publish, each with a link. You can
 also watch it on the project's **Actions** tab.
 
+Once the draft is open, the page starts the hub right away. It skips that when a hub run is already queued or running.
+It skips it too when the project rings the hub through the [doorbell](/guides/doorbell/). If you close the page, the
+hub still publishes the draft on its schedule.
+
 :::tip[You should see]{icon="approve-check-circle"}
 A draft release named `v0.1.0` with the archives and `checksums.txt`. It is not public yet.
 :::

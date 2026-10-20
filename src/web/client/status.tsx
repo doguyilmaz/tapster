@@ -1,9 +1,9 @@
 import type { ComponentChildren } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { FollowView, Problem as ProblemView, ProjectStatus, ReachView } from "../contract";
 import { type ProjectStep, type ProjectStepId, canRelease, projectNext, projectSteps, tagCommand, tagProblem } from "../status";
 import { get, post } from "./api";
-import { hubName, problemOf, say, statusOf, tilde } from "./state";
+import { hub, hubName, problemOf, say, statusOf, tilde } from "./state";
 import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner } from "./ui";
 
 export const KIND: Record<string, string> = { go: "Go with GoReleaser", bun: "Bun", app: "Mac app with Sparkle" };
@@ -194,15 +194,21 @@ function AppStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatu
 
 function Follow({ s, tag, onStatus }: { s: ProjectStatus; tag: string; onStatus: (s: ProjectStatus) => void }) {
   const [view, setView] = useState<FollowView | null>(null);
+  const [kick, setKick] = useState<{ started: boolean; doorbell: boolean } | null>(null);
   useEffect(() => {
     let timer = 0;
     let wait = 5000;
+    let kicked = false;
     const tick = async () => {
       if (!document.hidden) {
         try {
           const v = await get<FollowView>(`/api/projects/follow?${q(s)}&tag=${encodeURIComponent(tag)}`);
           setView(v);
           wait = 5000;
+          if (v.draft && !v.draft.note && !kicked) {
+            kicked = true;
+            setKick(await post<{ started: boolean; doorbell: boolean }>("/api/projects/publish", { hub: hubName.value, repo: s.repo }));
+          }
           const failed = v.run?.status === "completed" && v.run.conclusion !== "success" && !v.draft && !v.published;
           if (v.published || v.draft?.note || failed) {
             const next = await statusOf(s.repo).catch(() => null);
@@ -222,6 +228,22 @@ function Follow({ s, tag, onStatus }: { s: ProjectStatus; tag: string; onStatus:
   const ran = run?.status === "completed";
   const runOk = ran && run.conclusion === "success";
   const draftOpen = Boolean(view?.draft || view?.published);
+  const hubRun = kick ? (view?.hubRun ?? null) : null;
+  const seen = useRef(false);
+  if (hubRun && hubRun.status !== "completed") seen.current = true;
+  const hubBusy = (hubRun !== null && hubRun.status !== "completed") || Boolean(kick?.started && !seen.current);
+  const publishing = view?.published
+    ? "Published"
+    : view?.draft?.note
+      ? "The hub will not publish it until the draft is fixed"
+      : hubBusy
+        ? kick?.doorbell
+          ? "The doorbell started the hub; it signs and publishes it now"
+          : "The hub signs and publishes it now"
+        : kick?.doorbell
+          ? "The doorbell starts the hub"
+          : "The hub signs and publishes it on its next run";
+  const every = hub.value?.files.every ?? 10;
   const item = (state: ProjectStep["state"], text: ComponentChildren, link?: { href: string; label: string }) => (
     <li>
       <Mark state={state} />
@@ -243,8 +265,9 @@ function Follow({ s, tag, onStatus }: { s: ProjectStatus; tag: string; onStatus:
       <ol class="checks" aria-live="polite">
         {item(!run ? "wait" : !ran ? "wait" : runOk || draftOpen ? "done" : "attention", !run ? "The release workflow starts" : !ran ? "The release workflow runs" : runOk || draftOpen ? "The release workflow finished" : `The release workflow ended: ${run.conclusion ?? "unknown"}`, run ? { href: run.url, label: "Open the run" } : undefined)}
         {item(view?.draft?.note ? "attention" : draftOpen ? "done" : "wait", view?.draft?.note ? view.draft.note : draftOpen ? "The workflow opened the draft" : "The workflow opens a draft", view?.draft ? { href: view.draft.url, label: "Open the draft" } : undefined)}
-        {item(view?.published ? "done" : view?.draft?.note ? "open" : "wait", view?.published ? "Published" : "The hub signs and publishes it on its next run", view?.published ? { href: view.published.url, label: "Open the release" } : { href: view?.hub ?? "#", label: "Hub runs" })}
+        {item(view?.published ? "done" : view?.draft?.note ? "open" : "wait", publishing, view?.published ? { href: view.published.url, label: "Open the release" } : hubBusy && hubRun ? { href: hubRun.url, label: "Open the hub's run" } : { href: view?.hub ?? "#", label: "Hub runs" })}
       </ol>
+      {!view?.published && <p class="muted small">Without this page open, the hub still publishes it on its schedule, within about {every} minutes.</p>}
     </div>
   );
 }

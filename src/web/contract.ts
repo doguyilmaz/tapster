@@ -115,6 +115,7 @@ export type FollowView = {
   draft: { url: string; note: string | null } | null;
   published: { url: string; byHub: boolean } | null;
   hub: string;
+  hubRun: { status: string; conclusion: string | null; url: string } | null;
 };
 
 export type HealthView = {

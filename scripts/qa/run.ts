@@ -128,7 +128,12 @@ try {
   const aims = fake.get("octo/aims")!;
   Object.assign(aims.runs[0]!, { status: "completed", conclusion: "success" });
   aims.releases.unshift({ id: 22, tag_name: "v0.2.2", draft: true, prerelease: false, created_at: new Date().toISOString(), published_at: null, assets: [], body: "", html_url: "https://github.com/octo/aims/releases/tag/v0.2.2" });
+  const hubRepo = fake.get("octo/homebrew-tap")!;
+  const sent = hubRepo.dispatches;
   await page.waitFor("document.body.textContent.includes('The workflow opened the draft')", 20000);
+  for (let i = 0; i < 50 && hubRepo.dispatches === sent; i++) await Bun.sleep(200);
+  if (hubRepo.dispatches === sent) throw new Error("the page did not start the hub after the draft opened");
+  await page.waitFor("document.body.textContent.includes('Without this page open')");
   await shot("11d-aims-following");
   await audit("aims-following");
   Object.assign(aims.releases[0]!, { draft: false, published_at: new Date().toISOString() });

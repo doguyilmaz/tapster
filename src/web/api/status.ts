@@ -11,7 +11,7 @@ import { type HubEntry, hubEntries, hubFacts, installLink, releaseSecrets, repoT
 import type { CommitView, FollowView, ProjectStatus, StatusView } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
 import { highestTag, nextTag, tagProblem } from "../status";
-import { checkHub, me } from "./hub";
+import { checkHub, hubRunList, me, startHubRun } from "./hub";
 import { type HubChecks, hubChecks, reachOf, reachRoutes, stateOf } from "./reach";
 
 const HOMEBREW_KEYS = ["notarize", "homebrew_casks", "brews", "scoops"];
@@ -195,13 +195,15 @@ async function follow(c: Ctx): Promise<FollowView> {
   const tag = c.url.searchParams.get("tag") ?? "";
   if (!TAG.test(tag)) throw new TapsterError(`${tag} is not a version tag`, "Reload the page and try again.");
   const entry = await hubProject(gh, hub, c.url.searchParams.get("repo") ?? "");
-  const [runs, releases, stateText] = await Promise.all([
+  const [runs, releases, stateText, hubRuns] = await Promise.all([
     gh.json<{ workflow_runs: { status: string; conclusion: string | null; html_url: string }[] }>("GET", `/repos/${entry.repo}/actions/runs?event=push&branch=${encodeURIComponent(tag)}&per_page=5`).catch(() => ({ workflow_runs: [] })),
     gh.json<Release[]>("GET", `/repos/${entry.repo}/releases?per_page=30`).catch(() => []),
     readHubFile(gh, hub, ".tapster/state.json", "main").catch(() => null),
+    hubRunList(gh, hub),
   ]);
   const state = stateOf(stateText);
   const run = runs.workflow_runs[0];
+  const latest = hubRuns[0];
   const found = releases.find((r) => r.tag_name === tag);
   const byHub = (state.packages[entry.name] ?? []).some((p) => p.tag === tag && p.status === "published");
   return {
@@ -209,7 +211,21 @@ async function follow(c: Ctx): Promise<FollowView> {
     draft: found?.draft ? { url: found.html_url, note: noteIn(found.body) } : null,
     published: found && !found.draft ? { url: found.html_url, byHub } : null,
     hub: `https://github.com/${hub}/actions/workflows/tapster.yml`,
+    hubRun: latest ? { status: latest.status, conclusion: latest.conclusion, url: latest.html_url } : null,
   };
+}
+
+async function publish(c: Ctx): Promise<{ started: boolean; run: string | null; doorbell: boolean }> {
+  const body = await readJson(c.req, z.object({ hub: z.string(), repo: z.string().regex(REPO) }).strict());
+  const { gh, login } = await me(c.s);
+  const hub = checkHub(body.hub, login);
+  const entry = await hubProject(gh, hub, body.repo);
+  const bell = await gh.json("GET", `/repos/${entry.repo}/actions/variables/TAPSTER_DOORBELL`).then(
+    () => true,
+    (e) => (e instanceof GitHubError && e.status === 404 ? false : Promise.reject(e)),
+  );
+  if (bell) return { started: false, run: null, doorbell: true };
+  return { ...(await startHubRun(c.s, gh, hub)), doorbell: false };
 }
 
 export const statusRoutes: Routes = {
@@ -217,4 +233,5 @@ export const statusRoutes: Routes = {
   "GET /api/projects/status": status,
   "POST /api/projects/release": release,
   "GET /api/projects/follow": follow,
+  "POST /api/projects/publish": publish,
 };
