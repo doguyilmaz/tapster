@@ -3,6 +3,8 @@ import { NAME, PLATFORMS, type Platform, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { readHubFile } from "../hubcommit";
+import { TAG, compareSemver, parseTag } from "../semver";
+import { highestTag } from "../web/status";
 import { hubEnv } from "./gh";
 import { descProblems } from "../render";
 
@@ -243,12 +245,29 @@ export function descriptionNote(desc: string | null, name: string, existing = fa
   return { line: `- Homebrew would reject the repository's description (${problems.join(" and ")}); the entry says "${better}" instead`, add: `    description: ${JSON.stringify(better)}` };
 }
 
-export async function repoTags(gh: GitHub, repo: string): Promise<string[]> {
-  const [refs, releases] = await Promise.all([
-    gh.json<{ ref: string }[]>("GET", `/repos/${repo}/git/matching-refs/tags/v`).catch(() => []),
-    gh.json<{ tag_name: string }[]>("GET", `/repos/${repo}/releases?per_page=100`).catch(() => []),
-  ]);
-  return [...refs.map((r) => r.ref.replace(/^refs\/tags\//, "")), ...releases.map((r) => r.tag_name)];
+export type TagRef = { name: string; sha: string; type: string };
+
+export async function tagRefs(gh: GitHub, repo: string): Promise<TagRef[]> {
+  const refs = await gh.json<{ ref: string; object: { sha: string; type?: string } }[]>("GET", `/repos/${repo}/git/matching-refs/tags/v`);
+  return refs.map((r) => ({ name: r.ref.replace(/^refs\/tags\//, ""), sha: r.object.sha, type: r.object.type ?? "commit" }));
+}
+
+export async function repoTags(gh: GitHub, repo: string, strict = false): Promise<string[]> {
+  const soft = <T>(p: Promise<T>, empty: T) => (strict ? p : p.catch(() => empty));
+  const [refs, releases] = await Promise.all([soft(tagRefs(gh, repo), [] as TagRef[]), soft(gh.json<{ tag_name: string }[]>("GET", `/repos/${repo}/releases?per_page=100`), [])]);
+  return [...refs.map((r) => r.name), ...releases.map((r) => r.tag_name)];
+}
+
+export const tagCommit = async (gh: GitHub, repo: string, ref: Pick<TagRef, "sha" | "type">): Promise<string | null> =>
+  ref.type === "tag" ? gh.json<{ object: { sha: string } }>("GET", `/repos/${repo}/git/tags/${ref.sha}`).then((t) => t.object.sha, () => null) : ref.sha;
+
+export async function tagAt(gh: GitHub, repo: string, refs: TagRef[], sha: string): Promise<string | null> {
+  const versions = refs.filter((r) => TAG.test(r.name));
+  const direct = highestTag(versions.filter((r) => r.type === "commit" && r.sha === sha).map((r) => r.name));
+  if (direct) return direct;
+  const annotated = versions.filter((r) => r.type === "tag").sort((a, b) => compareSemver(parseTag(b.name)!, parseTag(a.name)!)).slice(0, 5);
+  for (const r of annotated) if ((await tagCommit(gh, repo, r)) === sha) return r.name;
+  return null;
 }
 
 export const releaseSecrets = (names: string[]) => names.filter((n) => /^(HOMEBREW_TAP_|MACOS_)/.test(n));

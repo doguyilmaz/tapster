@@ -102,6 +102,7 @@ export type ProjectStatus = {
     highest: string | null;
     next: string;
     autoTag: boolean;
+    atHead: string | null;
     head: CommitView | null;
   };
   secrets: { names: string[]; published: boolean };

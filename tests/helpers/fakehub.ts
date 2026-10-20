@@ -29,6 +29,7 @@ export type FakeRepo = {
   runs: FakeRun[];
   dispatches: number;
   tags: Map<string, string>;
+  annotated: Map<string, string>;
   branches: Map<string, Map<string, string>>;
   commit: { message: string; date: string };
 };
@@ -70,6 +71,7 @@ export class FakeHub {
       runs: [],
       dispatches: 0,
       tags: new Map(),
+      annotated: new Map(),
       branches: new Map(),
       commit: { message: "Start", date: "2026-10-01T09:00:00Z" },
       ...o,
@@ -172,10 +174,13 @@ export class FakeHub {
     const tagRef = /^\/git\/ref\/tags\/(.+)$/.exec(rest);
     if (tagRef) {
       const tag = decodeURIComponent(tagRef[1]!);
-      return r.tags.has(tag) ? json({ ref: `refs/tags/${tag}`, object: { sha: r.tags.get(tag) } }) : json({}, 404);
+      const at = r.tags.get(tag);
+      return at ? json({ ref: `refs/tags/${tag}`, object: { sha: at, type: r.annotated.has(at) ? "tag" : "commit" } }) : json({}, 404);
     }
     const matching = /^\/git\/matching-refs\/tags\/?(.*)$/.exec(rest);
-    if (matching) return json([...r.tags].filter(([t]) => t.startsWith(decodeURIComponent(matching[1]!))).map(([t, at]) => ({ ref: `refs/tags/${t}`, object: { sha: at } })));
+    if (matching) return json([...r.tags].filter(([t]) => t.startsWith(decodeURIComponent(matching[1]!))).map(([t, at]) => ({ ref: `refs/tags/${t}`, object: { sha: at, type: r.annotated.has(at) ? "tag" : "commit" } })));
+    const tagObject = /^\/git\/tags\/([0-9a-f]+)$/.exec(rest);
+    if (tagObject) return r.annotated.has(tagObject[1]!) ? json({ sha: tagObject[1], object: { sha: r.annotated.get(tagObject[1]!), type: "commit" } }) : json({}, 404);
     const commit = /^\/commits\/([^/]+)$/.exec(rest);
     if (commit) {
       const at = commit[1] === "main" ? r.head : commit[1]!;

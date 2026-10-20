@@ -188,6 +188,44 @@ test("a release tags the shown commit on GitHub and refuses a moved branch, a lo
   expect((await aims()).release.next).toBe("v0.2.3");
 });
 
+test("a tip that already carries a version tag is not released again, lightweight or annotated", async () => {
+  const repo = fake.get("octo/aims")!;
+  const head = repo.head;
+  const s = await aims();
+  expect(s.release).toMatchObject({ atHead: "v0.2.2", next: "v0.2.3" });
+  const again = await call("POST", "/api/projects/release", { hub: HUB, repo: "octo/aims", tag: "v0.2.3", sha: head });
+  expect(again.data.error).toEqual({ reason: "main has nothing new since v0.2.2", fix: "Push the changes you want to release to main, then click Release again." });
+  repo.head = "c".repeat(40);
+  repo.annotated.set("d".repeat(40), repo.head);
+  repo.tags.set("v0.3.0", "d".repeat(40));
+  expect((await aims()).release.atHead).toBe("v0.3.0");
+  repo.tags.delete("v0.3.0");
+  expect((await aims()).release.atHead).toBeNull();
+  repo.head = head;
+});
+
+test("a release stops when GitHub cannot list the tags and counts a tag it already made at that commit as done", async () => {
+  const repo = fake.get("octo/aims")!;
+  const head = repo.head;
+  repo.head = "e".repeat(40);
+  const real = fake.fetch;
+  fake.fetch = async (input, init) => (String(input).includes("/matching-refs/") ? new Response("{}", { status: 500 }) : real(input, init));
+  const blind = await call("POST", "/api/projects/release", { hub: HUB, repo: "octo/aims", tag: "v0.9.0", sha: repo.head });
+  fake.fetch = real;
+  expect(blind.data.error).toMatchObject({ reason: "GitHub did not list the tags of octo/aims" });
+  expect(repo.tags.has("v0.9.0")).toBe(false);
+  fake.fetch = async (input, init) => {
+    if (String(input).endsWith("/repos/octo/aims/git/refs") && init?.method === "POST") await real(input, init);
+    return real(input, init);
+  };
+  const twice = await call("POST", "/api/projects/release", { hub: HUB, repo: "octo/aims", tag: "v0.9.0", sha: repo.head });
+  fake.fetch = real;
+  expect(twice.data).toEqual({ tag: "v0.9.0", sha: "e".repeat(40) });
+  repo.tags.delete("v0.9.0");
+  repo.runs = repo.runs.filter((r) => r.head_branch !== "v0.9.0");
+  repo.head = head;
+});
+
 test("following a release shows its run, then the draft with the hub's note, then the hub's publish", async () => {
   const follow = async () => (await call("GET", `/api/projects/follow?hub=${HUB}&repo=octo/aims&tag=v0.2.2`)).data as unknown as FollowView;
   const first = await follow();

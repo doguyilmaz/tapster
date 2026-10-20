@@ -43,7 +43,9 @@ export function projectSteps(s: ProjectStatus): ProjectStep[] {
       ? { id: "release", state: "wait", label: `The hub publishes ${r.draft.tag} next` }
       : r.latest?.byHub
         ? { id: "release", state: "done", label: `Published ${r.latest.tag}` }
-        : { id: "release", state: "open", label: r.autoTag ? "Release from the workflow" : `Release ${r.next}` };
+        : r.atHead
+          ? { id: "release", state: "done", label: `Nothing new since ${r.atHead}` }
+          : { id: "release", state: "open", label: r.autoTag ? "Release from the workflow" : `Release ${r.next}` };
   const steps: ProjectStep[] = [
     { id: "setup", state: s.setup.ok ? "done" : "open", label: "Set up the release workflow" },
     { id: "protect", state: s.protection.ok || s.protection.off ? "done" : "open", label: "Protect the repository" },
@@ -69,6 +71,7 @@ export function canRelease(s: ProjectStatus): { ok: boolean; why: string | null 
   if (s.release.autoTag) return { ok: false, why: "The release workflow tags each release by itself." };
   if (!s.setup.ok) return { ok: false, why: `First the release workflow on ${s.defaultBranch} must be tapster's.` };
   if (!s.release.head) return { ok: false, why: `GitHub did not show the latest commit on ${s.defaultBranch}. Check again in a moment.` };
+  if (s.release.atHead) return { ok: false, why: `Nothing new on ${s.defaultBranch} since ${s.release.atHead}.` };
   return { ok: true, why: null };
 }
 

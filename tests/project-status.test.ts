@@ -24,7 +24,7 @@ const aims = (over: Partial<ProjectStatus> = {}): ProjectStatus => ({
   protection: { ok: true, off: false, problems: [] },
   entry: { state: "merged", pr: null },
   app: reach(true),
-  release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, head: { sha: "a".repeat(40), subject: "Start", date: "2026-10-01T00:00:00Z", url: "https://github.com/octo/aims/commit/a" } },
+  release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, atHead: null, head: { sha: "a".repeat(40), subject: "Start", date: "2026-10-01T00:00:00Z", url: "https://github.com/octo/aims/commit/a" } },
   secrets: { names: [], published: false },
   unreadable: null,
   ...over,
@@ -100,6 +100,12 @@ test("a project GitHub does not show needs attention and offers no release", () 
   expect(projectSteps(gone)).toEqual([{ id: "setup", state: "attention", label: "GitHub did not show it" }]);
   expect(canRelease(gone)).toEqual({ ok: false, why: "GitHub GET /repos/octo/aims returned 404. Check the name." });
   expect(projectStop([gone], 1)).toEqual({ done: false, status: "aims: GitHub did not show it" });
+});
+
+test("a default branch whose tip already carries a version tag has nothing to release", () => {
+  const done = aims({ release: { ...aims().release, highest: "v0.2.2", next: "v0.2.3", atHead: "v0.2.2" } });
+  expect(canRelease(done)).toEqual({ ok: false, why: "Nothing new on main since v0.2.2." });
+  expect(projectSteps(done).find((x) => x.id === "release")).toEqual({ id: "release", state: "done", label: "Nothing new since v0.2.2" });
 });
 
 test("an App reach the hub has not checked yet is a step but blocks no release", () => {

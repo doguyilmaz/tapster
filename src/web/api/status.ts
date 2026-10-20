@@ -7,7 +7,7 @@ import { readHubFile } from "../../hubcommit";
 import { protectionProblems } from "../../rulesets";
 import { TAG, compareSemver, parseTag } from "../../semver";
 import type { State } from "../../state";
-import { type HubEntry, hubEntries, hubFacts, installLink, releaseSecrets, repoTags } from "../../cli/hubpr";
+import { type HubEntry, type TagRef, hubEntries, hubFacts, installLink, releaseSecrets, tagAt, tagCommit, tagRefs } from "../../cli/hubpr";
 import type { CommitView, FollowView, ProjectStatus, StatusView } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
 import { highestTag, nextTag, tagProblem } from "../status";
@@ -74,20 +74,21 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
   const project = await gh.getRepo(e.repo);
   const branch = project.default_branch;
   const read = (path: string) => readHubFile(gh, e.repo, path, encodeURIComponent(branch));
-  const [goreleaser, workflow, problems, keys, releases, tags, head, secrets] = await Promise.all([
+  const [goreleaser, workflow, problems, keys, releases, refs, head, secrets] = await Promise.all([
     e.kind === "go" ? read(".goreleaser.yaml").then((t) => t ?? read(".goreleaser.yml")) : Promise.resolve(null),
     read(`.github/workflows/${e.workflow}`),
     e.protection === "off" ? Promise.resolve([]) : protectionProblems(gh, e.repo, branch, "admin", e.protection === "dependabot").catch(() => ["GitHub did not show the repository's rulesets"]),
     gh.json<{ title: string }[]>("GET", `/repos/${e.repo}/keys`).catch(() => []),
     gh.json<Release[]>("GET", `/repos/${e.repo}/releases?per_page=30`).catch(() => []),
-    repoTags(gh, e.repo),
+    tagRefs(gh, e.repo).catch(() => [] as TagRef[]),
     headOf(gh, e.repo, branch),
     gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${e.repo}/actions/secrets?per_page=100`).then((r) => releaseSecrets(r.secrets.map((x) => x.name)), () => []),
   ]);
   const published = sh.state.packages[e.name] ?? [];
   const latest = newest(releases.filter((r) => !r.draft));
   const draft = newest(releases.filter((r) => r.draft && TAG.test(r.tag_name) && (!latest || compareSemver(parseTag(r.tag_name)!, parseTag(latest.tag_name)!) > 0)));
-  const highest = highestTag(tags);
+  const highest = highestTag([...refs.map((r) => r.name), ...releases.map((r) => r.tag_name)]);
+  const atHead = head ? await tagAt(gh, e.repo, refs, head.sha) : null;
   const setup = setupProblems({ kind: e.kind, branch, workflowName: e.workflow, goreleaser, workflow });
   return {
     name: e.name,
@@ -105,6 +106,7 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
       highest,
       next: nextTag(highest),
       autoTag: keys.some((k) => k.title === "tapster tags"),
+      atHead,
       head,
     },
     secrets: { names: secrets, published: published.some((p) => p.status === "published") },
@@ -129,7 +131,7 @@ async function statusOrReason(sh: Shared, e: Listed): Promise<ProjectStatus> {
       protection: { ok: false, off: false, problems: [] },
       entry: { state: e.state, pr: e.pr },
       app: { reaches: null, how: null, at: null, since: null, reason: null, run: null, running: false, installUrl: "" },
-      release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, head: null },
+      release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, atHead: null, head: null },
       secrets: { names: [], published: false },
       unreadable: `${err.reason}. ${err.fix}`,
     };
@@ -178,15 +180,24 @@ async function release(c: Ctx) {
   const head = await headOf(gh, entry.repo, branch);
   if (!head) throw new TapsterError(`GitHub did not show the latest commit on ${branch}`, "Try again in a moment.");
   if (head.sha !== body.sha) throw new TapsterError(`${branch} moved since this page read it`, `It now ends at ${head.sha.slice(0, 7)}, ${head.subject}. Check that commit, then click Release again.`);
-  const problem = tagProblem(body.tag, highestTag(await repoTags(gh, entry.repo)));
+  const [refs, releases] = await Promise.all([tagRefs(gh, entry.repo), gh.json<{ tag_name: string }[]>("GET", `/repos/${entry.repo}/releases?per_page=100`)]).catch(() => {
+    throw new TapsterError(`GitHub did not list the tags of ${entry.repo}`, "Try again in a moment. tapster releases only once it has checked the versions.");
+  });
+  const done = { tag: body.tag, sha: body.sha };
+  const at = await tagAt(gh, entry.repo, refs, head.sha);
+  if (at === body.tag) return done;
+  if (at) throw new TapsterError(`${branch} has nothing new since ${at}`, `Push the changes you want to release to ${branch}, then click Release again.`);
+  const problem = tagProblem(body.tag, highestTag([...refs.map((r) => r.name), ...releases.map((r) => r.tag_name)]));
   if (problem) throw new TapsterError(`${body.tag} cannot be released`, `${problem}.`);
   try {
     await gh.json("POST", `/repos/${entry.repo}/git/refs`, { ref: `refs/tags/${body.tag}`, sha: body.sha });
   } catch (e) {
-    if (e instanceof GitHubError && e.status === 422) throw new TapsterError(`${body.tag} already exists on ${entry.repo}`, "Pick the next version and click Release again.");
-    throw e;
+    if (!(e instanceof GitHubError && e.status === 422)) throw e;
+    const now = await gh.json<{ object: { sha: string; type?: string } }>("GET", `/repos/${entry.repo}/git/ref/tags/${encodeURIComponent(body.tag)}`).catch(() => null);
+    if (now && (await tagCommit(gh, entry.repo, { sha: now.object.sha, type: now.object.type ?? "commit" })) === body.sha) return done;
+    throw new TapsterError(`${body.tag} already exists on ${entry.repo}`, "Pick the next version and click Release again.");
   }
-  return { tag: body.tag, sha: body.sha };
+  return done;
 }
 
 async function follow(c: Ctx): Promise<FollowView> {
