@@ -45,8 +45,25 @@ The hub writes the cask from its own entry in `tapster.yml`. `add` fills that en
 | `caveats` | `cask.caveats` |
 | `hooks.post.install` that runs one of the tool's commands | `cask.postflight` |
 
-The app's bundle id comes from an `Info.plist` in the project that names the app. tapster lists what it does not
-carry, such as other hooks or other lines of `custom_block`. A hook is carried only in this form:
+The app's bundle id comes from an `Info.plist` in the project that names the app. A project that also builds for
+Linux keeps the app in `on_macos` and the bare binary in `on_linux`. tapster reads them from there too:
+
+```yaml
+homebrew_casks:
+  - name: mytool
+    custom_block: |
+      on_macos do
+        app "MyTool.app"
+        binary "#{appdir}/MyTool.app/Contents/MacOS/mytool"
+      end
+      on_linux do
+        binary "mytool"
+      end
+```
+
+The hub entry then has the app and the Linux archives. The hub renders the same blocks, see
+[With Linux builds](/reference/config/#with-linux-builds). tapster lists what it does not carry, such as other hooks or
+other lines of `custom_block`. A hook is carried only in this form:
 
 ```ruby
 system_command "#{HOMEBREW_PREFIX}/bin/mytool", args: ["setup"], must_succeed: false
