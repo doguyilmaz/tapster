@@ -133,9 +133,26 @@ export function suggestDescription(desc: string | null, name: string): string | 
   return descProblems(s, name).length === 0 ? s : null;
 }
 
-type GoCask = { description?: unknown; homepage?: unknown; license?: unknown; completions?: Record<string, unknown>; uninstall?: { launchctl?: unknown }; zap?: { trash?: unknown }; caveats?: unknown };
+type GoCask = {
+  description?: unknown;
+  homepage?: unknown;
+  license?: unknown;
+  completions?: Record<string, unknown>;
+  custom_block?: unknown;
+  binaries?: unknown;
+  uninstall?: Record<string, unknown>;
+  zap?: Record<string, unknown>;
+  hooks?: Record<string, Record<string, unknown> | null>;
+  caveats?: unknown;
+};
 
-export function goreleaserCask(text: string | null): { lines: string[]; description: string | null; carried: string[] } {
+const READ = ["name", "ids", "repository", "commit_msg_template", "commit_author", "directory", "skip_upload", "url", "url_template", "description", "homepage", "license", "completions", "custom_block", "binaries", "uninstall", "zap", "hooks", "caveats"];
+const HOOK = /^system_command\s+"#\{HOMEBREW_PREFIX\}\/bin\/([A-Za-z0-9._-]+)"(?:,\s*args:\s*\[((?:\s*"[A-Za-z0-9._:=@%+,\/-]+"\s*,?)*)\])?,\s*must_succeed:\s*false$/;
+const REL = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+
+export type CaskOptions = { mac?: boolean; bundleId?: (app: string) => string | null };
+
+export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { lines: string[]; description: string | null; carried: string[]; notes: string[] } {
   type Doc = { homebrew_casks?: GoCask[]; brews?: GoCask[] } | null;
   let cfg: Doc = null;
   try {
@@ -144,11 +161,29 @@ export function goreleaserCask(text: string | null): { lines: string[]; descript
     cfg = null;
   }
   const c = cfg?.homebrew_casks?.[0] ?? cfg?.brews?.[0];
-  if (!c) return { lines: [], description: null, carried: [] };
+  if (!c) return { lines: [], description: null, carried: [], notes: [] };
   const str = (v: unknown) => (typeof v === "string" && v.trim() && !v.includes("{{") ? v.trim() : null);
   const list = (v: unknown, ok: RegExp) => (Array.isArray(v) ? v.map(str).filter((x): x is string => x !== null && ok.test(x)) : []);
   const lines: string[] = [];
   const carried: string[] = [];
+  const notes: string[] = [];
+  const skipped = Object.keys(c).filter((k) => !READ.includes(k));
+  skipped.push(...Object.keys(c.uninstall ?? {}).filter((k) => k !== "launchctl" && k !== "quit").map((k) => `uninstall.${k}`));
+  skipped.push(...Object.keys(c.zap ?? {}).filter((k) => k !== "trash").map((k) => `zap.${k}`));
+  let app: string | null = null;
+  for (const line of String(c.custom_block ?? "").split("\n").map((l) => l.trim()).filter(Boolean)) {
+    const found = /^app\s+"([A-Za-z0-9 ._-]+\.app)"$/.exec(line)?.[1];
+    if (found && !app) app = found;
+    else skipped.push(`custom_block: ${line}`);
+  }
+  let postflight: { binary: string; args: string[] } | null = null;
+  for (const [when, hooks] of Object.entries(c.hooks ?? {})) {
+    for (const [what, body] of Object.entries(hooks ?? {})) {
+      const m = when === "post" && what === "install" ? HOOK.exec(String(body).trim()) : null;
+      if (m) postflight = { binary: m[1]!, args: [...(m[2] ?? "").matchAll(/"([^"]+)"/g)].map((a) => a[1]!) };
+      else skipped.push(`hooks.${when}.${what}`);
+    }
+  }
   const homepage = str(c.homepage);
   if (homepage && /^https:\/\/[^\s"]+$/.test(homepage)) {
     lines.push(`    homepage: ${JSON.stringify(homepage)}`);
@@ -164,17 +199,30 @@ export function goreleaserCask(text: string | null): { lines: string[]; descript
     lines.push("    completions:", ...completions.map(([shell, path]) => `      ${shell}: ${str(path)}`));
     carried.push("completions");
   }
+  if (app && opts.mac !== false) {
+    const inside = `#{appdir}/${app}/`;
+    const binaries = list(c.binaries, /^#\{appdir\}\//).filter((b) => b.startsWith(inside) && REL.test(b.slice(inside.length))).map((b) => b.slice(inside.length));
+    const id = opts.bundleId?.(app) ?? null;
+    lines.push("    app:", `      name: ${JSON.stringify(app)}`, `      bundle_id: ${id ?? "<bundle id>"}`, ...(binaries.length ? [`      binaries: ${JSON.stringify(binaries)}`] : []));
+    carried.push("app");
+    notes.push(`the hub signs, notarizes and staples ${app}; a build hook must now sign it ad hoc only (codesign --force --sign -)`);
+    if (!id) notes.push(`no Info.plist here names ${app}; set app.bundle_id in the hub entry`);
+  }
   const launchctl = list(c.uninstall?.launchctl, /^[A-Za-z0-9.-]+$/);
+  const quit = list(c.uninstall?.quit, /^[A-Za-z0-9.-]+$/);
   const trash = list(c.zap?.trash, /^~\/[A-Za-z0-9 ._\/-]+$/);
   const caveats = str(c.caveats);
-  if (launchctl.length || trash.length || caveats) {
+  if (launchctl.length || quit.length || trash.length || postflight || caveats) {
     lines.push("    cask:");
-    if (launchctl.length) lines.push("      uninstall:", `        launchctl: ${JSON.stringify(launchctl)}`);
+    if (launchctl.length || quit.length) lines.push("      uninstall:", ...(launchctl.length ? [`        launchctl: ${JSON.stringify(launchctl)}`] : []), ...(quit.length ? [`        quit: ${JSON.stringify(quit)}`] : []));
     if (trash.length) lines.push("      zap:", `        trash: ${JSON.stringify(trash)}`);
+    if (postflight) lines.push(`      postflight: { binary: ${JSON.stringify(postflight.binary)}, args: ${JSON.stringify(postflight.args)} }`);
     if (caveats) lines.push(`      caveats: ${JSON.stringify(caveats.slice(0, 2000))}`);
-    carried.push(...[launchctl.length ? "uninstall" : "", trash.length ? "zap" : "", caveats ? "caveats" : ""].filter(Boolean));
+    carried.push(...[launchctl.length || quit.length ? "uninstall" : "", trash.length ? "zap" : "", postflight ? "post-install command" : "", caveats ? "caveats" : ""].filter(Boolean));
   }
-  return { lines, description: str(c.description), carried };
+  if (postflight) notes.push(`Homebrew runs the post-install command in its sandbox, without network or your home folder; check that ${[postflight.binary, ...postflight.args].join(" ")} works there`);
+  if (skipped.length) notes.push(`not carried from GoReleaser's Homebrew section: ${skipped.join(", ")}`);
+  return { lines, description: str(c.description), carried, notes };
 }
 
 export function entryExtras(entry: string, o: { kind: string; workflow: string; dependabot: boolean }): string {

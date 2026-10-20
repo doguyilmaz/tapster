@@ -40,12 +40,27 @@ export function adaptGoreleaser(text: string): { text: string; notes: string[] }
 
 const jobMap = (job: { value: unknown }) => job.value as YAMLMap;
 const RING_NAME = "Ring the tapster hub";
+const MOVES = /git\/refs\/heads\/|git push\b[^\n]*refs\/heads\//;
+
+function branchMoves(jobs: YAMLMap): string[] {
+  const found: string[] = [];
+  for (const job of jobs.items) {
+    const steps = jobMap(job).get("steps");
+    if (!isSeq(steps)) continue;
+    for (const st of steps.items) {
+      const run = isMap(st) ? String(st.get("run") ?? "") : "";
+      if (MOVES.test(run)) found.push(String((st as YAMLMap).get("name") ?? run.trim().split("\n")[0]));
+    }
+  }
+  return found.map((s) => `the step "${s}" moves a branch, which the branch rules now refuse to the workflow's token; see "A branch that follows releases" in the GoReleaser guide`);
+}
 
 export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag: string): { text: string; notes: string[] } {
   const doc = parseDocument(text);
   const notes: string[] = [];
   const jobs = doc.get("jobs");
   if (!isMap(jobs)) throw new TapsterError("the release workflow has no jobs", "Add the GoReleaser job first.");
+  notes.push(...branchMoves(jobs));
   for (const job of jobs.items) {
     const steps = (job.value as YAMLMap).get("steps");
     if (!isSeq(steps)) continue;
@@ -105,6 +120,21 @@ export function addRingStep(text: string): string | null {
     if (steps.items.some((st) => isMap(st) && st.get("name") === RING_NAME)) return text;
     steps.items.push(doc.createNode((parse(ringStep(0)) as unknown[])[0]) as never);
     return keepStyle(text, doc.toString(YAML_OUT));
+  }
+  return null;
+}
+
+export function bundleIdIn(dir: string, app: string): string | null {
+  const base = basename(app, ".app");
+  for (const path of infoPlists(dir)) {
+    try {
+      const bytes = readRegular(path);
+      const info = bytes ? (parsePlist(bytes) as Record<string, unknown>) : {};
+      const id = literal(info.CFBundleIdentifier);
+      if ((info.CFBundleExecutable === base || info.CFBundleName === base) && id && BUNDLE_ID.test(id)) return id;
+    } catch {
+      continue;
+    }
   }
   return null;
 }
@@ -407,7 +437,7 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
   let pr: string | null = null;
   if (entry) {
     entry = entryExtras(entry, { kind: prepared.kind, workflow: opts.workflow, dependabot: opts.dependabot });
-    const cask = goreleaserCask(prepared.original ?? null);
+    const cask = goreleaserCask(prepared.original ?? null, { mac: apple, bundleId: (app) => bundleIdIn(dir, app) });
     if (cask.lines.length) entry = `${entry}\n${cask.lines.join("\n")}`;
     const own = cask.description && descProblems(cask.description, name).length === 0 ? cask.description : null;
     if (own) {
@@ -419,6 +449,7 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
       if (desc.add) entry = `${entry}\n${desc.add}`;
     }
     if (cask.carried.length) say(`- carried the ${cask.carried.join(", ")} of GoReleaser's Homebrew section into the hub entry`);
+    for (const n of cask.notes) say(`- ${n}`);
     try {
       pr = await proposeEntry(gh, hub, name, repo, entry);
       say(`- proposed the hub entry in ${pr}; merge it to start publishing`);
