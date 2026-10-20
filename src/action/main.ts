@@ -1,5 +1,6 @@
 import * as core from "@actions/core";
 import { TapsterError } from "../errors";
+import { register } from "../mask";
 import { failedCount, failure, writeSummary } from "../report";
 import { check } from "./check";
 import { cleanupMode } from "./cleanup";
@@ -16,13 +17,18 @@ import { signMode } from "./sign";
 import { sparkleMode } from "./sparkle";
 
 const mode = core.getInput("mode") || "guide";
+let token = "";
 
 async function main(): Promise<void> {
   if (mode === "guide") return guide();
   guardRun(process.env, core.getInput("template"));
   if (mode === "cleanup") return cleanupMode();
+  if (mode === "check") {
+    token = process.env.GITHUB_TOKEN ?? "";
+    register(token);
+  }
   const ctx = await loadContext(core.getInput("config") || "tapster.yml");
-  if (mode === "check") return check(ctx);
+  if (mode === "check") return check(ctx, token);
   if (mode === "fetch") return fetchMode(ctx);
   if (mode === "sign") return signMode(ctx);
   if (mode === "package") return packageMode(ctx);

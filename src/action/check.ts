@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { missingAttestations } from "../attest";
 import { parseChecksums } from "../checksums";
-import { type AppPackage, type HubConfig, type InvalidPackage, type PackageConfig, isApp, macosCode } from "../config";
+import { type AppPackage, type HubConfig, type InvalidPackage, type PackageConfig, compareSemver, isApp, macosCode, parseTag } from "../config";
 import { GitHub, type Release } from "../github";
 import { readSecret, requireVar } from "../mask";
 import { type Note, type WorkItem, planPackage } from "../plan";
@@ -13,6 +13,7 @@ import { protectionProblems } from "../rulesets";
 import { GitHubError, TapsterError } from "../errors";
 import { STATE_PATH, type State, parseState, recordedChecksums } from "../state";
 import { type InstallationToken, installationRepos, installationToken } from "../token";
+import { TAPSTER } from "../version";
 import type { Context } from "./context";
 import { renderNeeded } from "./render";
 import { foreignWrites } from "../foreign";
@@ -133,9 +134,23 @@ async function latestRelease(gh: GitHub, repo: string): Promise<Release | null> 
   }
 }
 
-export async function check(ctx: Context): Promise<void> {
+export async function tapsterUpdate(gh: GitHub, running: { version: string; sha: string | null }): Promise<{ reason: string; fix: string } | null> {
+  const current = running.sha ? parseTag(`v${running.version}`) : null;
+  if (!current) return null;
+  const latest = await gh.json<{ tag_name: string }>("GET", "/repos/doguyilmaz/tapster/releases/latest").catch(() => null);
+  const next = latest ? parseTag(latest.tag_name) : null;
+  if (!next || compareSemver(next, current) <= 0) return null;
+  return {
+    reason: `tapster ${latest!.tag_name} is out; this hub runs v${running.version}`,
+    fix: "Update the hub workflow with bunx @doguyilmaz/tapster setup (Hub files) or with tapster init --workflow in a clone of the hub.",
+  };
+}
+
+export async function check(ctx: Context, token: string): Promise<void> {
   const appId = requireVar("TAPSTER_APP_ID");
   const pem = readSecret("TAPSTER_APP_PRIVATE_KEY");
+  const update = token ? await tapsterUpdate(new GitHub(token), TAPSTER) : null;
+  if (update) concern("tapster", update.reason, update.fix);
   const only = core.getInput("package");
   const items: WorkItem[] = [];
   const privateRepos = new Set<string>();
