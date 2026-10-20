@@ -1,5 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { run } from "../../src/run";
 import { demo } from "../demo";
 import { launch } from "./cdp";
 
@@ -7,7 +10,7 @@ const out = process.argv[2] ?? join(process.cwd(), "qa-shots");
 const only = process.argv[3] ?? "";
 mkdirSync(out, { recursive: true });
 const links: string[] = [];
-const { fake } = await demo(8299, (line) => {
+const { fake, sparkle } = await demo(8299, (line) => {
   const m = /http:\/\/127\.0\.0\.1:\d+\/#c=[0-9a-f]+/.exec(line);
   if (m) links.push(m[0]);
 });
@@ -46,8 +49,22 @@ try {
   await page.clickText("Yes, sign macOS software");
   await page.clickText("Apple certificate", ".route button");
   await shot("07-certificate");
+  const dir = mkdtempSync(join(tmpdir(), "qa-apple-"));
+  await run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(dir, "k.pem"), "-out", join(dir, "c.pem"), "-days", "400", "-subj", "/CN=Developer ID Application: Octo (ABCDE12345)/OU=ABCDE12345"]);
+  await run("openssl", ["pkcs12", "-export", "-in", join(dir, "c.pem"), "-inkey", join(dir, "k.pem"), "-out", join(dir, "cert.p12"), "-passout", "pass:qa-secret"]);
+  writeFileSync(join(dir, "AuthKey_ABCDE12345.p8"), "-----BEGIN PRIVATE KEY-----\nMIG\n-----END PRIVATE KEY-----\n");
+  await page.upload("input[name=p12]", join(dir, "cert.p12"));
+  await page.type("input[name=password]", "qa-secret");
+  await page.clickText("Check and store");
+  await page.waitFor("document.body.textContent.includes('Replace the certificate')", 15000);
+  await shot("07b-certificate-stored");
   await page.clickText("Notarization key", ".route button");
   await shot("08-notary");
+  await page.upload("input[name=p8]", join(dir, "AuthKey_ABCDE12345.p8"));
+  await page.type("input[name=keyId]", "ABCDE12345");
+  await page.type("input[name=issuerId]", "00000000-0000-4000-8000-000000000000");
+  await page.clickText("Check with Apple and store");
+  await page.waitFor("document.body.textContent.includes('The notarization key is stored')", 15000);
   await page.clickText("Hub files", ".route button");
   await page.waitFor("document.body.textContent.includes('changes for main')");
   await page.clickText("Remove .github/workflows/tests.yml", "label");
@@ -56,8 +73,18 @@ try {
   await page.clickText("to main", "button");
   await page.waitFor("document.body.textContent.includes('git pull')");
   await shot("10-files-written");
+  fake.get("octo/homebrew-tap")!.files!.set("tapster.yml", `version: 1\ntap: octo/tap\npackages:\n  - { name: pix, repo: octo/pix, kind: app, app: Pix.app, bundle_id: com.octo.Pix, assets: { darwin-arm64: "Pix-{version}.app.tar.gz" }, dmg: { name: "Pix-{version}.dmg" }, sparkle: { key: pix, public_key: "${sparkle.publicKey}" } }\n`);
+  await page.eval("location.reload()");
+  await page.waitFor("document.querySelector('.route')");
   await page.clickText("Optional extras", ".route button");
   await shot("10b-extras");
+  await page.clickText("Read it from my keychain");
+  await page.waitFor("document.body.textContent.includes('Paste the key')");
+  await shot("10c-sparkle");
+  await page.eval(`(() => { const i = document.querySelector('input[name=password]'); i.value = ${JSON.stringify(sparkle.seed)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await page.clickText("Store in the hub");
+  await page.waitFor("document.body.textContent.includes('All stored')", 15000);
+  await shot("10d-sparkle-stored");
   await page.clickText("Projects", "nav a");
   await page.waitFor("document.body.textContent.includes('Ready to add')");
   await shot("11-projects");

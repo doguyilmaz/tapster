@@ -210,6 +210,7 @@ select.input { appearance: auto; }
 .list { display: grid; }
 .item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; align-items: center; padding: 0.95rem 1.1rem; border-top: 1px solid var(--line); }
 .item:first-child { border-top: 0; }
+.item > .badge { justify-self: start; }
 .item .name { font-family: var(--mono); font-weight: 600; font-size: 0.93rem; overflow-wrap: anywhere; }
 .item .path { color: var(--faint); font-size: 0.83rem; overflow-wrap: anywhere; }
 .item button.link { all: unset; cursor: pointer; display: grid; gap: 0.15rem; min-width: 0; }
@@ -252,9 +253,8 @@ select.input { appearance: auto; }
 @media (max-width: 900px) {
   .setup { grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
   .route { position: static; display: flex; overflow-x: auto; gap: 0.25rem; padding-bottom: 0.25rem; }
-  .route li.extra { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed var(--line); }
-.route li.extra::before, .route li:has(+ li.extra)::before { display: none; }
-.route li:not(:last-child)::before { display: none; }
+  .route li:not(:last-child)::before { display: none; }
+  .route li.extra { margin: 0; padding: 0 0 0 0.25rem; border-top: 0; border-left: 1px dashed var(--line); }
   .route li { flex: none; }
   .route button { grid-template-columns: 28px auto; padding: 0.4rem 0.7rem 0.4rem 0.4rem; align-items: center; }
   .route .stop-state { display: none; }

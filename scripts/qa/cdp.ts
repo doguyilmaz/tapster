@@ -15,6 +15,8 @@ export type Page = {
   shot(path: string, full?: boolean): Promise<void>;
   size(width: number, height: number, mobile?: boolean): Promise<void>;
   scheme(dark: boolean): Promise<void>;
+  upload(selector: string, path: string): Promise<void>;
+  type(selector: string, text: string): Promise<void>;
   errors: string[];
   close(): void;
 };
@@ -111,6 +113,18 @@ export async function launch(): Promise<Page> {
     },
     async size(width, height, mobile = false) {
       await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 2, mobile });
+    },
+    async upload(selector, path) {
+      const { root } = await send<{ root: { nodeId: number } }>("DOM.getDocument", { depth: -1 });
+      const { nodeId } = await send<{ nodeId: number }>("DOM.querySelector", { nodeId: root.nodeId, selector });
+      if (!nodeId) throw new Error(`no ${selector}`);
+      await send("DOM.setFileInputFiles", { nodeId, files: [path] });
+      await Bun.sleep(200);
+    },
+    async type(selector, text) {
+      await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); el.focus(); })()`);
+      await send("Input.insertText", { text });
+      await Bun.sleep(100);
     },
     async scheme(dark) {
       await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: dark ? "dark" : "light" }] });
