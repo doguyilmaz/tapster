@@ -167,6 +167,58 @@ const REL = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
 
 export type CaskOptions = { mac?: boolean; bundleId?: (app: string) => string | null };
 
+const APP_LINE = /^app\s+"([A-Za-z0-9 ._-]+\.app)"$/;
+const OPENS = /^(if|unless|case|begin|while|until|def|class|module)\b|\bdo(\s*\|[^|]*\|)?$/;
+type CustomLine = { line: string; os?: "macos" | "linux"; path?: string };
+
+// The first app line anywhere is the app, as before. With a top-level on_macos or on_linux block (and Apple
+// credentials), only lines at the top or right inside those blocks are read; everything deeper is named.
+function readCustomBlock(lines: string[], blocks: boolean): { app: string | null; lines: CustomLine[] } {
+  const flat = () => {
+    let app: string | null = null;
+    const rest: CustomLine[] = [];
+    for (const line of lines) {
+      const found = APP_LINE.exec(line)?.[1];
+      if (found && !app) app = found;
+      else rest.push({ line });
+    }
+    return { app, lines: rest };
+  };
+  if (!blocks) return flat();
+  let app: string | null = null;
+  const rest: CustomLine[] = [];
+  let depth = 0;
+  let os: "macos" | "linux" | null = null;
+  let seen = false;
+  for (const line of lines) {
+    const opened = depth === 0 ? /^on_(macos|linux)\s+do$/.exec(line)?.[1] : undefined;
+    if (opened === "macos" || opened === "linux") {
+      os = opened;
+      depth = 1;
+      seen = true;
+      continue;
+    }
+    if (line === "end" && depth > 0) {
+      depth--;
+      if (depth === 0 && os) os = null;
+      else rest.push({ line });
+      continue;
+    }
+    if (OPENS.test(line)) {
+      depth++;
+      rest.push({ line });
+      continue;
+    }
+    const path = /^binary\s+"([^"]+)"$/.exec(line)?.[1];
+    const found = os !== "linux" ? APP_LINE.exec(line)?.[1] : undefined;
+    if (depth > 1 || (depth === 1 && !os)) rest.push({ line });
+    else if (found && !app) app = found;
+    else if (path && os) rest.push({ line, os, path });
+    else rest.push({ line });
+  }
+  return seen ? { app, lines: rest } : flat();
+}
+
 export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { lines: string[]; description: string | null; carried: string[]; notes: string[] } {
   type Doc = { homebrew_casks?: GoCask[]; brews?: GoCask[] } | null;
   let cfg: Doc = null;
@@ -185,19 +237,15 @@ export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { l
   const skipped = Object.keys(c).filter((k) => !READ.includes(k));
   skipped.push(...Object.keys(c.uninstall ?? {}).filter((k) => k !== "launchctl" && k !== "quit").map((k) => `uninstall.${k}`));
   skipped.push(...Object.keys(c.zap ?? {}).filter((k) => k !== "trash").map((k) => `zap.${k}`));
-  let app: string | null = null;
-  let os: string | null = null;
-  const fromBlock: { line: string; path: string }[] = [];
-  for (const line of String(c.custom_block ?? "").split("\n").map((l) => l.trim()).filter(Boolean)) {
-    const opened: string | undefined = os === null ? /^on_(macos|linux)\s+do$/.exec(line)?.[1] : undefined;
-    const found = os !== "linux" ? /^app\s+"([A-Za-z0-9 ._-]+\.app)"$/.exec(line)?.[1] : undefined;
-    const bin = /^binary\s+"([^"]+)"$/.exec(line)?.[1];
-    if (opened) os = opened;
-    else if (os !== null && line === "end") os = null;
-    else if (found && !app) app = found;
-    else if (bin && os !== "linux" && bin.startsWith("#{appdir}/")) fromBlock.push({ line, path: bin });
-    else if (!bin || os !== "linux" || !REL.test(bin)) skipped.push(`custom_block: ${line}`);
-  }
+  const custom = readCustomBlock(String(c.custom_block ?? "").split("\n").map((l) => l.trim()).filter(Boolean), opts.mac !== false);
+  const { app } = custom;
+  const inside = `#{appdir}/${app}/`;
+  const inApp = (b: string) => app !== null && b.startsWith(inside) && REL.test(b.slice(inside.length));
+  const fromMac = custom.lines.flatMap((l) => (l.os === "macos" ? [l.path!] : []));
+  const listed = list(c.binaries, /^#\{appdir\}\//);
+  const appBinaries = [...listed, ...fromMac.filter((b, i) => !listed.includes(b) && fromMac.indexOf(b) === i)].filter(inApp).map((b) => b.slice(inside.length));
+  const bare = new Set(appBinaries.map((b) => b.split("/").pop()));
+  for (const l of custom.lines) if (l.os === undefined || (l.os === "macos" ? !inApp(l.path!) : !bare.has(l.path!))) skipped.push(`custom_block: ${l.line}`);
   let postflight: { binary: string; args: string[] } | null = null;
   for (const [when, hooks] of Object.entries(c.hooks ?? {})) {
     for (const [what, body] of Object.entries(hooks ?? {})) {
@@ -221,13 +269,9 @@ export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { l
     lines.push("    completions:", ...completions.map(([shell, path]) => `      ${shell}: ${str(path)}`));
     carried.push("completions");
   }
-  const inside = `#{appdir}/${app}/`;
-  const inApp = (b: string) => app !== null && b.startsWith(inside) && REL.test(b.slice(inside.length));
-  for (const b of fromBlock) if (!inApp(b.path)) skipped.push(`custom_block: ${b.line}`);
   if (app && opts.mac !== false) {
-    const binaries = [...new Set([...list(c.binaries, /^#\{appdir\}\//), ...fromBlock.map((b) => b.path)])].filter(inApp).map((b) => b.slice(inside.length));
     const id = opts.bundleId?.(app) ?? null;
-    lines.push("    app:", `      name: ${JSON.stringify(app)}`, `      bundle_id: ${id ?? "<bundle id>"}`, ...(binaries.length ? [`      binaries: ${JSON.stringify(binaries)}`] : []));
+    lines.push("    app:", `      name: ${JSON.stringify(app)}`, `      bundle_id: ${id ?? "<bundle id>"}`, ...(appBinaries.length ? [`      binaries: ${JSON.stringify(appBinaries)}`] : []));
     carried.push("app");
     notes.push(`the hub signs, notarizes and staples ${app}; a build hook must now sign it ad hoc only (codesign --force --sign -)`);
     if (!id) notes.push(`no Info.plist here names ${app}; set app.bundle_id in the hub entry`);

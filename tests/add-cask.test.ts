@@ -124,10 +124,59 @@ test("an app in on_macos and the bare binary in on_linux carry over as an app be
   expect(Object.keys(p.assets).sort()).toEqual(["darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64"]);
   expect(p.app).toEqual({ name: "aims.app", bundle_id: "com.o.aims", binaries: ["Contents/MacOS/aims"], entitlements: [] });
   expect(p.cask.uninstall).toEqual({ launchctl: ["com.o.aims.keepalive"] });
-  const flat = goreleaserCask(crossPlatform.replace(/ {6}on_macos do\n([\s\S]*?) {6}end\n {6}on_linux do\n {8}binary "aims"\n {6}end\n/, (_, body: string) => body.replaceAll("        ", "      ")), aimsIds);
-  expect(flat.lines).toEqual(c.lines);
   const odd = goreleaserCask(crossPlatform.replace('binary "aims"', 'binary "aims"\n        manpage "aims.1"').replace("#{appdir}/aims.app/", "#{appdir}/other.app/"), aimsIds);
-  expect(odd.notes.at(-1)).toBe('not carried from GoReleaser\'s Homebrew section: custom_block: manpage "aims.1", custom_block: binary "#{appdir}/other.app/Contents/MacOS/aims"');
+  expect(odd.notes.at(-1)).toBe(`${NOT} custom_block: binary "#{appdir}/other.app/Contents/MacOS/aims", custom_block: binary "aims", custom_block: manpage "aims.1"`);
+});
+
+const NOT = "not carried from GoReleaser's Homebrew section:";
+
+test("in on_linux only the bare name of a carried app command is left out without a word", () => {
+  const c = goreleaserCask(crossPlatform.replace('binary "aims"', 'binary "aims"\n        binary "other"\n        binary "../../x"'), aimsIds);
+  expect(c.notes.at(-1)).toBe(`${NOT} custom_block: binary "other", custom_block: binary "../../x"`);
+});
+
+test("only lines at the top or right inside on_macos and on_linux are read; deeper ones and an app inside on_linux are named", () => {
+  const nested = `homebrew_casks:
+  - name: t
+    custom_block: |
+      on_linux do
+        on_intel do
+          binary "t"
+        end
+        app "t.app"
+        binary "#{appdir}/t.app/Contents/MacOS/t"
+      end
+      on_macos do
+        if MacOS.version >= :sonoma
+          app "t.app"
+        end
+      end
+`;
+  const c = goreleaserCask(nested, { bundleId: () => "com.o.t" });
+  expect(c.carried).toEqual([]);
+  expect(c.notes).toEqual([
+    `${NOT} custom_block: on_intel do, custom_block: binary "t", custom_block: end, custom_block: app "t.app", custom_block: binary "#{appdir}/t.app/Contents/MacOS/t", custom_block: if MacOS.version >= :sonoma, custom_block: app "t.app", custom_block: end`,
+  ]);
+});
+
+test("a custom_block without on_macos or on_linux is read as before; so is any entry without Apple credentials", () => {
+  const flat = `homebrew_casks:
+  - name: aims
+    custom_block: |
+      app "aims.app"
+      binary "#{appdir}/aims.app/Contents/MacOS/aims"
+    binaries: ["#{appdir}/aims.app/Contents/MacOS/aimsctl"]
+`;
+  const named = `${NOT} custom_block: binary "#{appdir}/aims.app/Contents/MacOS/aims"`;
+  const mac = goreleaserCask(flat, aimsIds);
+  expect(mac.lines).toEqual(["    app:", '      name: "aims.app"', "      bundle_id: com.o.aims", '      binaries: ["Contents/MacOS/aimsctl"]']);
+  expect(mac.notes.at(-1)).toBe(named);
+  expect(goreleaserCask(flat, { mac: false, ...aimsIds })).toEqual({ lines: [], description: null, carried: [], notes: [named] });
+  const noMac = goreleaserCask(crossPlatform, { mac: false, ...aimsIds });
+  expect(noMac.carried).toEqual(["uninstall"]);
+  expect(noMac.notes).toEqual([
+    `${NOT} custom_block: on_macos do, custom_block: binary "#{appdir}/aims.app/Contents/MacOS/aims", custom_block: end, custom_block: on_linux do, custom_block: binary "aims", custom_block: end`,
+  ]);
 });
 
 test("Homebrew parts tapster does not render are named, not carried", () => {
