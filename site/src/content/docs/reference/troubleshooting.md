@@ -39,6 +39,7 @@ These stop a whole run. The run's summary names them.
 | `the App is installed on the hub` | Remove the hub from the App's repositories at [github.com/settings/installations](https://github.com/settings/installations). The App must reach your projects only. |
 | `tapster runs only from .github/workflows/tapster.yml on the hub's main branch` | Start the **tapster** workflow on `main`. Other workflows and branches never get the keys. |
 | `the hub workflow was written for another tapster version` | Run `tapster init --workflow` in the hub clone, then commit and push. |
+| `TAPSTER_APP_ID is not set` or another `... is not set` | The setup is not finished. Run `bunx @doguyilmaz/tapster setup` on your computer or `tapster init` in a clone of the hub. |
 
 These stop one project. The others still publish:
 
@@ -49,6 +50,16 @@ These stop one project. The others still publish:
 | `<name> ships macOS code, but this hub has no Apple credentials` | Run `tapster init --rotate certificate` and `tapster init --rotate notary`. |
 | `the Developer ID certificate expired on <date>` | Create a new certificate, then run `tapster init --rotate certificate`. |
 | `<name> is invalid: ...` or `<name>: ...` | Fix the entry in `tapster.yml`. See [tapster.yml](/reference/config/). |
+
+## The issue "tapster: the hub needs attention"
+
+The hub checks itself on every run. When something needs you, it opens this issue in the hub and lists each finding
+with its fix. It edits the issue when the findings change and closes it once all is well, so you never close it
+yourself. Fix the findings with `bunx @doguyilmaz/tapster setup` (under Health) or `tapster doctor` in a clone of the
+hub.
+
+If the hub's issues are turned off, the run's summary says so instead. Turn them on in the hub's settings to get the
+issue.
 
 ## On a draft
 

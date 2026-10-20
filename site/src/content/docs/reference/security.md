@@ -63,6 +63,9 @@ you.
   from the one your installed apps trust.
 - The job that builds Linux packages has no key. The job that signs them rebuilds what each package must contain and
   refuses anything else.
+- The check job's own token can only read the hub's files and issues.
+- The report job holds no keys. Its token may write the hub's issues and nothing else. It opens, edits and closes one
+  issue, `tapster: the hub needs attention`. The findings reach it as an input of tapster's step, never through a shell.
 - The doorbell's App may only start the hub's workflow. The Worker accepts only GitHub's own tokens from your
   repositories, made for its address.
 
