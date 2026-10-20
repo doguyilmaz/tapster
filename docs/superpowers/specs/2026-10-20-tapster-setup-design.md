@@ -3,12 +3,12 @@
 ## Goal
 
 Someone who finds tapster on the GitHub Marketplace sets up a hub and adds their projects without learning a CLI. They
-run one command, `bunx @doguyilmaz/tapster setup`, and a local app opens in their browser. It walks them through every
-step, shows what each step changes and where each key goes, and does the work with buttons, file drops and forms that
+run one command, `bunx @doguyilmaz/tapster setup` and a local app opens in their browser. It walks them through every
+step, shows what each step changes and where each key goes and does the work with buttons, file drops and forms that
 their password manager understands. It finds the projects already cloned on their computer and adds them with a click.
-The CLI keeps every capability for people who prefer it, and both share one implementation of each step.
+The CLI keeps every capability for people who prefer it and both share one implementation of each step.
 
-The hub keeps itself healthy after setup: every run checks what it can, and one issue in the hub opens when something
+The hub keeps itself healthy after setup: every run checks what it can and one issue in the hub opens when something
 needs the owner and closes itself once it is fixed.
 
 Nothing changes in where keys go: from the user's computer to their own GitHub (and, for the doorbell, Cloudflare)
@@ -63,7 +63,7 @@ So the Action guides and checks; the setup app (or the CLI) on the owner's compu
 - Headers on every response: a CSP of `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;
   connect-src 'self'; form-action https://github.com; frame-ancestors 'none'; base-uri 'none'`, `nosniff`,
   `no-referrer` and `no-store`.
-- The only routes without the token: the page itself, its script, style and images, the claim, and the GitHub App
+- The only routes without the token: the page itself, its script, style and images, the claim and the GitHub App
   callback, which needs the single-use state the app created for that flow. The manifest form submits in the same tab,
   so the page that GitHub sends back still holds the session.
 - Uploaded files (`.p12`, `.p8`, `.pem`) stay in memory, size-limited. The notary check needs a file path for
@@ -82,7 +82,7 @@ So the Action guides and checks; the setup app (or the CLI) on the owner's compu
 - Secret fields are real `<form>` elements with `name`, `autocomplete="current-password"` and a username field with
   `autocomplete="username"` whose value names the entry, such as `you/homebrew-tap: Developer ID certificate`, so the
   manager saves a meaningful entry and can tell entries apart.
-- The form submits through a real submit button. The script prevents the navigation, sends the request, and on success
+- The form submits through a real submit button. The script prevents the navigation, sends the request and on success
   removes the form and changes the address (`pushState`). Chrome detects a save when the form disappears, 1Password and
   Bitwarden react to the submit itself, Safari to a submit followed by an address change. No paste blocking, no custom
   password widgets, `spellcheck` off. Only one secret form is on the page at a time, so autofill cannot land in the
@@ -112,16 +112,16 @@ So the Action guides and checks; the setup app (or the CLI) on the owner's compu
 
 1. **Account.** `gh` installed and signed in, with the scopes tapster needs (`repo`, `workflow`). If not, the exact
    command to run, a copy button and an automatic re-check.
-2. **Hub.** Pick one of the repositories you own whose name starts with `homebrew-`, or create `homebrew-tap` (public
+2. **Hub.** Pick one of the repositories you own whose name starts with `homebrew-` or create `homebrew-tap` (public
    by default, with the reason, created with a first commit). The current folder's repository is preselected when it is
    a tap. Organization repositories are not offered: tapster serves personal accounts.
 3. **Protect.** One button runs the same protection as `tapster init`. The stop lists the protections and shows each
    as done when GitHub has it. Before it runs, it lists the hub's other workflows that use actions from anyone else
-   (such as the `tests.yml` and `publish.yml` of `brew tap-new`): they stop running, and their commits would make the
+   (such as the `tests.yml` and `publish.yml` of `brew tap-new`): they stop running and their commits would make the
    hub refuse to run. The hub files step can remove them.
 4. **GitHub App.** The page explains the App and its permissions, then posts the manifest to GitHub. GitHub sends the
    user back to the app, which stores the App and its key in the hub and opens the install page. While the app holds
-   the new key in memory it checks the installation every few seconds and says when it is done, or that the hub was
+   the new key in memory it checks the installation every few seconds and says when it is done or that the hub was
    picked by mistake.
 5. **macOS.** "Will this hub sign macOS software?" Yes shows the two Apple stops, No skips them and says how to add
    them later. A hub that already has Apple credentials skips the question.
@@ -132,7 +132,7 @@ So the Action guides and checks; the setup app (or the CLI) on the owner's compu
    commit through the API, after the foreign-commit check. Existing files other than the workflow are kept. An empty
    repository gets its first commit through the contents API. Also the place to move the hub to this tapster version,
    to change the schedule and to remove the old tap workflows. A local clone of the hub needs a `git pull` afterwards;
-   the page says so, and `init` refuses to read a clone that is behind `main`.
+   the page says so and `init` refuses to read a clone that is behind `main`.
 9. **First project.** Leads to Projects.
 
 ### Projects
@@ -143,11 +143,11 @@ So the Action guides and checks; the setup app (or the CLI) on the owner's compu
   `node_modules`, hidden folders and `Library`, with a time and folder limit. Folders macOS guards with a privacy prompt
   (Documents, Desktop, Downloads) are read only when the user adds them. It reads `.git/config` and checks which build
   files exist; the page says so. A project's build files are read when the user opens it.
-- Each clone shows its kind (GoReleaser Go tool, Bun tool, Mac app with Sparkle, or not supported and why) and its
+- Each clone shows its kind (GoReleaser Go tool, Bun tool, Mac app with Sparkle or not supported and why) and its
   state: not in the hub, proposed (open pull request on the hub), in the hub, last version published.
 - **Add** opens a sheet: what tapster changes in the clone (files) and on GitHub (ruleset, deploy key, pull request),
   the options as switches with their trade-offs (automatic tags, Dependabot, which workflow runs GoReleaser, replace an
-  existing release workflow), then one button. The result shows each change, the diff of the clone, and the next steps
+  existing release workflow), then one button. The result shows each change, the diff of the clone and the next steps
   as buttons:
   - **Commit** commits only the files tapster changed, with a fixed message, in the user's own environment (their hooks
     and commit signing apply). **Push** pushes the current branch with prompts turned off; when git needs a password
@@ -161,7 +161,7 @@ So the Action guides and checks; the setup app (or the CLI) on the owner's compu
 - The `doctor` checks with their fixes, grouped as problems first. Fixes that the app can do have a button (restore the
   protection, rewrite the workflow); the others say what to do.
 - The hub's health issue (section 3), when one is open.
-- The hub's recent runs with their result, and a "Run the hub now" button.
+- The hub's recent runs with their result and a "Run the hub now" button.
 
 ### Extras (in Setup, after the main stops)
 
@@ -178,7 +178,7 @@ So the Action guides and checks; the setup app (or the CLI) on the owner's compu
 - `src/web/api/*.ts`: one module per area (account and hub, setup steps, projects, health). Each handler validates its
   input with zod and calls the shared operations.
 - `src/web/client/`: Preact 10 with signals. One stylesheet with tokens. Built by Bun into a string; in development
-  and tests it is built on first request, and the release build inlines it with a Bun plugin, for `dist/cli.js` and
+  and tests it is built on first request and the release build inlines it with a Bun plugin, for `dist/cli.js` and
   the compiled binaries alike (`scripts/build.ts`).
 - Shared operations move out of the prompts: certificate and notary checks take bytes and strings, `add` takes its
   answers and reports through a callback, hub files are planned once and either written to a clone (CLI) or committed
@@ -192,7 +192,7 @@ So the Action guides and checks; the setup app (or the CLI) on the owner's compu
   then runs the guide: a run summary that says what tapster is, what it can see of this repository from the run's own
   event (its name, whether it is public, the workflow that ran) and the next step, with both ways: the setup app
   (`bunx @doguyilmaz/tapster setup`) or the CLI. It runs before the hub guard, needs no token, no secrets and no
-  checkout, and runs in any workflow. There is no token input: every hub step would receive it.
+  checkout and runs in any workflow. There is no token input: every hub step would receive it.
 - When the real hub workflow runs before the setup is finished, the missing variable or secret errors say to finish
   the setup with `bunx @doguyilmaz/tapster setup` or the CLI command.
 - The README leads with these two paths. The Marketplace listing is prepared from it; its field values go to the owner
@@ -201,15 +201,15 @@ So the Action guides and checks; the setup app (or the CLI) on the owner's compu
 ## 3. The health issue
 
 The user asked for a weekly doctor. A fixed weekly run would be fragile: the hub's concurrency group keeps one pending
-run, so a tick or a doorbell ring cancels a queued weekly run, and it would be an extra billed run on private hubs. So
-the check job decides on every run whether the issue needs a change, and the issue changes only when the findings do.
+run, so a tick or a doorbell ring cancels a queued weekly run and it would be an extra billed run on private hubs. So
+the check job decides on every run whether the issue needs a change and the issue changes only when the findings do.
 
 - The `check` job collects findings: failures (including a check that stops early), the certificate expiring within 30
   days and a newer tapster release. Choices the owner accepted (`protection: off`, the App on extra repositories) and
   per-run waiting notes are not findings.
 - It reads the open issue that `github-actions[bot]` opened with the title "tapster: the hub needs attention" (its token
   gets `issues: read`) and compares a hash of the findings with the one the issue carries. It sets `report=true` when
-  they differ, or when the issue is open and nothing is wrong.
+  they differ or when the issue is open and nothing is wrong.
 - A `report` job runs only then. Its token can write issues and nothing else; it holds no keys. It opens the issue with
   each finding and its fix, edits it when the findings change and closes it with a comment once all is well. The
   findings reach it as an action input, never through a shell.
