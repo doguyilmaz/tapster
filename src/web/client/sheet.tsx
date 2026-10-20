@@ -1,6 +1,6 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { AddOptionsView, AddView, DiffView, InspectView, Problem as ProblemView, ProjectStatus } from "../contract";
+import type { AddOptionsView, AddView, CommitResult, DiffView, InspectView, Problem as ProblemView, ProjectStatus } from "../contract";
 import { type OneGo, addInOneGo, oneGoRefusal } from "../oneclick";
 import type { ProjectStepId } from "../status";
 import { changedOnly, lineDiff, notes } from "../steps";
@@ -112,12 +112,30 @@ function Diff({ view }: { view: DiffView }) {
   );
 }
 
-function Changes({ repo, path, files, ahead }: { repo: string; path: string; files: string[]; ahead: number | null }) {
+function Sends({ ahead, unpushed }: Pick<CommitResult, "ahead" | "unpushed">) {
+  if (ahead === null) return <span class="muted small">tapster cannot tell which commits Push sends: this clone has no copy of the branch from GitHub yet.</span>;
+  if (!unpushed.some((c) => !c.tapster)) return null;
+  return (
+    <Note tone="warn" title="Push also sends commits that are not tapster's">
+      <ul class="log">
+        {unpushed.map((c) => (
+          <li key={c.sha}>
+            <code>{c.sha.slice(0, 7)}</code> {c.subject}
+          </li>
+        ))}
+      </ul>
+      {ahead > unpushed.length && <span>And {ahead - unpushed.length} more.</span>}
+    </Note>
+  );
+}
+
+function Changes({ repo, path, files, ahead, unpushed }: { repo: string; path: string; files: string[] } & Pick<CommitResult, "ahead" | "unpushed">) {
   const [diff, setDiff] = useState<DiffView | null>(null);
   const [problem, setProblem] = useState<ProblemView | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [committed, setCommitted] = useState(false);
+  const [committed, setCommitted] = useState<CommitResult | null>(null);
   const [pushed, setPushed] = useState(false);
+  const sends = committed ?? { ahead, unpushed };
   useEffect(() => {
     setDiff(null);
     if (files.length) post<DiffView>("/api/projects/diff", { path, files }).then(setDiff, (e) => setProblem(problemOf(e)));
@@ -156,12 +174,15 @@ function Changes({ repo, path, files, ahead }: { repo: string; path: string; fil
       {diff && <Diff view={diff} />}
       <Problem problem={problem} />
       {nothing ? (
-        <div class="row">
-          <span class="row muted">
-            <Icon name="check" /> No changes: the clone's files match its last commit.
-          </span>
-          {ahead !== null && ahead > 0 && (pushed ? <Badge tone="ok">Pushed</Badge> : push)}
-        </div>
+        <>
+          <div class="row">
+            <span class="row muted">
+              <Icon name="check" /> No changes: the clone's files match its last commit.
+            </span>
+            {ahead !== null && ahead > 0 && (pushed ? <Badge tone="ok">Pushed</Badge> : push)}
+          </div>
+          {ahead !== null && ahead > 0 && !pushed && <Sends {...sends} />}
+        </>
       ) : (
         diff && (
           <>
@@ -173,10 +194,7 @@ function Changes({ repo, path, files, ahead }: { repo: string; path: string; fil
                   busy={busy === "commit"}
                   class="btn primary"
                   onClick={() =>
-                    act("commit", async () => {
-                      await post("/api/projects/commit", { path, files: real.map((f) => f.path) });
-                      setCommitted(true);
-                    })
+                    act("commit", async () => setCommitted(await post<CommitResult>("/api/projects/commit", { path, files: real.map((f) => f.path) })))
                   }
                 >
                   Commit {real.length === 1 ? "this file" : "these files"}
@@ -184,6 +202,7 @@ function Changes({ repo, path, files, ahead }: { repo: string; path: string; fil
               )}
               {committed && (pushed ? <Badge tone="ok">Pushed</Badge> : push)}
             </div>
+            {committed && !pushed && <Sends {...sends} />}
             <p class="muted small">tapster commits only these files, in your own git setup: your hooks and commit signing apply.</p>
           </>
         )
@@ -453,7 +472,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
       return (
         <>
           <span class="muted small">The clone has tapster's files. Commit and push them, then merge them into {info.defaultBranch} if you work on another branch.</span>
-          <Changes repo={target.repo} path={info.path} files={info.dirty} ahead={info.ahead} />
+          <Changes repo={target.repo} path={info.path} files={info.dirty} ahead={info.ahead} unpushed={info.unpushed} />
         </>
       );
     }
@@ -461,7 +480,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
       return (
         <>
           <span class="muted small">The clone's last commit has tapster's files but is not on GitHub yet.</span>
-          <Changes repo={target.repo} path={info.path} files={[]} ahead={info.ahead} />
+          <Changes repo={target.repo} path={info.path} files={[]} ahead={info.ahead} unpushed={info.unpushed} />
         </>
       );
     }
@@ -505,7 +524,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
           {!running && !run?.done && (
             <section class="stack tight">
               <h3 class="section-title">Review and commit the changes</h3>
-              <Changes repo={target.repo} path={path!} files={added.files} ahead={info?.ahead ?? null} />
+              <Changes repo={target.repo} path={path!} files={added.files} ahead={info?.ahead ?? null} unpushed={info?.unpushed ?? []} />
             </section>
           )}
           {!running && (card ?? <Spinner label="Reading the project's status" />)}

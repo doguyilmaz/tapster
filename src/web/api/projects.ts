@@ -7,7 +7,7 @@ import { readGit } from "../../clone";
 import { TOOLS, runPath } from "../../run";
 import { addOptions, addProject, findApp, prepare, projectName } from "../../cli/add";
 import { binName, hubEntries, hubFacts } from "../../cli/hubpr";
-import type { AddView, DiffView, InspectView, ScanView } from "../contract";
+import type { AddView, CommitResult, DiffView, InspectView, ScanView, Unpushed } from "../contract";
 import { defaultRoots, insideHome, oneClonePerRepo, originRepo, projectKind, readSmall, scanClones } from "../scan";
 import { type Ctx, type Routes, readJson } from "../server";
 import { checkHub, me } from "./hub";
@@ -155,7 +155,7 @@ async function inspect(c: Ctx): Promise<InspectView> {
     proposed: entry?.pr ?? null,
     apple: facts.apple,
     ready,
-    ahead: await ahead(dir),
+    ...(await unpushed(dir, project.default_branch)),
   };
 }
 
@@ -164,9 +164,17 @@ const addBody = z.object({ ...hubBody, path: z.string(), options, oneGo: z.boole
 
 const optionsOf = (o: z.infer<typeof options>) => addOptions([...(o.force ? ["--force"] : []), ...(o.autoTag ? ["--auto-tag"] : []), ...(o.dependabot ? ["--allow-dependabot"] : []), "--workflow", o.workflow]);
 
-async function ahead(dir: string): Promise<number | null> {
-  const res = await git(dir, ["rev-list", "--count", "@{u}..HEAD"]);
-  return res.code === 0 && /^\d+$/.test(res.stdout.trim()) ? Number(res.stdout.trim()) : null;
+async function unpushed(dir: string, defaultBranch: string): Promise<{ ahead: number | null; unpushed: Unpushed[] }> {
+  const known = async (rev: string) => (await git(dir, ["rev-parse", "--verify", "--quiet", rev])).code === 0;
+  const remote = /^[A-Za-z0-9._/-]+$/.test(defaultBranch) && !defaultBranch.includes("..") ? `refs/remotes/origin/${defaultBranch}` : null;
+  const base = (await known("@{u}")) ? "@{u}" : remote && (await known(remote)) ? remote : null;
+  if (!base) return { ahead: null, unpushed: [] };
+  const [count, list] = await Promise.all([git(dir, ["rev-list", "--count", `${base}..HEAD`]), git(dir, ["rev-list", "--max-count=20", "--format=%H %s", `${base}..HEAD`])]);
+  const commits = list.stdout.split("\n").flatMap((line) => {
+    const m = /^([0-9a-f]{40,64}) (.*)$/.exec(line);
+    return m ? [{ sha: m[1]!, subject: m[2]!.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, 120), tapster: m[2] === COMMIT_MESSAGE }] : [];
+  });
+  return { ahead: count.code === 0 && /^\d+$/.test(count.stdout.trim()) ? Number(count.stdout.trim()) : null, unpushed: commits };
 }
 
 async function add(c: Ctx): Promise<AddView> {
@@ -178,7 +186,8 @@ async function add(c: Ctx): Promise<AddView> {
   const opts = optionsOf(body.options);
   const facts = await hubFacts(gh, hub);
   if (body.oneGo) {
-    const problem = oneGoProblem({ branch: branchOf(dir), defaultBranch: (await gh.getRepo(repo)).default_branch, dirty: [...new Set(await changed(dir, [...TAPSTER_FILES, `.github/workflows/${opts.workflow}`]))], ahead: await ahead(dir) });
+    const defaultBranch = (await gh.getRepo(repo)).default_branch;
+    const problem = oneGoProblem({ branch: branchOf(dir), defaultBranch, dirty: [...new Set(await changed(dir, [...TAPSTER_FILES, `.github/workflows/${opts.workflow}`]))], ahead: (await unpushed(dir, defaultBranch)).ahead });
     if (problem) throw new TapsterError(problem, "Fix that in the clone first. Or turn off doing it in one go and add the project step by step.");
   }
   await git(dir, ["config", "tapster.hub", hub], { user: true });
@@ -226,21 +235,20 @@ async function diff(c: Ctx): Promise<DiffView> {
   return { files: out };
 }
 
-async function commit(c: Ctx) {
+async function commit(c: Ctx): Promise<CommitResult> {
   const body = await readJson(c.req, filesBody);
-  const { login } = await me(c.s);
+  const { gh, login } = await me(c.s);
   const dir = clonePath(body.path, c.s.deps.home);
-  cloneRepo(dir, login);
+  const repo = cloneRepo(dir, login);
   const files = relFiles(body.files);
   const added = await git(dir, ["add", "--", ...files], { user: true });
   if (added.code !== 0) throw new TapsterError("git could not stage the files", added.stderr.trim().split("\n").at(-1) ?? "Run git status in the clone.");
   const done = await git(dir, ["commit", "-m", COMMIT_MESSAGE, "--", ...files], { user: true, timeoutMs: 60_000 });
-  if (done.code !== 0) {
-    const said = `${done.stdout}\n${done.stderr}`;
-    if (/nothing to commit|no changes added/i.test(said)) return { committed: false };
+  const said = `${done.stdout}\n${done.stderr}`;
+  if (done.code !== 0 && !/nothing to commit|no changes added/i.test(said)) {
     throw new TapsterError("git could not commit", `${said.trim().split("\n").at(-1) ?? ""} Commit in a terminal: git commit -m "${COMMIT_MESSAGE}" -- ${files.join(" ")}`);
   }
-  return { committed: true };
+  return { committed: done.code === 0, ...(await unpushed(dir, (await gh.getRepo(repo)).default_branch)) };
 }
 
 async function push(c: Ctx) {

@@ -166,6 +166,7 @@ try {
   const pix = join(home, "Developer", "hafifpix");
   await run("git", ["init", "-q", "--bare", "-b", "main", join(home, "hafifpix.git")]);
   for (const [k, v] of [["user.name", "Demo"], ["user.email", "demo@example.com"], ["commit.gpgsign", "false"], ["remote.origin.pushurl", join(home, "hafifpix.git")]]) await run("git", ["-C", pix, "config", k!, v!]);
+  await run("git", ["-C", pix, "push", "-q", "origin", "main"]);
   await page.clickText("octo/hafifpix", ".item button.link");
   await page.waitFor("document.body.textContent.includes('Options')");
   await page.clickText("Add, commit, push and merge in one go", ".sheet label");

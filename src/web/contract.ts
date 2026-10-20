@@ -66,7 +66,12 @@ export type InspectView = {
   apple: boolean;
   ready: boolean;
   ahead: number | null;
+  unpushed: Unpushed[];
 };
+
+export type Unpushed = { sha: string; subject: string; tapster: boolean };
+
+export type CommitResult = { committed: boolean; ahead: number | null; unpushed: Unpushed[] };
 
 export type AddOptionsView = { workflow: string; autoTag: boolean; dependabot: boolean; force: boolean };
 

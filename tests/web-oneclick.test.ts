@@ -24,10 +24,11 @@ beforeAll(async () => {
   fake.track(HUB);
   home = await sampleHome(fake);
   remotes = mkdtempSync(join(home, "remotes-"));
-  for (const name of ["ebb", "hafifpix"]) {
+  for (const name of ["ebb", "hafifpix", "aims", "lockstep"]) {
     const dir = join(home, "Developer", name);
     await run("git", ["init", "-q", "--bare", "-b", "main", join(remotes, `${name}.git`)]);
     for (const [k, v] of [["user.name", "Test"], ["user.email", "t@example.com"], ["commit.gpgsign", "false"], ["remote.origin.pushurl", join(remotes, `${name}.git`)]]) await run("git", ["-C", dir, "config", k!, v!]);
+    if (name !== "lockstep") await run("git", ["-C", dir, "push", "-q", "origin", "main"]);
   }
   useGhWrite(fake.ghWrite);
   ({ call } = webApp(fake, home));
@@ -139,4 +140,30 @@ test("one go stops at the step that fails and leaves the rest to the manual way"
   expect(await head(path)).not.toBe(before);
   const pr = fake.get(HUB)!.pulls.find((p) => p.head === "tapster-add-hafifpix")!;
   expect(pr.merged).toBeUndefined();
+  const info = await inspect(path);
+  expect([info.ahead, info.unpushed.map((c) => [c.subject, c.tapster])]).toEqual([1, [["Release through the tapster hub", true]]]);
+});
+
+test("a clone pushed without an upstream still counts its own commits, and Push names them", async () => {
+  const path = join(home, "Developer", "aims");
+  const remote = (await run("git", ["-C", join(remotes, "aims.git"), "rev-parse", "main"])).stdout.trim();
+  await run("git", ["-C", path, "commit", "-q", "--allow-empty", "-m", "WIP mine"]);
+  const info = await inspect(path);
+  expect([info.ahead, info.unpushed.map((c) => [c.subject, c.tapster])]).toEqual([1, [["WIP mine", false]]]);
+  expect(oneGoRefusal(info)).toBe("The clone has 1 commit that is not on GitHub yet.");
+  const r = await addInOneGo(send, { hub: HUB, info, options: OPTIONS }, () => {});
+  expect(r.steps[0]!.problem!.reason).toBe("the clone has 1 commit that is not on GitHub yet");
+  expect((await run("git", ["-C", join(remotes, "aims.git"), "rev-parse", "main"])).stdout.trim()).toBe(remote);
+  await Bun.write(join(path, ".github", "workflows", "release.yml"), `${await Bun.file(join(path, ".github", "workflows", "release.yml")).text()}# mine\n`);
+  const done = (await call("POST", "/api/projects/commit", { path, files: [".github/workflows/release.yml"] })).data as { committed: boolean; ahead: number; unpushed: { subject: string; tapster: boolean }[] };
+  expect([done.committed, done.ahead, done.unpushed.map((c) => [c.subject, c.tapster])]).toEqual([true, 2, [["Release through the tapster hub", true], ["WIP mine", false]]]);
+});
+
+test("one go refuses a clone that cannot tell which commits GitHub has", async () => {
+  const path = join(home, "Developer", "lockstep");
+  const info = await inspect(path);
+  expect([info.ahead, info.unpushed]).toEqual([null, []]);
+  expect(oneGoRefusal(info)).toBe("The clone has no origin/main, so tapster cannot tell which commits are on GitHub yet.");
+  const r = await addInOneGo(send, { hub: HUB, info, options: OPTIONS }, () => {});
+  expect(r.steps[0]!.problem!.reason).toBe("the clone has no origin/main, so tapster cannot tell which commits are on GitHub yet");
 });

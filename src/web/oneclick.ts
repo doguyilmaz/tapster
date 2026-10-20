@@ -10,6 +10,7 @@ const LABELS: Record<RunStepId, string> = { add: "Add the project", commit: "Com
 export function oneGoProblem(c: { branch: string; defaultBranch: string; dirty: string[]; ahead: number | null }): string | null {
   if (c.branch !== c.defaultBranch) return `the clone is on ${c.branch}, not ${c.defaultBranch}`;
   if (c.dirty.length) return `the clone has changes of its own in ${c.dirty.join(", ")}`;
+  if (c.ahead === null) return `the clone has no origin/${c.defaultBranch}, so tapster cannot tell which commits are on GitHub yet`;
   if (c.ahead) return `the clone has ${c.ahead} ${c.ahead === 1 ? "commit" : "commits"} that ${c.ahead === 1 ? "is" : "are"} not on GitHub yet`;
   return null;
 }
