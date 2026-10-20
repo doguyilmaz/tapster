@@ -33,6 +33,13 @@ test("the kind comes from which build files exist", () => {
   expect(projectKind(dir, ["go.mod", ".goreleaser.yaml"]).kind).toBe("go");
   expect(projectKind(dir, ["MyApp.xcodeproj"]).kind).toBe("app");
   expect(projectKind(dir, ["README.md"]).why).toBe("no build that tapster knows");
+  const js = join(base, "kinds-js");
+  mkdirSync(js, { recursive: true });
+  writeFileSync(join(js, "package.json"), '{"name":"site"}');
+  writeFileSync(join(js, "bun.lock"), "{}");
+  expect(projectKind(js, ["package.json", "bun.lock"]).why).toBe("a Bun project without a command (no bin in package.json)");
+  writeFileSync(join(js, "package.json"), '{"name":"tool","bin":{"tool":"cli.ts"}}');
+  expect(projectKind(js, ["package.json", "bun.lock"]).kind).toBe("bun");
 });
 
 test("the scan finds clones three levels down, skips noise and follows a symlinked root once", () => {

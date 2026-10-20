@@ -70,6 +70,15 @@ const or404 = async <T>(p: Promise<T>): Promise<T | null> => {
   }
 };
 
+const mainRef = async (gh: GitHub, hub: string): Promise<string | null> => {
+  try {
+    return (await gh.json<{ object: { sha: string } }>("GET", `/repos/${hub}/git/ref/heads/main`)).object.sha;
+  } catch (e) {
+    if (e instanceof GitHubError && (e.status === 404 || e.status === 409)) return null;
+    throw e;
+  }
+};
+
 export async function hubChoices(gh: GitHub, owner: string): Promise<HubChoice[]> {
   const repos: { full_name: string; name: string; private: boolean; html_url: string; owner: { login: string } }[] = [];
   for (let page = 1; page <= 5; page++) {
@@ -112,7 +121,7 @@ type Named = { name: string; value?: string };
 
 export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubView> {
   const repo = await gh.json<{ private: boolean; html_url: string }>("GET", `/repos/${hub}`);
-  const branch = await or404(gh.json<{ object: { sha: string } }>("GET", `/repos/${hub}/git/ref/heads/main`));
+  const branch = await mainRef(gh, hub);
   const empty = branch === null;
   const env = await or404(gh.json<{ deployment_branch_policy: { custom_branch_policies: boolean } | null }>("GET", `/repos/${hub}/environments/tapster`));
   const list = async (kind: "variables" | "secrets") => (env ? ((await gh.json<Record<string, Named[]>>("GET", `/repos/${hub}/environments/tapster/${kind}?per_page=100`))[kind] ?? []) : []);
@@ -341,7 +350,7 @@ async function filesPreview(c: Ctx): Promise<FilesView> {
 async function filesCommit(c: Ctx) {
   const q = await readJson(c.req, filesQuery);
   const { gh, hub, login } = await hubFrom(c, q.hub);
-  if ((await or404(gh.json("GET", `/repos/${hub}/git/ref/heads/main`))) === null) {
+  if ((await mainRef(gh, hub)) === null) {
     const readme = starterFiles(hub).find((f) => f.path === "README.md")!;
     await gh.json("PUT", `/repos/${hub}/contents/README.md`, { message: "Start the tap", content: Buffer.from(readme.content).toString("base64") });
   }

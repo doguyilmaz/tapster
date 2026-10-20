@@ -26,7 +26,16 @@ export function projectKind(dir: string, entries: string[]): { kind: ProjectKind
   const has = (f: string) => entries.includes(f) && isFile(join(dir, f));
   if (entries.some((f) => f === "project.yml" || f === "Package.swift" || f.endsWith(".xcodeproj"))) return { kind: "app", why: null };
   if (has("go.mod")) return has(".goreleaser.yaml") || has(".goreleaser.yml") ? { kind: "go", why: null } : { kind: null, why: "a Go project without GoReleaser" };
-  if (has("package.json")) return has("bun.lock") || has("bun.lockb") ? { kind: "bun", why: null } : { kind: null, why: "a JavaScript project without Bun" };
+  if (has("package.json")) {
+    if (!has("bun.lock") && !has("bun.lockb")) return { kind: null, why: "a JavaScript project without Bun" };
+    let bin: unknown = null;
+    try {
+      bin = (JSON.parse(readSmall(join(dir, "package.json")) ?? "{}") as { bin?: unknown }).bin;
+    } catch {
+      bin = null;
+    }
+    return bin ? { kind: "bun", why: null } : { kind: null, why: "a Bun project without a command (no bin in package.json)" };
+  }
   return { kind: null, why: "no build that tapster knows" };
 }
 

@@ -221,3 +221,18 @@ test("opening a clone never runs commands from its own git config", async () => 
   await call("POST", "/api/projects/scan", { hub: "octo/homebrew-tap", extra: [] });
   expect(existsSync(marker)).toBe(false);
 });
+
+test("a new tap starts empty, gets protected and receives tapster's README as its first commit", async () => {
+  expect((await call("POST", "/api/hubs", { name: "homebrew-fresh", private: false })).data).toEqual({ hub: "octo/homebrew-fresh" });
+  const view = (await call("GET", "/api/hub?hub=octo/homebrew-fresh")).data as unknown as HubView;
+  expect(view.empty).toBe(true);
+  expect(view.files.config).toBe(false);
+  expect((await call("POST", "/api/hub/protect", { hub: "octo/homebrew-fresh" })).status).toBe(200);
+  const body = { hub: "octo/homebrew-fresh", every: null, remove: [], readme: false };
+  const preview = (await call("POST", "/api/hub/files/preview", body)).data as unknown as FilesView;
+  expect(preview.files.map((f) => f.path)).toEqual(["tapster.yml", ".tapster/state.json", "README.md", ".github/workflows/tapster.yml"]);
+  expect((await call("POST", "/api/hub/files", body)).data).toEqual({ result: "committed" });
+  const files = fake.get("octo/homebrew-fresh")!.files!;
+  expect(files.get("README.md")).toContain("brew trust octo/fresh");
+  expect(files.has(".github/workflows/tapster.yml")).toBe(true);
+});
