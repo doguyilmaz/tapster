@@ -12,7 +12,7 @@ export type Page = {
   click(selector: string): Promise<void>;
   clickText(text: string, selector?: string): Promise<void>;
   waitFor(expr: string, timeoutMs?: number): Promise<void>;
-  shot(path: string): Promise<void>;
+  shot(path: string, full?: boolean): Promise<void>;
   size(width: number, height: number, mobile?: boolean): Promise<void>;
   scheme(dark: boolean): Promise<void>;
   errors: string[];
@@ -105,8 +105,8 @@ export async function launch(): Promise<Page> {
       await Bun.sleep(250);
     },
     waitFor,
-    async shot(path) {
-      const { data } = await send<{ data: string }>("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+    async shot(path, full = true) {
+      const { data } = await send<{ data: string }>("Page.captureScreenshot", { format: "png", captureBeyondViewport: full });
       writeFileSync(path, Buffer.from(data, "base64"));
     },
     async size(width, height, mobile = false) {

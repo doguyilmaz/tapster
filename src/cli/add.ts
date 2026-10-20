@@ -15,7 +15,7 @@ import appTemplate from "../../templates/project/app-release.yml" with { type: "
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
-import { appInstallUrl, autoTagSteps, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubFacts, hubName, installSentence, proposeEntry, releaseEntry, releaseSecrets, withoutMac } from "./hubpr";
+import { appInstallUrl, autoTagSteps, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubFacts, hubName, installSentence, proposeEntry, releaseEntry, releaseSecrets, withoutMac } from "./hubpr";
 import { ask } from "./prompt";
 
 type Pins = typeof pinsJson;
@@ -33,7 +33,7 @@ export function adaptGoreleaser(text: string): { text: string; notes: string[] }
       notes.push(`removed ${key}; the hub does this now`);
     }
   }
-  return { text: doc.toString(), notes };
+  return { text: keepStyle(text, doc.toString()), notes };
 }
 
 const jobMap = (job: { value: unknown }) => job.value as YAMLMap;
@@ -80,7 +80,7 @@ export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag:
       steps.items.push(doc.createNode((parse(ringStep(0)) as unknown[])[0]) as never);
       notes.push("added the step that rings the hub's doorbell after the draft is open");
     }
-    return { text: doc.toString(), notes };
+    return { text: keepStyle(text, doc.toString()), notes };
   }
   throw new TapsterError("no GoReleaser step found in the release workflow", "tapster add edits the job that runs goreleaser/goreleaser-action.");
 }
@@ -102,7 +102,7 @@ export function addRingStep(text: string): string | null {
     if (!drafts) continue;
     if (steps.items.some((st) => isMap(st) && st.get("name") === RING_NAME)) return text;
     steps.items.push(doc.createNode((parse(ringStep(0)) as unknown[])[0]) as never);
-    return doc.toString();
+    return keepStyle(text, doc.toString());
   }
   return null;
 }
