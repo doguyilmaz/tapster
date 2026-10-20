@@ -19,3 +19,12 @@ test("only lines that changed take the YAML library's style", async () => {
   expect(keepStyle("a: [x, y]\nb: { c: d }\n", "a: [ x, y ]\nb: { c: d }\nnew: [ z ]\n")).toBe("a: [x, y]\nb: { c: d }\nnew: [ z ]\n");
   expect(keepStyle("s: \"[ keep ]\"\n", "s: \"[ keep ]\"\n")).toBe("s: \"[ keep ]\"\n");
 });
+
+test("long lines stay on one line and the ring step keeps its script as a literal block", () => {
+  const long = `builds:\n  - hooks:\n      post:\n        - cmd: scripts/macapp.sh "{{ .Version }}" "{{ .Path }}" "{{ if .IsSnapshot }}snapshot{{ else }}release{{ end }}"\n`;
+  expect(adaptGoreleaser(long).text).toContain('- cmd: scripts/macapp.sh "{{ .Version }}" "{{ .Path }}" "{{ if .IsSnapshot }}snapshot{{ else }}release{{ end }}"\n');
+  const flow = 'on: { push: { tags: ["v*"] } }\njobs:\n  r:\n    steps:\n      - uses: goreleaser/goreleaser-action@v6\n      - run: gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/release" -f sha="$GITHUB_SHA"\n';
+  const out = adaptReleaseWorkflow(flow, "a".repeat(40), "v4").text;
+  expect(out).toContain('      - run: gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/release" -f sha="$GITHUB_SHA"\n');
+  expect(out).toMatch(/run: \|-?\n\s+set -euo pipefail\n/);
+});

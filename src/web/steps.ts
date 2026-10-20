@@ -159,7 +159,7 @@ export function notes(lines: string[]): NoteItem[] {
       item = last;
       item.text += `${/[.:;!?]$/.test(item.text) ? "" : "."} ${head}`;
     } else {
-      item = { text: /^[a-z]+[._]/.test(head) ? head : head.charAt(0).toUpperCase() + head.slice(1), block: null };
+      item = { text: /^[a-z]+[\s:;,]/.test(head) ? head.charAt(0).toUpperCase() + head.slice(1) : head, block: null };
       out.push(item);
     }
     let i = 0;

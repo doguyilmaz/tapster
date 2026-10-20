@@ -182,3 +182,38 @@ test("a hub without Apple credentials gets entries without macOS builds", () => 
   expect(valid(`version: 1\ntap: o/tap\npackages:\n${linuxOnly}\n`).packages).toHaveLength(1);
   expect(withoutMac("  - name: t\n    repo: o/t\n    binaries: [t]\n    assets:\n      darwin-arm64: \"t.tar.gz\"\n    scoop: false")).toBeNull();
 });
+
+test("GoReleaser's Homebrew section carries its description, links, completions and cask cleanup into the hub entry", async () => {
+  const { goreleaserCask } = await import("../src/cli/hubpr");
+  const text = `homebrew_casks:
+  - name: ebb
+    homepage: https://github.com/o/ebb
+    description: See where your disk space went and win it back safely
+    license: MIT
+    completions: { bash: completions/ebb.bash, zsh: completions/_ebb, fish: "{{ .Env.X }}" }
+    uninstall:
+      launchctl: [com.o.ebb]
+    zap:
+      trash: ["~/.config/ebb", "/etc/evil"]
+`;
+  const c = goreleaserCask(text);
+  expect(c.description).toBe("See where your disk space went and win it back safely");
+  expect(c.carried).toEqual(["homepage", "license", "completions", "uninstall", "zap"]);
+  expect(c.lines).toEqual([
+    '    homepage: "https://github.com/o/ebb"',
+    "    license: MIT",
+    "    completions:",
+    "      bash: completions/ebb.bash",
+    "      zsh: completions/_ebb",
+    "    cask:",
+    "      uninstall:",
+    '        launchctl: ["com.o.ebb"]',
+    "      zap:",
+    '        trash: ["~/.config/ebb"]',
+  ]);
+  const { parseHub } = await import("../src/config");
+  const entry = ["  - name: ebb", "    repo: o/ebb", "    kind: go", "    binaries: [ebb]", "    assets:", '      darwin-universal: "ebb_{version}_darwin_universal.tar.gz"', ...c.lines, `    description: ${JSON.stringify(c.description)}`].join("\n");
+  expect(parseHub(`version: 1\ntap: o/tap\npackages:\n${entry}\n`, "o").invalid).toEqual([]);
+  expect(goreleaserCask("brews: []\n").lines).toEqual([]);
+  expect(goreleaserCask(null).carried).toEqual([]);
+});

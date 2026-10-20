@@ -8,6 +8,7 @@ import { GitHubError, TapsterError } from "../errors";
 import { run, runPath } from "../run";
 import type { GitHub } from "../github";
 import { parsePlist } from "../plist";
+import { descProblems } from "../render";
 import { createProtection } from "../rulesets";
 import { ringStep } from "./doorbell";
 import pinsJson from "../../templates/pins.json";
@@ -15,7 +16,7 @@ import appTemplate from "../../templates/project/app-release.yml" with { type: "
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
-import { appInstallUrl, autoTagSteps, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubFacts, hubName, installSentence, proposeEntry, releaseEntry, releaseSecrets, withoutMac } from "./hubpr";
+import { YAML_OUT, appInstallUrl, autoTagSteps, goreleaserCask, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubFacts, hubName, installSentence, proposeEntry, releaseEntry, releaseSecrets, withoutMac } from "./hubpr";
 import { ask } from "./prompt";
 import { mustRead, readRegular, readSmall, writeInside } from "./paths";
 
@@ -34,7 +35,7 @@ export function adaptGoreleaser(text: string): { text: string; notes: string[] }
       notes.push(`removed ${key}; the hub does this now`);
     }
   }
-  return { text: keepStyle(text, doc.toString()), notes };
+  return { text: keepStyle(text, doc.toString(YAML_OUT)), notes };
 }
 
 const jobMap = (job: { value: unknown }) => job.value as YAMLMap;
@@ -81,7 +82,7 @@ export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag:
       steps.items.push(doc.createNode((parse(ringStep(0)) as unknown[])[0]) as never);
       notes.push("added the step that rings the hub's doorbell after the draft is open");
     }
-    return { text: keepStyle(text, doc.toString()), notes };
+    return { text: keepStyle(text, doc.toString(YAML_OUT)), notes };
   }
   throw new TapsterError("no GoReleaser step found in the release workflow", "tapster add edits the job that runs goreleaser/goreleaser-action.");
 }
@@ -103,7 +104,7 @@ export function addRingStep(text: string): string | null {
     if (!drafts) continue;
     if (steps.items.some((st) => isMap(st) && st.get("name") === RING_NAME)) return text;
     steps.items.push(doc.createNode((parse(ringStep(0)) as unknown[])[0]) as never);
-    return keepStyle(text, doc.toString());
+    return keepStyle(text, doc.toString(YAML_OUT));
   }
   return null;
 }
@@ -285,7 +286,7 @@ async function writeTemplate(dir: string, file: string, text: string, force: boo
   return `- wrote .github/workflows/${file} (build, attest, draft, ring the hub)`;
 }
 
-type Prepared = { kind: "go" | "bun" | "app"; entry: string | null; reason: string | null; notes: string[]; goreleaser: string | null; bin?: string | null; files: string[] };
+type Prepared = { kind: "go" | "bun" | "app"; entry: string | null; reason: string | null; notes: string[]; goreleaser: string | null; original?: string | null; bin?: string | null; files: string[] };
 
 export async function prepare(dir: string, repo: string, name: string, opts: AddOptions, mac = true): Promise<Prepared> {
   const app = findApp(dir);
@@ -301,13 +302,14 @@ export async function prepare(dir: string, repo: string, name: string, opts: Add
   }
   const goreleaser = [".goreleaser.yaml", ".goreleaser.yml"].find((f) => existsSync(join(dir, f)));
   if (goreleaser && existsSync(join(dir, "go.mod"))) {
-    const g = adaptGoreleaser(mustRead(join(dir, goreleaser), goreleaser));
+    const original = mustRead(join(dir, goreleaser), goreleaser);
+    const g = adaptGoreleaser(original);
     await writeInside(dir, goreleaser, g.text);
     const flowPath = join(dir, ".github/workflows", opts.workflow);
     if (!existsSync(flowPath)) throw new TapsterError(`no .github/workflows/${opts.workflow} found`, "Name the workflow that runs GoReleaser with --workflow.");
     const w = adaptReleaseWorkflow(mustRead(flowPath, `.github/workflows/${opts.workflow}`), pinsJson["actions/attest-build-provenance"].sha, pinsJson["actions/attest-build-provenance"].tag);
     await writeInside(dir, `.github/workflows/${opts.workflow}`, w.text);
-    return { kind: "go", entry: null, reason: null, notes: [...g.notes, ...w.notes].map((n) => `- ${n}`), goreleaser: g.text, files: [goreleaser, `.github/workflows/${opts.workflow}`] };
+    return { kind: "go", entry: null, reason: null, notes: [...g.notes, ...w.notes].map((n) => `- ${n}`), goreleaser: g.text, original, files: [goreleaser, `.github/workflows/${opts.workflow}`] };
   }
   if (existsSync(join(dir, "package.json")) && (existsSync(join(dir, "bun.lock")) || existsSync(join(dir, "bun.lockb")))) {
     let manifest: unknown;
@@ -405,9 +407,18 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
   let pr: string | null = null;
   if (entry) {
     entry = entryExtras(entry, { kind: prepared.kind, workflow: opts.workflow, dependabot: opts.dependabot });
-    const desc = descriptionNote(project.description, name);
-    if (desc.line) say(desc.line);
-    if (desc.add) entry = `${entry}\n${desc.add}`;
+    const cask = goreleaserCask(prepared.original ?? null);
+    if (cask.lines.length) entry = `${entry}\n${cask.lines.join("\n")}`;
+    const own = cask.description && descProblems(cask.description, name).length === 0 ? cask.description : null;
+    if (own) {
+      entry = `${entry}\n    description: ${JSON.stringify(own)}`;
+      cask.carried.unshift("description");
+    } else {
+      const desc = descriptionNote(project.description, name);
+      if (desc.line) say(desc.line);
+      if (desc.add) entry = `${entry}\n${desc.add}`;
+    }
+    if (cask.carried.length) say(`- carried the ${cask.carried.join(", ")} of GoReleaser's Homebrew section into the hub entry`);
     try {
       pr = await proposeEntry(gh, hub, name, repo, entry);
       say(`- proposed the hub entry in ${pr}; merge it to start publishing`);
