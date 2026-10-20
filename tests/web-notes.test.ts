@@ -23,5 +23,7 @@ test("add's notes read as sentences, with YAML and commands kept as blocks", () 
   expect(out[2]!.block!.split("\n")[0]).toBe("# in the job that decides the version, on the default branch:");
   expect(out[3]!.block).toBe("- name: x\n  repo: o/x");
   expect(out[0]!.block).toBeNull();
+  expect(notes(["- doguyilmaz/ebb still holds release secrets"])[0]!.text).toBe("doguyilmaz/ebb still holds release secrets");
+  expect(notes(["- added the attestation step"])[0]!.text).toBe("Added the attestation step");
   expect(notes(["- the hub has no Apple credentials, so the entry leaves out the macOS builds", "  Remove the macOS builds too."])[0]!.text).toBe("The hub has no Apple credentials, so the entry leaves out the macOS builds. Remove the macOS builds too.");
 });

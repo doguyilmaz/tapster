@@ -94,6 +94,8 @@ export function goEntry(name: string, repo: string, goreleaser: string | null, r
   return { entry: entryText(name, repo, "go", bins, assets, zip && goos.includes("windows")), reason: null };
 }
 
+export const YAML_OUT = { lineWidth: 0, blockQuote: "literal" } as const;
+
 const unpadded = (line: string) => line.replace(/([[{])\s+/g, "$1").replace(/\s+([\]}])/g, "$1");
 
 export function keepStyle(before: string, after: string): string {
@@ -121,7 +123,7 @@ export function withEntry(hubYaml: string, entry: string, name: string): string 
   if (!isSeq(item) || item.items.length !== 1) throw new TapsterError("the entry is not one package", "Report this as a tapster bug.");
   packages.flow = false;
   packages.items.push(item.items[0] as never);
-  return keepStyle(hubYaml, doc.toString());
+  return keepStyle(hubYaml, doc.toString(YAML_OUT));
 }
 
 export function suggestDescription(desc: string | null, name: string): string | null {
@@ -129,6 +131,50 @@ export function suggestDescription(desc: string | null, name: string): string | 
   let s = desc.trim().replace(/^(?:the|an?)\s+/i, "").replace(/command ?line/gi, "command-line").replace(/\.$/, "");
   s = s.charAt(0).toUpperCase() + s.slice(1);
   return descProblems(s, name).length === 0 ? s : null;
+}
+
+type GoCask = { description?: unknown; homepage?: unknown; license?: unknown; completions?: Record<string, unknown>; uninstall?: { launchctl?: unknown }; zap?: { trash?: unknown }; caveats?: unknown };
+
+export function goreleaserCask(text: string | null): { lines: string[]; description: string | null; carried: string[] } {
+  type Doc = { homebrew_casks?: GoCask[]; brews?: GoCask[] } | null;
+  let cfg: Doc = null;
+  try {
+    cfg = text ? (parse(text) as Doc) : null;
+  } catch {
+    cfg = null;
+  }
+  const c = cfg?.homebrew_casks?.[0] ?? cfg?.brews?.[0];
+  if (!c) return { lines: [], description: null, carried: [] };
+  const str = (v: unknown) => (typeof v === "string" && v.trim() && !v.includes("{{") ? v.trim() : null);
+  const list = (v: unknown, ok: RegExp) => (Array.isArray(v) ? v.map(str).filter((x): x is string => x !== null && ok.test(x)) : []);
+  const lines: string[] = [];
+  const carried: string[] = [];
+  const homepage = str(c.homepage);
+  if (homepage && /^https:\/\/[^\s"]+$/.test(homepage)) {
+    lines.push(`    homepage: ${JSON.stringify(homepage)}`);
+    carried.push("homepage");
+  }
+  const license = str(c.license);
+  if (license && /^[A-Za-z0-9.+-]+$/.test(license)) {
+    lines.push(`    license: ${license}`);
+    carried.push("license");
+  }
+  const completions = Object.entries(c.completions ?? {}).filter(([shell, path]) => ["bash", "zsh", "fish"].includes(shell) && /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(str(path) ?? ""));
+  if (completions.length) {
+    lines.push("    completions:", ...completions.map(([shell, path]) => `      ${shell}: ${str(path)}`));
+    carried.push("completions");
+  }
+  const launchctl = list(c.uninstall?.launchctl, /^[A-Za-z0-9.-]+$/);
+  const trash = list(c.zap?.trash, /^~\/[A-Za-z0-9 ._\/-]+$/);
+  const caveats = str(c.caveats);
+  if (launchctl.length || trash.length || caveats) {
+    lines.push("    cask:");
+    if (launchctl.length) lines.push("      uninstall:", `        launchctl: ${JSON.stringify(launchctl)}`);
+    if (trash.length) lines.push("      zap:", `        trash: ${JSON.stringify(trash)}`);
+    if (caveats) lines.push(`      caveats: ${JSON.stringify(caveats.slice(0, 2000))}`);
+    carried.push(...[launchctl.length ? "uninstall" : "", trash.length ? "zap" : "", caveats ? "caveats" : ""].filter(Boolean));
+  }
+  return { lines, description: str(c.description), carried };
 }
 
 export function entryExtras(entry: string, o: { kind: string; workflow: string; dependabot: boolean }): string {
