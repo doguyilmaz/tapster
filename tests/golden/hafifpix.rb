@@ -18,6 +18,13 @@ cask "hafifpix" do
   app "HafifPix.app"
   binary "#{appdir}/HafifPix.app/Contents/Resources/bin/hafif"
 
+  postflight_steps do
+    run "bin/hafif",
+        base:         :homebrew_prefix,
+        args:         ["--install-helper"],
+        must_succeed: false
+  end
+
   uninstall quit: "com.doguyilmaz.HafifPix"
 
   zap trash: "~/Library/Preferences/com.doguyilmaz.HafifPix.plist"

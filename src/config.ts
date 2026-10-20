@@ -22,6 +22,14 @@ const relPath = z
 const label = z.string().regex(/^[A-Za-z0-9.-]+$/);
 
 const caskFields = {
+  postflight: z
+    .object({ binary: z.string().regex(/^[A-Za-z0-9._-]+$/), args: z
+        .array(z.string().regex(/^[A-Za-z0-9._:=@%+,\/-]{1,90}$/))
+        .max(10)
+        .refine((a) => a.reduce((n, x) => n + x.length + 4, 0) <= 90, "must fit on one line of the cask (90 characters)")
+        .default([]) })
+    .strict()
+    .optional(),
   uninstall: z.object({ launchctl: z.array(label).optional(), quit: z.array(label).optional() }).strict().optional(),
   zap: z.object({ trash: z.array(z.string().regex(/^~\/[A-Za-z0-9 ._\/-]+$/)) }).strict().optional(),
   caveats: z.string().min(1).max(2000).optional(),
@@ -38,11 +46,15 @@ const common = {
   protection: z.enum(["on", "off", "dependabot"]).default("on"),
 };
 
+const APP = /^[A-Za-z0-9 ._-]+\.app$/;
+export const BUNDLE_ID = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+
 const cliPkg = z
   .object({
     ...common,
     kind: z.enum(["go", "bun"]),
     binaries: z.array(relPath).min(1),
+    app: z.object({ name: z.string().regex(APP), bundle_id: z.string().regex(BUNDLE_ID), binaries: z.array(relPath).default([]) }).strict().optional(),
     completions: z.object({ bash: relPath.optional(), zsh: relPath.optional(), fish: relPath.optional() }).strict().optional(),
     scoop: z.boolean().default(false),
     entitlements: z.array(z.enum(ENTITLEMENTS)).default([]),
@@ -51,7 +63,6 @@ const cliPkg = z
   })
   .strict();
 
-export const BUNDLE_ID = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 const coord = z.number().int().min(0).max(5000);
 const entitlementValue = z.union([z.boolean(), z.string().regex(/^[A-Za-z0-9._*{}-]+$/), z.array(z.string().regex(/^[A-Za-z0-9._*{}-]+$/))]);
 
@@ -59,7 +70,7 @@ const appPkg = z
   .object({
     ...common,
     kind: z.literal("app"),
-    app: z.string().regex(/^[A-Za-z0-9 ._-]+\.app$/),
+    app: z.string().regex(APP),
     bundle_id: z.string().regex(BUNDLE_ID),
     carry: z.record(z.string().regex(/^[A-Za-z0-9._-]+$/), z.string().regex(/^sha256:[0-9a-f]{64}$/)).default({}),
     dmg: z
@@ -108,9 +119,11 @@ const hub = z
   .strict();
 
 export type CliPackage = z.infer<typeof cliPkg>;
+export type ToolApp = NonNullable<CliPackage["app"]>;
 export type AppPackage = z.infer<typeof appPkg> & { dmg: { volume: string } };
 export type PackageConfig = CliPackage | AppPackage;
 export const isApp = (p: PackageConfig): p is AppPackage => p.kind === "app";
+export const linked = (p: PackageConfig) => (isApp(p) ? (p.cask.binaries ?? []) : [...p.binaries, ...(p.app?.binaries ?? [])]).map((b) => b.split("/").pop()!);
 export const macosCode = (p: PackageConfig) => isApp(p) || Object.keys(p.assets).some((k) => k.startsWith("darwin"));
 export type HubConfig = Omit<z.infer<typeof hub>, "packages"> & { packages: PackageConfig[] };
 export type Semver = { major: number; minor: number; patch: number; pre: string | null };
@@ -121,6 +134,11 @@ const issueText = (issues: z.core.$ZodIssue[]) => issues.map((i) => `${i.path.jo
 
 function checkPackage(p: PackageConfig, top: Omit<HubConfig, "packages">, hubOwner: string): void {
   if (isApp(p)) checkApp(p);
+  else if (p.app) checkToolApp(p, p.app);
+  const post = p.cask.postflight;
+  if (post && !linked(p).includes(post.binary)) {
+    throw new TapsterError(`${p.name}: cask.postflight runs ${post.binary}, which the cask does not link`, `Name one of the commands the cask links: ${linked(p).join(", ") || "none yet"}.`);
+  }
   if (p.repo.split("/")[0]!.toLowerCase() !== hubOwner.toLowerCase()) {
     throw new TapsterError(`${p.name}: ${p.repo} is not owned by ${hubOwner}`, "tapster publishes only repositories of the hub's owner.");
   }
@@ -154,7 +172,7 @@ function conflicts(pkgs: [number, PackageConfig][]): Map<number, TapsterError> {
     const twins = pkgs.filter(([j, q]) => j !== i && q.name === p.name);
     if (twins.length) mark(i, new TapsterError(`package ${p.name} is listed twice`, "Keep one entry per package."));
   }
-  const binaries = pkgs.flatMap(([i, p]) => (isApp(p) ? (p.cask.binaries ?? []) : p.binaries).map((b) => ({ i, p, id: b.split("/").pop()! })));
+  const binaries = pkgs.flatMap(([i, p]) => linked(p).map((id) => ({ i, p, id })));
   for (const a of binaries) {
     for (const b of binaries) {
       if (a.i === b.i || a.id !== b.id || a.p.name === b.p.name) continue;
@@ -166,16 +184,16 @@ function conflicts(pkgs: [number, PackageConfig][]): Map<number, TapsterError> {
     const b = y.toLowerCase();
     return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
   };
-  const apps = pkgs.filter((e): e is [number, AppPackage] => isApp(e[1]));
-  for (const [i, a] of apps) {
-    for (const [j, b] of apps) {
-      if (i !== j && overlaps(a.bundle_id, b.bundle_id)) mark(i, new TapsterError(`${a.name} and ${b.name} have overlapping bundle ids`, "Each app needs its own bundle id, not one inside another."));
+  const bundles = pkgs.flatMap(([i, p]) => (isApp(p) ? [{ i, name: p.name, id: p.bundle_id }] : p.app ? [{ i, name: p.name, id: p.app.bundle_id }] : []));
+  for (const a of bundles) {
+    for (const b of bundles) {
+      if (a.i !== b.i && overlaps(a.id, b.id)) mark(a.i, new TapsterError(`${a.name} and ${b.name} have overlapping bundle ids`, "Each app needs its own bundle id, not one inside another."));
     }
     for (const bin of binaries) {
       const id = bin.id.toLowerCase();
-      if (id !== a.bundle_id.toLowerCase() && !id.startsWith(`${a.bundle_id.toLowerCase()}.`)) continue;
+      if (id !== a.id.toLowerCase() && !id.startsWith(`${a.id.toLowerCase()}.`)) continue;
       const e = new TapsterError(`the binary ${bin.id} would carry ${a.name}'s identity`, "Rename the binary.");
-      mark(i, e);
+      mark(a.i, e);
       mark(bin.i, e);
     }
   }
@@ -232,6 +250,14 @@ export function parseConfig(text: string, hubOwner: string): HubConfig {
   const { config, invalid } = parseHub(text, hubOwner);
   if (invalid.length) throw new TapsterError(invalid.map((i) => i.reason).join("; "), invalid[0]!.fix);
   return config;
+}
+
+function checkToolApp(p: CliPackage, app: ToolApp): void {
+  const platforms = Object.keys(p.assets);
+  if (!platforms.some((k) => k.startsWith("darwin"))) throw new TapsterError(`${p.name}: app needs a macOS archive that holds ${app.name}`, "Map a darwin-* asset or remove app.");
+  if (platforms.some((k) => k.startsWith("linux"))) throw new TapsterError(`${p.name}: a tool with an app has a cask for macOS only, but it also has a Linux archive`, "Remove the linux-* assets or remove app.");
+  const inside = p.binaries.find((b) => b === app.name || b.startsWith(`${app.name}/`));
+  if (inside) throw new TapsterError(`${p.name}: ${inside} is inside ${app.name}`, "Remove it from binaries: the hub signs the app as a whole. List commands to link under app.binaries.");
 }
 
 function checkApp(p: AppPackage): void {

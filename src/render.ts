@@ -98,7 +98,12 @@ export function renderCask(i: RenderInput): string | null {
     "  end",
     "",
   );
-  for (const b of pkg.binaries) lines.push(`  binary ${rubyString(b)}`);
+  if (pkg.app) lines.push("  depends_on :macos", "");
+  const fromApp = pkg.app?.binaries ?? [];
+  const taken = new Set(fromApp.map((b) => basename(b)));
+  if (pkg.app) lines.push(`  app ${rubyString(pkg.app.name)}`);
+  for (const b of pkg.binaries) if (!taken.has(basename(b))) lines.push(`  binary ${rubyString(b)}`);
+  for (const b of fromApp) lines.push(appBinary(pkg.app!.name, b));
   const c = pkg.completions;
   if (c?.bash) lines.push(`  bash_completion ${rubyString(c.bash)}`);
   if (c?.zsh) lines.push(`  zsh_completion ${rubyString(c.zsh)}`);
@@ -107,7 +112,15 @@ export function renderCask(i: RenderInput): string | null {
   return lines.join("\n");
 }
 
+const appBinary = (app: string, b: string) => `  binary "#{appdir}/${rubyString(`${app}/${b}`).slice(1)}`;
+
 function tail(lines: string[], cask: CliPackage["cask"], quit: string[]): void {
+  const post = cask.postflight;
+  if (post) {
+    lines.push("", "  postflight_steps do", `    run ${rubyString(`bin/${post.binary}`)},`, "        base:         :homebrew_prefix,");
+    if (post.args.length) lines.push(`        args:         [${post.args.map(rubyString).join(", ")}],`);
+    lines.push("        must_succeed: false", "  end");
+  }
   const parts = ([["launchctl", cask.uninstall?.launchctl ?? []], ["quit", quit]] as const).filter(([, v]) => v.length > 0);
   const width = Math.max(0, ...parts.map(([k]) => k.length)) + 2;
   if (parts.length) lines.push("", `  uninstall ${parts.map(([k, v]) => `${`${k}:`.padEnd(width)}${list([...v])}`).join(",\n            ")}`);
@@ -144,7 +157,7 @@ export function renderAppCask(i: AppRenderInput): string {
   if (pkg.cask.auto_updates ?? pkg.sparkle !== undefined) lines.push("  auto_updates true");
   if (ARCH[platform]) lines.push(`  depends_on arch: ${ARCH[platform]}`);
   lines.push(`  depends_on macos: :${i.macos}`, "", `  app ${rubyString(pkg.app)}`);
-  for (const b of pkg.cask.binaries ?? []) lines.push(`  binary "#{appdir}/${rubyString(`${pkg.app}/${b}`).slice(1)}`);
+  for (const b of pkg.cask.binaries ?? []) lines.push(appBinary(pkg.app, b));
   tail(lines, pkg.cask, pkg.cask.uninstall?.quit ?? [pkg.bundle_id]);
   return lines.join("\n");
 }
