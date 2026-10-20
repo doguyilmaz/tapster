@@ -14,7 +14,7 @@ test("add's notes read as sentences, with YAML and commands kept as blocks", () 
   ];
   const out = notes(said);
   expect(out.map((n) => n.text)).toEqual([
-    "Release.draft: true; the tapster hub publishes after signing",
+    "release.draft: true; the tapster hub publishes after signing",
     "Dependabot cannot open pull requests here now: GitHub does not let personal repositories exempt it from the rules. To keep it, run tapster add --allow-dependabot.",
     "Automatic tags: a deploy key lives in its release environment. Push tags from your release workflow like this:",
     "The hub entry was not proposed: o/x is already in the hub's tapster.yml. Edit its entry there instead. The entry for o/homebrew-tap's tapster.yml:",
@@ -23,4 +23,5 @@ test("add's notes read as sentences, with YAML and commands kept as blocks", () 
   expect(out[2]!.block!.split("\n")[0]).toBe("# in the job that decides the version, on the default branch:");
   expect(out[3]!.block).toBe("- name: x\n  repo: o/x");
   expect(out[0]!.block).toBeNull();
+  expect(notes(["- the hub has no Apple credentials, so the entry leaves out the macOS builds", "  Remove the macOS builds too."])[0]!.text).toBe("The hub has no Apple credentials, so the entry leaves out the macOS builds. Remove the macOS builds too.");
 });

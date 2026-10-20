@@ -157,9 +157,9 @@ export function notes(lines: string[]): NoteItem[] {
     let item: NoteItem;
     if (first.startsWith("  ") && last && last.block === null) {
       item = last;
-      item.text += ` ${head}`;
+      item.text += `${/[.:;!?]$/.test(item.text) ? "" : "."} ${head}`;
     } else {
-      item = { text: head.charAt(0).toUpperCase() + head.slice(1), block: null };
+      item = { text: /^[a-z]+[._]/.test(head) ? head : head.charAt(0).toUpperCase() + head.slice(1), block: null };
       out.push(item);
     }
     let i = 0;
