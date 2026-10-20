@@ -12,6 +12,7 @@ most. Start with [`tapster doctor`](/reference/commands/#tapster-doctor) in your
 
 | Message | What to do |
 | --- | --- |
+| `tapster setup` prints the list of commands instead of opening the page | An older tapster installed with Homebrew comes first on your PATH; `bunx` runs it. Run `brew upgrade --cask tapster` or start the latest with `bunx @doguyilmaz/tapster@latest setup`. |
 | `Port 8277 is in use` (in the terminal) | Another tapster setup may be open; use that one or stop it. The new one uses another port. Your password manager may not offer the entries it saved for 8277. |
 | `Open tapster setup from your terminal` | The page has no session, for example after you closed its tab. Press Enter in the terminal where tapster setup runs for a fresh link. |
 | `this link was already used` | Someone opened the same link twice, so tapster ended every session. Open the fresh link the terminal printed. |
