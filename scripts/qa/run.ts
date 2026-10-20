@@ -56,6 +56,8 @@ try {
   await page.clickText("to main", "button");
   await page.waitFor("document.body.textContent.includes('git pull')");
   await shot("10-files-written");
+  await page.clickText("Optional extras", ".route button");
+  await shot("10b-extras");
   await page.clickText("Projects", "nav a");
   await page.waitFor("document.body.textContent.includes('Ready to add')");
   await shot("11-projects");

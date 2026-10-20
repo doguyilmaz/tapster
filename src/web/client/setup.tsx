@@ -633,6 +633,52 @@ function Projects({ h }: { h: HubView }) {
   );
 }
 
+function Extras({ h }: { h: HubView }) {
+  const repo = h.name.split("/")[1]!;
+  const missing = h.extras.sparkle.filter((s) => !s.stored);
+  return (
+    <div class="panel">
+      <Head title="Optional extras" lead="The hub works without these. For now each one runs in a terminal, in a clone of the hub, because it needs a tool on your computer: Wrangler for Cloudflare, gpg or your keychain." />
+      <Cmd text={`gh repo clone ${h.name} && cd ${repo}`} />
+      <section class="stack tight">
+        <div class="spread">
+          <h3 class="section-title">Faster releases: the doorbell</h3>
+          <Badge tone={h.extras.doorbell ? "ok" : undefined}>{h.extras.doorbell ? "On" : "Off"}</Badge>
+        </div>
+        <p class="muted">A small Worker on your own Cloudflare account starts the hub as soon as a project opens its draft, instead of at the next scheduled run. Wrangler asks you to sign in to Cloudflare in your browser.</p>
+        {!h.extras.doorbell && <Cmd text="bunx @doguyilmaz/tapster init --doorbell" />}
+        <a href="https://tapster.doguyilmaz.com/guides/doorbell/" target="_blank" rel="noopener noreferrer" class="small">
+          Read the doorbell guide
+        </a>
+      </section>
+      <section class="stack tight">
+        <div class="spread">
+          <h3 class="section-title">apt and dnf repositories</h3>
+          <Badge tone={h.extras.linux.stored ? "ok" : h.extras.linux.wanted ? "warn" : undefined}>{h.extras.linux.stored ? "Key stored" : h.extras.linux.wanted ? "Key missing" : "Off"}</Badge>
+        </div>
+        <p class="muted">{h.extras.linux.wanted && !h.extras.linux.stored ? "tapster.yml asks for Linux packages, but the hub has no key to sign them yet." : "Linux users install your command line tools with apt and dnf from the hub's GitHub Pages. tapster makes the signing key with gpg and keeps a copy in your keychain."}</p>
+        {!h.extras.linux.stored && <Cmd text="bunx @doguyilmaz/tapster init --linux" />}
+        <a href="https://tapster.doguyilmaz.com/guides/linux/" target="_blank" rel="noopener noreferrer" class="small">
+          Read the apt and dnf guide
+        </a>
+      </section>
+      {h.extras.sparkle.length > 0 && (
+        <section class="stack tight">
+          <div class="spread">
+            <h3 class="section-title">Sparkle keys</h3>
+            <Badge tone={missing.length ? "warn" : "ok"}>{missing.length ? `${missing.length} missing` : "All stored"}</Badge>
+          </div>
+          <p class="muted">Each Mac app signs its update feed with a Sparkle key. tapster keeps it in your keychain and in the hub.</p>
+          {missing.map((s) => (
+            <Cmd key={s.label} text={`bunx @doguyilmaz/tapster init --sparkle ${s.label} --new`} />
+          ))}
+          {missing.length > 0 && <p class="faint small">Already have the key in your keychain? Use --account &lt;account&gt; instead of --new.</p>}
+        </section>
+      )}
+    </div>
+  );
+}
+
 function Ready({ h }: { h: HubView }) {
   return (
     <div class="card pad row" style="gap: 1.25rem; flex-wrap: nowrap">
@@ -649,7 +695,7 @@ function Ready({ h }: { h: HubView }) {
 
 export function Setup() {
   const h = hub.value;
-  const [open, setOpen] = useState<StopId | null>(null);
+  const [open, setOpen] = useState<StopId | "extras" | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   void macChoice.value;
   if (hubError.value) {
@@ -677,11 +723,12 @@ export function Setup() {
   const current = open ?? (appResult.value?.kind === "created" ? "app" : firstOpen(list));
   const done = list.filter((s) => s.state === "done" || s.state === "skipped").length;
   const next = list.find((s) => s.state === "now" || s.state === "attention");
-  const pick = (id: StopId) => {
+  const pick = (id: StopId | "extras") => {
     setOpen(id);
     if (window.matchMedia("(max-width: 900px)").matches) panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
-  const panel: Record<StopId, preact.JSX.Element> = {
+  const panel: Record<StopId | "extras", preact.JSX.Element> = {
+    extras: <Extras h={h} />,
     protect: <Protect h={h} />,
     app: <App h={h} />,
     macos: <Mac h={h} choice={choice} />,
@@ -722,6 +769,17 @@ export function Setup() {
               </button>
             </li>
           ))}
+          <li class={`extra${current === "extras" ? " open" : ""}`}>
+            <button type="button" onClick={() => pick("extras")} aria-current={current === "extras" ? "step" : undefined}>
+              <span class="dot">
+                <Icon name="plus" />
+              </span>
+              <span>
+                <span class="stop-name">Optional extras</span>
+                <span class="stop-state">Doorbell, apt and dnf, Sparkle</span>
+              </span>
+            </button>
+          </li>
         </ol>
         <div class="card pad stack" ref={panelRef} style="gap: 1.5rem">
           {panel[current]}

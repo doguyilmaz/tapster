@@ -22,6 +22,7 @@ export type HubView = {
   packages: { name: string; repo: string; kind: string }[];
   invalid: { name: string; reason: string }[];
   issue: { url: string; number: number; updated: string; body: string } | null;
+  extras: { doorbell: boolean; linux: { wanted: boolean; stored: boolean }; sparkle: { label: string; stored: boolean }[] };
 };
 
 export type InstallView = { checked: boolean; id: number | null; onHub: boolean; repos: string[] };

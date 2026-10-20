@@ -12,7 +12,7 @@ import { P12_LIMIT, P8_LIMIT, inspectP12, notaryKey, saveCertificate, saveNotary
 import { convertManifest, permissionLines } from "../../cli/appflow";
 import { doctorChecks, hubRulesetCheck, policyCheck } from "../../cli/doctor";
 import { appInstallation, appManifest, storeApp } from "../../cli/hubapp";
-import { FLOW, hubFiles, starterFiles } from "../../cli/hubfiles";
+import { FLOW, hubFiles, sparkleLabels, starterFiles } from "../../cli/hubfiles";
 import { protectHub } from "../../cli/init";
 import { everyFromFlow } from "../../cli/schedule";
 import type { AccountView, AppStart, FilePlan, FilesView, HealthView, HubChoice, HubView, InstallView, OtherWorkflow } from "../contract";
@@ -183,6 +183,11 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
     packages: (parsed?.config.packages ?? []).map((p) => ({ name: p.name, repo: p.repo, kind: isApp(p) ? "app" : p.kind })),
     invalid: (parsed?.invalid ?? []).map((i) => ({ name: i.name, reason: i.reason })),
     issue: issue ? { url: issue.html_url, number: issue.number, updated: issue.updated_at, body: issue.body ?? "" } : null,
+    extras: {
+      doorbell: v("TAPSTER_DOORBELL") !== null,
+      linux: { wanted: parsed?.config.packages.some((p) => !isApp(p) && p.linux) ?? false, stored: names(secrets).includes("TAPSTER_LINUX_KEY") },
+      sparkle: (parsed ? sparkleLabels(parsed.config) : []).map((label) => ({ label, stored: names(secrets).includes(`SPARKLE_KEY_${label.toUpperCase()}`) })),
+    },
   };
 }
 
