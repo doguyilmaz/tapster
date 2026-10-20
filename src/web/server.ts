@@ -5,7 +5,7 @@ import type { GitHub } from "../github";
 import type { NotaryKey } from "../cli/apple";
 import { scrub } from "../mask";
 import { COURIER_URI, LOGO_URI } from "../ui/images";
-import { webScript } from "./assets";
+import { logoPng, webScript } from "./assets";
 import { hostAllowed, json, problem, respond, tokenMatches } from "./http";
 import css from "./client/app.css" with { type: "text" };
 
@@ -124,6 +124,7 @@ export function handler(s: Session, routes: Routes, callback: (c: Ctx) => Promis
     if (req.method === "GET" && path === "/app.css") return respond(css, 200, "text/css; charset=utf-8");
     if (req.method === "GET" && path === "/app.js") return respond(await webScript(), 200, "text/javascript; charset=utf-8");
     if (req.method === "GET" && IMAGES[path]) return respond(new Uint8Array(IMAGES[path]), 200, "image/webp");
+    if (req.method === "GET" && path === "/logo.png") return respond(await logoPng(), 200, "image/png", { "content-disposition": 'attachment; filename="tapster-logo.png"' });
     if (req.method === "GET" && path === "/app/callback") return callback({ s, req, url });
     if (req.method === "POST" && path === "/api/claim") {
       const body = (await req.json().catch(() => null)) as { code?: unknown } | null;

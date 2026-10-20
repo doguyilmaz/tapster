@@ -175,12 +175,12 @@ test("a project whose entry waits in a hub pull request is listed with the link;
   hub.branches.set("tapster-add-ebb", new Map([["tapster.yml", `version: 1\ntap: octo/tap\npackages:\n  - name: ebb\n    repo: octo/ebb\n    binaries: [ebb]\n    assets: { linux-amd64: "ebb_{version}_linux_amd64.tar.gz" }\n`]]));
   hub.pulls.push({ number: 3, head: "tapster-add-ebb", html_url: "https://github.com/octo/homebrew-tap/pull/3", title: "Add ebb" });
   const ebb = (await statuses()).find((p) => p.name === "ebb")!;
-  expect(ebb.entry).toEqual({ state: "proposed", pr: "https://github.com/octo/homebrew-tap/pull/3" });
+  expect(ebb.entry).toMatchObject({ state: "proposed", pr: "https://github.com/octo/homebrew-tap/pull/3" });
   expect(ebb.setup).toEqual({ ok: false, problems: ["there is no .goreleaser.yaml on main", "there is no .github/workflows/release.yml on main"] });
   expect(ebb.release.next).toBe("v0.1.0");
   hub.pulls.length = 0;
   hub.branches.delete("tapster-add-ebb");
-  expect((await statuses("&repo=octo/ebb"))[0]!.entry).toEqual({ state: "missing", pr: null });
+  expect((await statuses("&repo=octo/ebb"))[0]!.entry).toEqual({ state: "missing", pr: null, proposal: null, blocked: null });
 });
 
 test("a release tags the shown commit on GitHub and refuses a moved branch, a lower version and an existing tag", async () => {

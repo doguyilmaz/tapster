@@ -5,12 +5,17 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 
+const logo = await Bun.file(join(root, "site", "public", "logo-512.png")).bytes();
+
 async function servesSetup(cmd: string[], cwd: string, port: number): Promise<string> {
   const proc = Bun.spawn([...cmd, "setup", "--no-open", "--port", String(port)], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   try {
     for (let i = 0; i < 100; i++) {
       const res = await fetch(`http://127.0.0.1:${port}/app.js`).catch(() => null);
-      if (res?.ok) return await res.text();
+      if (res?.ok) {
+        expect(new Uint8Array(await (await fetch(`http://127.0.0.1:${port}/logo.png`)).arrayBuffer())).toEqual(logo);
+        return await res.text();
+      }
       await Bun.sleep(100);
     }
     throw new Error(`tapster setup did not answer: ${await new Response(proc.stderr).text()}`);

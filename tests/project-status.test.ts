@@ -22,7 +22,7 @@ const aims = (over: Partial<ProjectStatus> = {}): ProjectStatus => ({
   defaultBranch: "main",
   setup: { ok: true, problems: [] },
   protection: { ok: true, off: false, problems: [] },
-  entry: { state: "merged", pr: null },
+  entry: { state: "merged", pr: null, proposal: null, blocked: null },
   app: reach(true),
   release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, atHead: null, head: { sha: "a".repeat(40), subject: "Start", date: "2026-10-01T00:00:00Z", url: "https://github.com/octo/aims/commit/a" } },
   secrets: { names: [], published: false },
@@ -58,7 +58,7 @@ test("the tag command tags the commit on GitHub, never the local clone", () => {
 test("each fact is a done step or the next step, in the order of the card", () => {
   const s = aims({
     app: reach(false),
-    entry: { state: "proposed", pr: "https://github.com/octo/homebrew-tap/pull/7" },
+    entry: { state: "proposed", pr: "https://github.com/octo/homebrew-tap/pull/7", proposal: null, blocked: null },
     secrets: { names: ["HOMEBREW_TAP_GITHUB_TOKEN"], published: false },
   });
   expect(projectSteps(s).map((x) => [x.id, x.state])).toEqual([
@@ -147,7 +147,7 @@ test("the route's project stop sums up the projects the same way", () => {
   expect(projectStop(null, 2)).toEqual({ done: true, status: "2 in the hub" });
   expect(projectStop(null, 0)).toEqual({ done: false, status: "None yet" });
   expect(projectStop([aims()], 1)).toEqual({ done: true, status: "1 in the hub" });
-  expect(projectStop([aims({ entry: { state: "proposed", pr: "p" } })], 0)).toEqual({ done: false, status: "aims: Merge the hub entry" });
+  expect(projectStop([aims({ entry: { state: "proposed", pr: "p", proposal: null, blocked: null } })], 0)).toEqual({ done: false, status: "aims: Merge the hub entry" });
   const other = aims({ name: "ebb", repo: "octo/ebb", app: reach(false) });
-  expect(projectStop([aims({ entry: { state: "proposed", pr: "p" } }), other], 1)).toEqual({ done: false, status: "2 projects need you" });
+  expect(projectStop([aims({ entry: { state: "proposed", pr: "p", proposal: null, blocked: null } }), other], 1)).toEqual({ done: false, status: "2 projects need you" });
 });

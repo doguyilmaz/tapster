@@ -1,4 +1,4 @@
-import { isSeq, parse, parseDocument } from "yaml";
+import { isMap, isSeq, parse, parseDocument } from "yaml";
 import { NAME, PLATFORMS, type Platform, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
@@ -127,6 +127,18 @@ export function withEntry(hubYaml: string, entry: string, name: string): string 
   packages.flow = false;
   packages.items.push(item.items[0] as never);
   return keepStyle(hubYaml, doc.toString(YAML_OUT));
+}
+
+export function addedEntry(before: string, after: string, name: string): string | null {
+  const packages = parseDocument(after).get("packages", true);
+  const item = isSeq(packages) ? packages.items.find((i) => isMap(i) && i.get("name") === name) : undefined;
+  if (!isMap(item) || !item.range) return null;
+  const entry = after.slice(after.lastIndexOf("\n", item.range[0]) + 1, item.range[1]).trimEnd();
+  try {
+    return withEntry(before, entry, name) === after ? entry : null;
+  } catch {
+    return null;
+  }
 }
 
 export function suggestDescription(desc: string | null, name: string): string | null {
@@ -300,7 +312,7 @@ async function hubFile(gh: GitHub, hub: string): Promise<{ text: string; sha: st
   }
 }
 
-export async function proposeEntry(gh: GitHub, hub: string, name: string, repo: string, entry: string): Promise<string> {
+export async function proposeEntry(gh: GitHub, hub: string, name: string, repo: string, entry: string): Promise<{ url: string; head: string }> {
   if (!NAME.test(name)) throw new TapsterError(`${name} is not a valid package name`, "Use lowercase letters, digits and dashes.");
   const { text, sha } = await hubFile(gh, hub);
   const next = withEntry(text, entry, name);
@@ -315,10 +327,10 @@ export async function proposeEntry(gh: GitHub, hub: string, name: string, repo: 
     if (e instanceof GitHubError && e.status === 422) throw new TapsterError(`the hub already has a branch ${branch}`, `Merge or delete it on ${hub}, then run tapster add again.`);
     throw e;
   }
-  await gh.json("PUT", `/repos/${hub}/contents/tapster.yml`, { message: `Add ${name}`, content: Buffer.from(next).toString("base64"), sha, branch });
+  const put = await gh.json<{ commit: { sha: string } }>("PUT", `/repos/${hub}/contents/tapster.yml`, { message: `Add ${name}`, content: Buffer.from(next).toString("base64"), sha, branch });
   const body = [`tapster add prepared this entry for ${repo}:`, "", "```yaml", entry, "```", "", `Merge it to let the hub publish ${repo}.`].join("\n");
   const pr = await gh.json<{ html_url: string }>("POST", `/repos/${hub}/pulls`, { title: `Add ${name}`, head: branch, base: "main", body });
-  return pr.html_url;
+  return { url: pr.html_url, head: put.commit.sha };
 }
 
 export type HubEntry = { name: string; repo: string; kind: "go" | "bun" | "app"; workflow: string; protection: string; description: string | null; state: "merged" | "proposed"; pr: string | null };

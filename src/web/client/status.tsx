@@ -51,7 +51,7 @@ const MARK: Record<ProjectStep["state"], { icon: "check" | "alert" | "circle" | 
   attention: { icon: "alert", cls: "bad", label: "Needs you" },
 };
 
-function Mark({ state }: { state: ProjectStep["state"] }) {
+export function Mark({ state }: { state: ProjectStep["state"] }) {
   const m = MARK[state];
   return <span class={m.cls}>{state === "wait" ? <Spinner label={m.label} /> : <Icon name={m.icon} label={m.label} />}</span>;
 }
@@ -157,7 +157,7 @@ function AppStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatu
   return (
     <>
       <span class="muted">{reachLine(s)}</span>
-      {s.app.reaches === false && <span class="muted">The hub cannot publish {s.repo} until its App reaches it. GitHub preselects the project; keep "Only select repositories".</span>}
+      {s.app.reaches === false && <span class="muted">The hub cannot publish {s.repo} until its App reaches it.</span>}
       {running && (
         <p class="row muted small" role="status">
           <Spinner label="Checking" /> The hub checks its App now. This updates by itself when its run ends.
@@ -174,6 +174,11 @@ function AppStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatu
         </p>
       )}
       <Problem problem={problem} />
+      {s.app.reaches !== true && s.app.installUrl && (
+        <span class="muted small">
+          GitHub preselects {s.repo}. Keep "Only select repositories". With "All repositories" the App would also reach {hubName.value}, which holds your keys. The hub then refuses to run.
+        </span>
+      )}
       {s.app.reaches !== true && (
         <div class="row">
           {s.app.installUrl ? (
@@ -189,6 +194,56 @@ function AppStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatu
           </button>
         </div>
       )}
+    </>
+  );
+}
+
+function EntryStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatus) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<ProblemView | null>(null);
+  const p = s.entry.proposal;
+  const merge = async () => {
+    if (!p) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      await post("/api/projects/merge", { hub: hubName.value, name: s.name, repo: s.repo, entry: p.entry, sha: p.head });
+      say("ok", `Merged the hub entry of ${s.name}.`);
+      const next = await statusOf(s.repo);
+      if (next) onStatus(next);
+    } catch (e) {
+      setProblem(problemOf(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <span class="muted">Waiting in a pull request on {hubName.value}. Merge it to let the hub publish {s.name}.</span>
+      {p ? (
+        <>
+          <pre class="block" tabIndex={0} aria-label={`The entry for ${s.name}`}>
+            {p.entry}
+          </pre>
+          <span class="muted small">
+            The pull request ends at commit <code>{p.head.slice(0, 7)}</code> and only adds this entry to tapster.yml. tapster checks that again and merges it with your GitHub sign-in.
+          </span>
+        </>
+      ) : (
+        s.entry.blocked && <span class="muted small">tapster cannot merge it from here: {s.entry.blocked}</span>
+      )}
+      <Problem problem={problem} />
+      <div class="row">
+        {p && (
+          <Busy busy={busy} class="btn primary small" onClick={merge}>
+            {!busy && <Icon name="pr" />}
+            Merge the hub entry
+          </Busy>
+        )}
+        <Out href={s.entry.pr!} class={p ? "btn secondary small" : "btn primary small"}>
+          {p ? "Review on GitHub" : "Review and merge on GitHub"}
+        </Out>
+      </div>
     </>
   );
 }
@@ -404,15 +459,7 @@ export function StatusCard({ s, onStatus, fix }: { s: ProjectStatus; onStatus: (
           {s.entry.state === "merged" ? (
             <span class="muted">In {hubName.value}'s tapster.yml.</span>
           ) : s.entry.state === "proposed" ? (
-            <>
-              <span class="muted">Waiting in a pull request on {hubName.value}. Merge it to let the hub publish {s.name}.</span>
-              <div class="row">
-                <Out href={s.entry.pr!} class="btn primary small">
-                  <Icon name="pr" />
-                  Review and merge
-                </Out>
-              </div>
-            </>
+            <EntryStep s={s} onStatus={onStatus} />
           ) : (
             <>
               <span class="muted">Not in the hub yet.</span>

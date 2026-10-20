@@ -169,7 +169,7 @@ test("a project is inspected, added, diffed and committed, touching only tapster
   await run("git", ["-C", path, "config", "commit.gpgsign", "false"]);
   await Bun.write(join(path, "unrelated.txt"), "mine");
   await run("git", ["-C", path, "add", "unrelated.txt"]);
-  expect((await call("POST", "/api/projects/commit", { path, files: added.files })).data).toEqual({ committed: true });
+  expect((await call("POST", "/api/projects/commit", { path, files: added.files })).data).toEqual({ committed: true, ahead: null, unpushed: [] });
   const last = (await run("git", ["-C", path, "show", "--name-only", "--format=%s", "HEAD"])).stdout;
   expect(last).toContain("Release through the tapster hub");
   expect(last).toContain(".goreleaser.yaml");

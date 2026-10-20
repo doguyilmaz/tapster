@@ -10,7 +10,7 @@ const out = process.argv[2] ?? join(process.cwd(), "qa-shots");
 const only = process.argv[3] ?? "";
 mkdirSync(out, { recursive: true });
 const links: string[] = [];
-const { fake, sparkle } = await demo(8299, (line) => {
+const { fake, sparkle, home } = await demo(8299, (line) => {
   const m = /http:\/\/127\.0\.0\.1:\d+\/#c=[0-9a-f]+/.exec(line);
   if (m) links.push(m[0]);
 });
@@ -51,6 +51,7 @@ try {
   fake.installation = { id: 9, repos: ["octo/ebb"] };
   await page.waitFor("document.body.textContent.includes('The App is installed')", 15000);
   await shot("05-installed");
+  await audit("app-installed");
   await page.clickText("macOS or not", ".route button");
   await page.waitFor("document.body.textContent.includes('Will this hub sign macOS software')");
   await shot("06-macos");
@@ -154,6 +155,29 @@ try {
   await audit("added");
   await page.clickText("Commit these files");
   await page.waitFor("document.body.textContent.includes('Committed')");
+  await page.waitFor("[...document.querySelectorAll('.sheet button')].some((b) => b.textContent.includes('Merge the hub entry'))", 20000);
+  await page.eval("(() => { const s = document.querySelector('.sheet'); const h = [...s.querySelectorAll('strong')].find((e) => e.textContent === 'Hub entry'); s.scrollTop = h.getBoundingClientRect().top + s.scrollTop - 120; })()");
+  await shot("13a-merge-entry");
+  await audit("merge-entry");
+  await page.clickText("Merge the hub entry", ".sheet button");
+  await page.waitFor("document.body.textContent.includes(\"In octo/homebrew-tap's tapster.yml\")", 20000);
+  await shot("13b-entry-merged");
+  await page.eval("document.querySelector('.sheet-back').click()");
+  const pix = join(home, "Developer", "hafifpix");
+  await run("git", ["init", "-q", "--bare", "-b", "main", join(home, "hafifpix.git")]);
+  for (const [k, v] of [["user.name", "Demo"], ["user.email", "demo@example.com"], ["commit.gpgsign", "false"], ["remote.origin.pushurl", join(home, "hafifpix.git")]]) await run("git", ["-C", pix, "config", k!, v!]);
+  await run("git", ["-C", pix, "push", "-q", "origin", "main"]);
+  await page.clickText("octo/hafifpix", ".item button.link");
+  await page.waitFor("document.body.textContent.includes('Options')");
+  await page.clickText("Add, commit, push and merge in one go", ".sheet label");
+  await page.clickText("Check the changes first", ".sheet button");
+  await page.waitFor("document.querySelector('.sheet .files')", 15000);
+  await shot("13c-one-go-check");
+  await audit("one-go-check");
+  await page.clickText("Add, commit, push and merge", ".sheet button");
+  await page.waitFor("document.body.textContent.includes('Install the App on hafifpix')", 30000);
+  await shot("13d-one-go-done");
+  await audit("one-go-done");
   await page.eval("document.querySelector('.sheet-back').click()");
   await page.clickText("Health", "nav a");
   await page.waitFor("document.querySelector('.card.list')", 15000);
@@ -171,6 +195,11 @@ try {
   await page.waitFor("document.body.textContent.includes('Where aims stands')", 20000);
   await shot("16c-phone-aims-dark");
   await audit("phone-aims-dark");
+  await page.eval("document.querySelector('.sheet-back').click()");
+  await page.clickText("octo/hafifpix", ".item button.link");
+  await page.waitFor("document.body.textContent.includes('Where hafifpix stands')", 20000);
+  await shot("16d-phone-pix-dark");
+  await audit("phone-pix-dark");
   await page.eval("document.querySelector('.sheet-back').click()");
   await page.size(1280, 860);
   await shot("17-projects-dark");
