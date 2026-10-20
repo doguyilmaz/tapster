@@ -79,7 +79,7 @@ function Protect({ h }: { h: HubView }) {
       </ul>
       {h.protect.others.length > 0 && (
         <Note tone="warn" title="These workflows stop running once the hub is protected">
-          <span>They use actions from others or actions not pinned by commit. The hub does not need them, and their commits would make the hub refuse to run. You can remove them in Hub files.</span>
+          <span>They use actions from others or actions not pinned by commit. The hub does not need them. Their commits would make the hub refuse to run. You can remove them in Hub files.</span>
           <ul class="log">
             {h.protect.others.map((o) => (
               <li key={o.file}>
@@ -132,7 +132,7 @@ function Installation({ h, slug }: { h: HubView; slug: string }) {
     <div class="stack tight">
       <h3 class="section-title">Install it on your projects</h3>
       <p class="muted">
-        On GitHub, choose <strong>Only select repositories</strong> and pick the projects the hub should publish. Never pick {h.name}: the App can write to every repository it is installed on, and the hub holds your signing keys. You can also install it per project later, from Projects.
+        On GitHub, choose <strong>Only select repositories</strong> and pick the projects the hub should publish. Never pick {h.name}: the App can write to every repository it is installed on. The hub holds your signing keys. You can also install it per project later, from Projects.
       </p>
       {view?.checked && view.onHub && (
         <Note tone="error" title={`The App is installed on ${h.name}`}>
@@ -392,7 +392,7 @@ function Notary({ h }: { h: HubView }) {
   };
   return (
     <div class="panel">
-      <Head title="Notarization key" lead="An App Store Connect API key. The hub sends your signed code to Apple with it, and Apple notarizes it." />
+      <Head title="Notarization key" lead="An App Store Connect API key. The hub sends your signed code to Apple with it; Apple notarizes it." />
       {h.apple.notary && !replacing && (
         <>
           <Done text="The notarization key is stored" />
@@ -525,7 +525,7 @@ function Files({ h }: { h: HubView }) {
               <input type="checkbox" checked={remove.includes(f)} onChange={(e) => setRemove((e.currentTarget as HTMLInputElement).checked ? [...remove, f] : remove.filter((x) => x !== f))} />
               <span>
                 <strong>Remove .github/workflows/{f}</strong>
-                <span>It stops running once the hub is protected, and its commits would make the hub refuse to run.</span>
+                <span>It stops running once the hub is protected. Its commits would make the hub refuse to run.</span>
               </span>
             </label>
           ))}

@@ -32,7 +32,7 @@ At the end of this tutorial you have:
 - **For macOS builds, an Apple Developer Program membership and a Mac.** Without them your hub can still publish Linux
   and Windows builds. The next step shows how to get the two Apple files.
 
-You do not install tapster. Every command in this tutorial runs the latest release with `bunx`:
+You do not install tapster. The setup and every command run the latest release with `bunx`:
 
 ```sh
 bunx @doguyilmaz/tapster --version
@@ -45,11 +45,7 @@ bunx @doguyilmaz/tapster --version
 ## Your tap becomes the hub
 
 A Homebrew tap is a GitHub repository whose name starts with `homebrew-`, such as `you/homebrew-tap`. Users add it with
-`brew tap you/tap`. tapster turns that repository into your hub. If you have no tap yet, create one:
-
-```sh
-gh repo create homebrew-tap --public --clone
-```
+`brew tap you/tap`. tapster turns that repository into your hub. If you have no tap yet, the setup creates one for you.
 
 Keep the hub **public**. GitHub gives public repositories free macOS runners, which signing needs. It also gives them
 the protected environment that holds your keys. A private hub needs GitHub Pro. Its runs use your plan's Actions minutes.
@@ -58,7 +54,8 @@ the protected environment that holds your keys. A private hub needs GitHub Pro. 
 
 <Steps>
 
-1. **Your computer** runs the `tapster` command while you set things up.
+1. **Your computer** runs `tapster setup`, a page in your browser that only your computer serves, while you set things
+   up.
 2. **Your hub's GitHub Actions** run tapster for each release.
 3. **Your Cloudflare account** runs the optional [doorbell](/guides/doorbell/), which only starts the hub.
 

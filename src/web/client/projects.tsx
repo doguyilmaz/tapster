@@ -99,7 +99,7 @@ export function Projects() {
         <label class="sr" for="folder">
           A folder to look in
         </label>
-        <input id="folder" class="input mono" placeholder="/Users/you/Documents/code, or one project's folder" value={folder} onInput={(e) => setFolder((e.currentTarget as HTMLInputElement).value)} spellcheck={false} autoComplete="off" />
+        <input id="folder" class="input mono" placeholder="A folder, such as /Users/you/Documents/code" value={folder} onInput={(e) => setFolder((e.currentTarget as HTMLInputElement).value)} spellcheck={false} autoComplete="off" />
         <button class="btn secondary" type="submit">
           <Icon name="folder" />
           Look there too
@@ -157,7 +157,7 @@ export function Projects() {
             </section>
           )}
           <p class="faint small">
-            Looked in {scan.roots.map(tilde).join(", ")}{scan.truncated ? ", and stopped early because there were many folders" : ""}. {scan.others ? `${scan.others} ${scan.others === 1 ? "clone belongs" : "clones belong"} to other owners and ${scan.others === 1 ? "is" : "are"} not listed.` : ""}
+            Looked in {scan.roots.map(tilde).join(", ")}{scan.truncated ? "; it stopped early because there were many folders" : ""}. {scan.others ? `${scan.others} ${scan.others === 1 ? "clone belongs" : "clones belong"} to other owners and ${scan.others === 1 ? "is" : "are"} not listed.` : ""}
           </p>
         </>
       )}
@@ -460,7 +460,7 @@ function Sheet({ p, hubName, onClose, onAdded }: { p: LocalProject; hubName: str
               </section>
               <section class="stack tight">
                 <h3 class="section-title">4. Release</h3>
-                <p class="muted">Push a version tag. The project's workflow opens a draft, and the hub signs and publishes it on its next run.</p>
+                <p class="muted">Push a version tag. The project's workflow opens a draft; the hub signs and publishes it on its next run.</p>
                 <Cmd text={`git -C ${JSON.stringify(p.path)} tag v1.0.0 && git -C ${JSON.stringify(p.path)} push origin v1.0.0`} />
                 <p class="faint small">Use your next version instead of v1.0.0.</p>
               </section>

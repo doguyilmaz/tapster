@@ -85,7 +85,7 @@ The hub entry it proposes looks like this:
 ```
 
 If tapster could not find the bundle id or the public key, the entry holds a placeholder and is printed instead of
-proposed. Fill it in and add it to the hub's `tapster.yml` yourself. Then follow [Add a project](/tutorial/project/#your-turn).
+proposed. Fill it in and add it to the hub's `tapster.yml` yourself. Then follow [Commit, merge and install](/tutorial/project/#2-commit-merge-and-install).
 
 **For an app that already ships with a key**, store that key once the entry is merged and before the first tag. In a
 clone of your hub:

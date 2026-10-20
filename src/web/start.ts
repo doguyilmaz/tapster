@@ -81,7 +81,7 @@ export async function setup(args: string[], deps?: Deps): Promise<void> {
   try {
     server = listen(o.port ?? PORT, (req) => handle(req));
   } catch {
-    if (o.port !== null) throw new TapsterError(`port ${o.port} is in use`, "Pick another one with --port, or close the program that uses it.");
+    if (o.port !== null) throw new TapsterError(`port ${o.port} is in use`, "Pick another one with --port or close the program that uses it.");
     server = listen(0, (req) => handle(req));
     d.log(`Port ${PORT} is in use (another tapster setup may be open), so this one uses ${server.port}. Password managers save entries per address, so they may not offer the ones saved on ${PORT}.`);
   }

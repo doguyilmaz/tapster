@@ -54,7 +54,7 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
   try {
     res = await fetch(path, { method, headers, body: payload });
   } catch {
-    throw new ApiError({ reason: "tapster setup is not answering", fix: "Check that tapster setup still runs in your terminal, or start it again with bunx @doguyilmaz/tapster setup." }, 0);
+    throw new ApiError({ reason: "tapster setup is not answering", fix: "Check that tapster setup still runs in your terminal. If it stopped, start it again with bunx @doguyilmaz/tapster setup." }, 0);
   }
   const data = (await res.json().catch(() => null)) as (T & { error?: Problem }) | null;
   if (res.status === 401) {

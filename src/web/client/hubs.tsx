@@ -97,14 +97,14 @@ export function HubChooser({ onChosen, onCancel }: { onChosen: (name: string) =>
               <input type="radio" name="visibility" checked={visibility === "public"} onChange={() => setVisibility("public")} />
               <span>
                 <strong>Public (recommended)</strong>
-                <span>GitHub gives public repositories free macOS runners, which signing needs, and the protected environment that holds your keys.</span>
+                <span>GitHub gives public repositories free macOS runners, which signing needs. It also gives them the protected environment that holds your keys.</span>
               </span>
             </label>
             <label class="switch">
               <input type="radio" name="visibility" checked={visibility === "private"} onChange={() => setVisibility("private")} />
               <span>
                 <strong>Private</strong>
-                <span>Needs GitHub Pro for the protected environment. Every run uses your plan's Actions minutes, and users can only install from public projects.</span>
+                <span>Needs GitHub Pro for the protected environment. Every run uses your plan's Actions minutes. Users can only install from public projects.</span>
               </span>
             </label>
           </fieldset>

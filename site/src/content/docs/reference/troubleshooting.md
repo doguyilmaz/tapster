@@ -8,6 +8,18 @@ sidebar:
 tapster says what went wrong and, on the next line, what to do. This page adds the why for the messages people meet
 most. Start with [`tapster doctor`](/reference/commands/#tapster-doctor) in your hub clone.
 
+## In tapster setup
+
+| Message | What to do |
+| --- | --- |
+| `Port 8277 is in use` (in the terminal) | Another tapster setup may be open; use that one or stop it. The new one uses another port. Your password manager may not offer the entries it saved for 8277. |
+| `Open tapster setup from your terminal` | The page has no session, for example after you closed its tab. Press Enter in the terminal where tapster setup runs for a fresh link. |
+| `this link was already used` | Someone opened the same link twice, so tapster ended every session. Open the fresh link the terminal printed. |
+| `Allow gh to change workflows` | Run the command the page shows, `gh auth refresh -s workflow`. The page continues by itself. |
+| `main changed in ways only you may change it` | Someone else pushed to the hub. Review those commits on GitHub and revert what you did not make, then write the hub files again. |
+| `git could not push without asking for a password or passphrase` | Push from a terminal in the project's folder; the page shows the command. |
+| `... is outside your home folder` | tapster reads clones inside your home folder only. Move the clone or link it into your home folder. |
+
 ## In your terminal
 
 | Message | What to do |
