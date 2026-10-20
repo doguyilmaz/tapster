@@ -165,9 +165,11 @@ So the Action guides and checks; the setup app (or the CLI) on the owner's compu
 
 ### Extras (in Setup, after the main stops)
 
-- Linux packages: makes the signing key (needs gpg) and turns on Pages, as `init --linux`.
-- Sparkle keys: create a key for an app (keychain plus the password manager form) or store one from the keychain.
-- Doorbell: needs a Cloudflare login through wrangler, which is interactive; the stop explains it and gives the command.
+- Sparkle keys: stores a key from the keychain for each label in `tapster.yml`. The page shows it read-only, the user
+  pastes it into a password form (so the password manager offers to keep the offline copy), tapster checks the paste
+  and then stores it and passes it to the hub workflow. Making a new key stays a terminal step (`init --sparkle --new`).
+- Linux packages and the doorbell show their state and the terminal command: they need gpg or a Cloudflare login
+  through Wrangler.
 
 ### Architecture
 
@@ -222,12 +224,18 @@ the check job decides on every run whether the issue needs a change, and the iss
 - The README and the commands reference gain `tapster setup`. A troubleshooting entry covers a busy port and the
   token link.
 
+## 5. AI assistants
+
+- `tapster mcp` serves six tools over stdio: `hub_status`, `doctor`, `hub_runs`, `release_status`, `local_projects`
+  (read only) and `run_hub`. They use the GitHub CLI sign-in, act only on the user's own hubs and never touch keys.
+- Two skills in `skills/` (setup and release diagnosis), installable with `bunx skills add doguyilmaz/tapster`.
+
 ## Not in this round
 
 - The doorbell's Cloudflare login inside the app (it stays a CLI step with a clear explanation).
 - Tagging a release from the app (the app gives the command).
 - Merging the hub entry from the app (GitHub shows the owner the exact files).
-- MCP server, skills and AI integration: next, from the backlog.
+- Linux keys and the doorbell inside the page.
 - Notifications to Slack or Discord when a release ships: an idea for later (`notify:` with a webhook secret).
 
 ## Testing
