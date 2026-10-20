@@ -30,21 +30,20 @@ export async function currentRepo(dir = process.cwd()): Promise<string> {
   return m[1]!;
 }
 
-export async function setEnvSecret(repo: string, name: string, value: string, env = "tapster"): Promise<void> {
-  await runPath(cliGh(), "gh", ["secret", "set", name, "--env", env, "--repo", repo], { env: userEnv(), stdin: value });
+export type GhWrite = (args: string[], stdin?: string) => Promise<void>;
+
+let ghWrite: GhWrite = async (args, stdin) => {
+  await runPath(cliGh(), "gh", args, { env: userEnv(), stdin });
+};
+
+export function useGhWrite(write: GhWrite): void {
+  ghWrite = write;
 }
 
-export async function setEnvVariable(repo: string, name: string, value: string): Promise<void> {
-  await runPath(cliGh(), "gh", ["variable", "set", name, "--env", "tapster", "--repo", repo, "--body", value], { env: userEnv() });
-}
-
-export async function setRepoVariable(repo: string, name: string, value: string): Promise<void> {
-  await runPath(cliGh(), "gh", ["variable", "set", name, "--repo", repo, "--body", value], { env: userEnv() });
-}
-
-export async function deleteEnvSecret(repo: string, name: string, env = "tapster"): Promise<void> {
-  await runPath(cliGh(), "gh", ["secret", "delete", name, "--env", env, "--repo", repo], { env: userEnv() });
-}
+export const setEnvSecret = (repo: string, name: string, value: string, env = "tapster") => ghWrite(["secret", "set", name, "--env", env, "--repo", repo], value);
+export const setEnvVariable = (repo: string, name: string, value: string) => ghWrite(["variable", "set", name, "--env", "tapster", "--repo", repo, "--body", value]);
+export const setRepoVariable = (repo: string, name: string, value: string) => ghWrite(["variable", "set", name, "--repo", repo, "--body", value]);
+export const deleteEnvSecret = (repo: string, name: string, env = "tapster") => ghWrite(["secret", "delete", name, "--env", env, "--repo", repo]);
 
 export async function hubEnv(gh: GitHub, hub: string, kind: "variables" | "secrets"): Promise<{ name: string; value?: string }[]> {
   try {

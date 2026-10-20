@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { linuxNeeded } from "../src/action/check";
 import { linuxCheck } from "../src/cli/doctor";
-import { fillWorkflow, linuxKeyAllowed } from "../src/cli/init";
+import { fillWorkflow } from "../src/cli/hubfiles";
+import { linuxKeyAllowed } from "../src/cli/init";
 import { parseConfig } from "../src/config";
 import pins from "../templates/pins.json";
 

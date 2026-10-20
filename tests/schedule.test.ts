@@ -18,7 +18,7 @@ test("the interval is read back from the workflow", () => {
 });
 
 test("the hub workflow gets the schedule it is asked for", async () => {
-  const { fillWorkflow } = await import("../src/cli/init");
+  const { fillWorkflow } = await import("../src/cli/hubfiles");
   const pins = (await import("../templates/pins.json")).default;
   const template = await Bun.file("templates/hub/tapster.yml").text();
   const tapster = { sha: "f".repeat(40), tag: "v1.0.0" };

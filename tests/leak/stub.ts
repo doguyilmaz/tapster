@@ -115,6 +115,7 @@ const server = createServer({ cert: readFileSync(certPath!), key: readFileSync(k
     }
   }
   if (path.startsWith(`${repo}/attestations/`)) return send(res, 404, { message: "Not Found" });
+  if (path === "/repos/doguyilmaz/tapster/issues") return method === "POST" ? send(res, 201, { number: 1 }) : send(res, 200, []);
   const hub = /^\/repos\/[^/]+\/[^/]+\/(git\/ref\/heads\/main|git\/refs\/heads\/main|git\/commits\/[0-9a-f]+|git\/commits|git\/trees|contents\/(.+))$/.exec(path);
   if (hub) {
     if (hub[1] === "git/ref/heads/main") return send(res, 200, { object: { sha: hubHead } });

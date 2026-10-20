@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { appleGate } from "../src/action/check";
 import { macosCode } from "../src/config";
 import { cleanPath } from "../src/cli/paths";
-import { checkCertificate, checkP12, doneSteps, initSteps, notaryArgs, notaryCheckError, privateHubError } from "../src/cli/init";
+import { checkCertificate, checkP12, notaryArgs, notaryCheckError } from "../src/cli/apple";
+import { doneSteps, initSteps, privateHubError } from "../src/cli/init";
 import { parseConfig } from "../src/config";
 import { GitHubError, TapsterError } from "../src/errors";
 
@@ -18,7 +19,7 @@ const now = Date.parse("2026-10-19T00:00:00Z");
 const subject = "UID=ABCDE12345,CN=Developer ID Application: Dogu Yilmaz (ABCDE12345),OU=ABCDE12345,O=Dogu Yilmaz,C=TR";
 
 test("only a valid Developer ID Application certificate is stored, with its expiry", () => {
-  expect(checkCertificate(subject, "Oct 19 00:00:00 2031 GMT", now)).toEqual({ team: "ABCDE12345", expires: "2031-10-19" });
+  expect(checkCertificate(subject, "Oct 19 00:00:00 2031 GMT", now)).toEqual({ team: "ABCDE12345", expires: "2031-10-19", name: "Developer ID Application: Dogu Yilmaz (ABCDE12345)" });
   expect(() => checkCertificate(subject.replace("Developer ID Application", "Apple Development"), "Oct 19 00:00:00 2031 GMT", now)).toThrow(/Developer ID Application/);
   expect(() => checkCertificate(subject.replace("Developer ID Application", "Developer ID Installer"), "Oct 19 00:00:00 2031 GMT", now)).toThrow(/Developer ID Application/);
   expect(() => checkCertificate(subject, "Oct 18 00:00:00 2026 GMT", now)).toThrow(/expired/);
@@ -78,7 +79,7 @@ test("macOS work waits for Apple credentials and a certificate that has not expi
   expect(ok.macos).toBe(true);
   expect(ok.warning).toBeNull();
   const soon = appleGate(all, cfg.packages, { team: "ABCDE12345", expires: "2026-11-01" }, now);
-  expect(soon.warning).toContain("2026-11-01");
+  expect(soon.warning).toEqual({ reason: "the Developer ID certificate expires on 2026-11-01", fix: "Create a new Developer ID Application certificate, then run tapster init --rotate certificate." });
   const expired = appleGate(all, cfg.packages, { team: "ABCDE12345", expires: "2026-10-01" }, now);
   expect(expired.failed.map((f) => f.name)).toEqual(["mac", "app"]);
   expect(expired.failed[0]!.error.reason).toContain("expired");

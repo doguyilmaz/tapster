@@ -1,101 +1,78 @@
 ---
 title: "Add a project"
-description: "Run tapster add in a project to prepare its release workflow, protect it and propose it to the hub."
+description: "Pick a project cloned on your computer; tapster prepares its release workflow, protects it and proposes it to the hub."
 sidebar:
   order: 4
   label: "4. Add a project"
 ---
 import { Steps } from "@astrojs/starlight/components";
+import { Image } from "astro:assets";
 import TutorialProgress from "../../../components/TutorialProgress.astro";
+import projects from "../../../assets/setup/projects.webp";
+import project from "../../../assets/setup/project.webp";
+import added from "../../../assets/setup/added.webp";
 
 <TutorialProgress step={4} />
 
-Go to a clone of the project you want to publish and run `add`:
+In tapster setup, open **Projects**.
 
-```sh
-cd my-tool
-bunx @doguyilmaz/tapster add
-```
+<Image src={projects} alt="The Projects page lists the clones of your repositories on this computer, with their kind and an Add button." />
 
-The first time, tapster asks which hub publishes the project and remembers the answer in the clone:
+tapster looks for clones of your own repositories in the folder you started it from, its parent and the usual places
+such as `~/Developer`, `~/Projects` and `~/code`. It reads each clone's `.git/config` and checks which build files
+exist. Nothing leaves your computer. If a project lives elsewhere, type its folder and click **Look there too**.
 
-:::tip[You should see]{icon="approve-check-circle"}
-`Which hub publishes this project (owner/repo)?` Type `you/homebrew-tap` and press Enter.
-:::
+It recognizes three kinds of projects:
 
-tapster recognizes three kinds of projects. Each line it prints starts with `-` and says what it did.
-
-## 1. The release workflow
-
-- **Go with GoReleaser** (a `.goreleaser.yaml` next to `go.mod`): tapster turns on draft releases, names the checksum
-  file `checksums.txt` and removes `notarize`, `homebrew_casks`, `brews` and `scoops`, because the hub does those now.
-  In the workflow that runs GoReleaser (`release.yml` or the file you name with `--workflow`), it adds a step that
-  attests the archives. See [Move a GoReleaser project](/guides/goreleaser/).
-- **Bun** (a `package.json` with `bin` and a `bun.lock`): tapster writes `.github/workflows/release.yml`. It builds every
-  platform in a job that can only read the repository. A second job attests the archives and opens the draft. See
-  [Bun projects](/guides/bun/).
+- **Go with GoReleaser**: a `.goreleaser.yaml` next to `go.mod`. See [Move a GoReleaser project](/guides/goreleaser/).
+- **Bun**: a `package.json` with `bin` and a `bun.lock`. See [Bun projects](/guides/bun/).
 - **A Mac app with Sparkle**: see [Mac apps with Sparkle](/guides/sparkle/), which has its own order of steps.
 
-Every release workflow also gets a step named **Ring the tapster hub**. It does nothing until you add the
-[doorbell](/guides/doorbell/).
+## 1. Choose the options
 
-## 2. The project is protected
+Click **Add** next to the project.
 
-:::tip[You should see]{icon="approve-check-circle"}
-`- protected you/my-tool: only you can create, move or delete branches and tags; workflows and Apps, the hub's
-included, cannot. Push release tags yourself; GitHub then notes "Bypassed rule violations", which is your admin
-right at work.`
-:::
+<Image src={project} alt="The project sheet shows the kind, branch and protection of the project, its options and what tapster will do." />
 
-This keeps a stolen App key from tagging code for your hub to sign. The rules cover every branch too: only you can push
-to the project now, so every push of yours shows the same note. Collaborators and bots such as Renovate or
-release-please can no longer push branches. Two cases have an option:
+The sheet shows what tapster found and what it will do. The options:
 
-- A workflow that pushes its own release tags needs `--auto-tag`. See [Releases tagged by a workflow](/guides/auto-tag/).
-- Dependabot opens its pull requests from branches, which the rules now close. See [Dependabot](/guides/dependabot/).
+- **The workflow that runs GoReleaser**, when a Go project has more than one.
+- **Let the release workflow push tags**, for workflows that tag by themselves. See
+  [Releases tagged by a workflow](/guides/auto-tag/).
+- **Keep Dependabot's pull requests**, preselected when the project uses Dependabot. See [Dependabot](/guides/dependabot/).
+- **Replace the existing release workflow**, when a Bun project or app already has one tapster does not recognize.
 
-## 3. The hub entry
+Click **Add to you/homebrew-tap**. tapster then:
 
-tapster writes the project's entry for the hub's `tapster.yml` and opens a pull request on the hub with it:
+- edits the release workflow so it opens a draft, attests the archives and rings the hub;
+- protects the project: only you can create, move or delete its branches and tags. A stolen App key cannot tag code for
+  your hub to sign. Your own pushes show "Bypassed rule violations", which is your admin right at work;
+- opens a pull request on the hub with the project's entry for `tapster.yml`.
 
-:::tip[You should see]{icon="approve-check-circle"}
-`- proposed the hub entry in https://github.com/you/homebrew-tap/pull/1; merge it to start publishing`
-:::
+## 2. Commit, merge and install
 
-If the repository's GitHub description is one that Homebrew would reject, tapster says so and suggests a better one in
-the entry. Homebrew wants a short description that starts with a capital letter and has no full stop at the end.
+<Image src={added} alt="After adding, the sheet shows the changes as a diff and the next steps: commit, push, merge the hub entry and install the App." />
+
+<Steps>
+
+1. Review the diff, then click **Commit these files** and **Push**. tapster commits only the files it changed, with your
+   own git setup, so your hooks and commit signing apply. If git needs a password, the page gives you the command to run
+   in a terminal.
+2. Click **Review and merge on GitHub** and merge the pull request on the hub.
+3. Click **Install the App** unless the App already reaches this project. GitHub preselects it; keep
+   **Only select repositories**.
+
+</Steps>
+
+If the repository's GitHub description is one that Homebrew would reject, the sheet says so and the entry suggests a
+better one. Homebrew wants a short description that starts with a capital letter and has no full stop at the end.
 
 :::note
-A project whose archives tapster cannot predict yet, for example GoReleaser with its own name template, gets no
-entry until its first draft exists. Run `tapster add` again after that.
+A project whose archive names tapster cannot predict yet, for example GoReleaser with its own name template, gets no
+entry until its first draft exists. Add it again after that.
 :::
-
-## 4. The App's install link
-
-:::tip[You should see]{icon="approve-check-circle"}
-`- open this page and choose Install, unless the hub's App already reaches you/my-tool; the project is preselected
-(keep "Only select repositories"):` followed by a link.
-:::
-
-If you picked this project when you created the hub, skip it. Otherwise open the link and click **Install**.
-
-## Your turn
-
-tapster commits nothing. When it ends with
-`Review the changes with git diff, commit and push them, then push a tag to release.`, do this:
-
-- [ ] Merge the pull request on your hub.
-- [ ] Open the install link if tapster printed one for a project the App does not reach yet.
-- [ ] Review the changes in the project, then commit and push them:
-
-  ```sh
-  git diff
-  git add -A
-  git commit -m "Release through tapster"
-  git push
-  ```
 
 :::note[Where your keys go]{icon="padlock"}
-The project holds no keys. If it still has old release secrets such as `MACOS_*` or `HOMEBREW_TAP_*`, tapster lists
+The project holds no keys. If it still has old release secrets such as `MACOS_*` or `HOMEBREW_TAP_*`, the sheet lists
 them. Delete them once the hub has published a release.
 :::

@@ -82,8 +82,12 @@ export async function appFromManifest(manifest: (redirect: string) => object, co
   clearTimeout(timer);
   setTimeout(() => server.stop(), 1000);
   if ("error" in result) throw result.error;
-  const app = await fetch(`https://api.github.com/app-manifests/${result.code}/conversions`, { method: "POST", headers: { Accept: "application/vnd.github+json" } });
-  if (!app.ok) throw new TapsterError(`GitHub did not hand over the new App (status ${app.status})`, `${orphan} Then run ${copy.again} again.`);
+  return convertManifest(result.code, owner, `${orphan} Then run ${copy.again} again.`);
+}
+
+export async function convertManifest(code: string, owner: string, fix: string, fetchImpl: typeof fetch = fetch): Promise<CreatedApp> {
+  const app = await fetchImpl(`https://api.github.com/app-manifests/${code}/conversions`, { method: "POST", headers: { Accept: "application/vnd.github+json" } });
+  if (!app.ok) throw new TapsterError(`GitHub did not hand over the new App (status ${app.status})`, fix);
   const created = (await app.json()) as CreatedApp;
   checkConverted(created, owner);
   return created;

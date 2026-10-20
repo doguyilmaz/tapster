@@ -63,8 +63,27 @@ you.
   from the one your installed apps trust.
 - The job that builds Linux packages has no key. The job that signs them rebuilds what each package must contain and
   refuses anything else.
+- The check job's own token can only read the hub's files and issues.
+- The report job holds no keys. Its token may write the hub's issues and nothing else. It opens, edits and closes one
+  issue, `tapster: the hub needs attention`. The findings reach it as an input of tapster's step, never through a shell.
 - The doorbell's App may only start the hub's workflow. The Worker accepts only GitHub's own tokens from your
   repositories, made for its address.
+
+## The setup page
+
+`tapster setup` serves its page from your computer, on `127.0.0.1` only.
+
+- The link it opens holds a code that works once. The page trades it for a session token that lives in that browser tab.
+  A copy of the link in your browser history, your terminal or another program's view of the command line is worthless
+  once used. If a link is used twice, tapster ends every session and prints a fresh link.
+- Every request needs that token in a header. Another site open in your browser cannot send it. The page answers only
+  requests addressed to `127.0.0.1` or `localhost` on its port.
+- Files you drop, such as the `.p12` and the `.p8`, stay in memory until tapster stores them as secrets through the
+  GitHub CLI. Apple's notary tool needs a file, so the `.p8` sits in a private temporary folder during that check only.
+- Reading a project clone runs none of its git hooks or filters. **Commit** and **Push** run your own git setup, as if you
+  typed the commands.
+- Before it writes to the hub's `main`, tapster runs the hub's own check: if someone else changed `main` since your last
+  push, it stops, because a write from you would mark their commits as reviewed.
 
 ## How tapster checks itself
 

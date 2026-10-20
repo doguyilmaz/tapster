@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-[`tapster add` protects each project](/tutorial/project/#2-the-project-is-protected) so that only you can create or
+[Adding a project protects it](/tutorial/project/#1-choose-the-options) so that only you can create or
 move its tags. That also stops a workflow that tags releases by itself, for example one that picks the next version
 after each merge to `main`.
 

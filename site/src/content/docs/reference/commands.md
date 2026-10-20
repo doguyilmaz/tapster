@@ -7,6 +7,21 @@ sidebar:
 
 Run each command with `bunx @doguyilmaz/tapster <command>`. Every command takes `--help`.
 
+## tapster setup
+
+Opens the setup in your browser: choosing the hub, its protection, the GitHub App, the Apple credentials, the hub files,
+the projects on your computer and the hub's health. It does what `init`, `add` and `doctor` do. It needs no clone of the
+hub. See [Create the hub](/tutorial/hub/).
+
+| Option | What it does |
+| --- | --- |
+| `--no-open` | Prints the link instead of opening the browser. |
+| `--port <port>` | Listens on another port than 8277. Password managers save entries per address, so keep one port. |
+| `--tapster <commit>` | Pins the hub workflow to a tapster commit, for a tapster built from a checkout. |
+
+The page runs on `127.0.0.1` only. The link it opens works once; press Enter in the terminal for a fresh one. It stops
+with Ctrl+C, with **Close** on the page or after two hours without use.
+
 ## tapster init
 
 Run it in a clone of your hub. Each option below adds or changes one part of it. `init` and `init --workflow` also
@@ -48,6 +63,11 @@ hub. See [Add a project](/tutorial/project/).
 
 Run it in a clone of your hub. It reads the hub as it is on GitHub's `main` branch and checks every setting its security
 depends on. Each finding names the command that fixes it. It takes no options.
+
+## tapster mcp
+
+Serves tapster's tools to an AI assistant over MCP, on stdin and stdout. See
+[Use tapster with an AI assistant](/guides/ai/). It takes no options.
 
 ## tapster --version
 

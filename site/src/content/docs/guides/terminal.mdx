@@ -1,0 +1,235 @@
+---
+title: "Set up from a terminal"
+description: "The same setup as the browser, with tapster init in the hub and tapster add in each project."
+sidebar:
+  order: 0
+---
+import { Steps } from "@astrojs/starlight/components";
+
+The [tutorial](/tutorial/hub/) sets up the hub and its projects in your browser. Every step works in a terminal as well,
+with the same checks and the same results on GitHub. You can mix both: the browser shows what the terminal did.
+
+## The hub: tapster init
+
+Go to a clone of your tap and run `init`:
+
+```sh
+cd homebrew-tap
+bunx @doguyilmaz/tapster init
+```
+
+`init` walks through five parts. Each part can run again and skips what is done. If anything stops it, run the same
+command again.
+
+### 1. The hub is protected
+
+Nothing to answer here. tapster:
+
+- creates a `tapster` environment that only the `main` branch can open. Your keys go into it;
+- adds a ruleset that keeps `main` from being deleted or force-pushed, by anyone including you;
+- lets the hub's workflows run only GitHub's own actions and tapster's, each pinned by commit;
+- makes the workflows' default token read-only.
+
+:::danger[Careful]
+Bringing an existing tap? Its other workflows stop running if they use actions from anyone else, such as the
+`tests.yml` and `publish.yml` that `brew tap-new` writes. The hub does not need them; delete them.
+:::
+
+### 2. macOS or not
+
+:::tip[You should see]{icon="approve-check-circle"}
+`Will this hub sign software for macOS (Mac apps or CLI tools with macOS builds)? [Y/n]`
+:::
+
+Press Enter for yes. Answer `n` if you skipped the Apple step. tapster then leaves out the Apple parts below, and
+`tapster add` later leaves the macOS builds out of each project's entry.
+
+### 3. The App is created
+
+The hub needs a GitHub App to write releases to your projects. tapster opens a page in your browser that shows the App
+and the permissions it asks for.
+
+:::caution[tapster waits here]{icon="clock"}
+`tapster waits up to 30 minutes until GitHub sends you back. If no page opened, open the address above. Ctrl+C stops it.`
+:::
+
+<Steps>
+
+1. Read the page and click **Continue to GitHub**.
+2. GitHub shows the same App. Click **Create GitHub App**.
+3. GitHub sends you back to a page that says **Your tapster App is created**. Close it.
+
+</Steps>
+
+:::note[Where your keys go]{icon="padlock"}
+GitHub hands the App's private key to tapster in your terminal. tapster stores it as a secret of the hub's `tapster`
+environment. It goes nowhere else.
+:::
+
+tapster then opens the App's install page:
+
+<Steps>
+
+1. Choose **Only select repositories**.
+2. Pick the project you will add in the next step. You can add more projects later.
+3. Never pick the hub itself. The App can write to every repository it is installed on. The hub holds your keys.
+4. Click **Install**.
+
+</Steps>
+
+:::caution[tapster waits here]{icon="clock"}
+`Waiting up to 10 minutes until the App is installed; tapster continues by itself once you choose Install.`
+
+tapster checks every few seconds. If you close the page without installing, it says so after 10 minutes and moves on.
+`tapster add` prints the install link for each project too.
+:::
+
+### 4. Your Apple credentials
+
+Drag each file from Finder into the terminal when tapster asks for it, then press Enter.
+
+:::tip[You should see]{icon="approve-check-circle"}
+`.p12 file (drag it here):` then `.p12 password:`
+
+`Certificate stored for team ABCDE12345. It expires on 2031-02-01; the hub warns 30 days before.`
+:::
+
+tapster opens the `.p12` with your password to check that it is a Developer ID Application certificate that has not
+expired. The password is not shown while you type.
+
+:::tip[You should see]{icon="approve-check-circle"}
+`.p8 file (drag it here):`, `Key ID:` and `Issuer ID:`
+
+`Apple accepted the key.` and `Notarization key stored.`
+:::
+
+On a Mac, tapster asks Apple whether the key works before it stores it. Elsewhere Apple checks it at the first release.
+
+:::note[Where your keys go]{icon="padlock"}
+The certificate, its password and the notarization key become secrets of the hub's `tapster` environment. Only
+workflows on `main` can read them. Keep your backups: GitHub never shows a secret again.
+:::
+
+### 5. The files are written
+
+:::tip[You should see]{icon="approve-check-circle"}
+```
+wrote tapster.yml
+wrote .tapster/state.json
+wrote README.md
+wrote .github/workflows/tapster.yml from the template, tapster v1.0.0 (61cd09d); hand edits in it are replaced
+The hub looks for new drafts every 10 minutes; change it with tapster init --workflow --every <minutes>.
+
+Done. Review and commit the new files, push, then run tapster add in each project.
+```
+:::
+
+tapster keeps files that already exist, such as your own README. The workflow pins the exact tapster you ran by its
+commit.
+
+Commit and push them:
+
+```sh
+git add -A
+git commit -m "Set up tapster"
+git push
+```
+
+The hub is ready. It has no projects yet, so its runs find nothing to do.
+
+## A project: tapster add
+
+Go to a clone of the project you want to publish and run `add`:
+
+```sh
+cd my-tool
+bunx @doguyilmaz/tapster add
+```
+
+The first time, tapster asks which hub publishes the project and remembers the answer in the clone:
+
+:::tip[You should see]{icon="approve-check-circle"}
+`Which hub publishes this project (owner/repo)?` Type `you/homebrew-tap` and press Enter.
+:::
+
+tapster recognizes three kinds of projects. Each line it prints starts with `-` and says what it did.
+
+### 1. The release workflow
+
+- **Go with GoReleaser** (a `.goreleaser.yaml` next to `go.mod`): tapster turns on draft releases, names the checksum
+  file `checksums.txt` and removes `notarize`, `homebrew_casks`, `brews` and `scoops`, because the hub does those now.
+  In the workflow that runs GoReleaser (`release.yml` or the file you name with `--workflow`), it adds a step that
+  attests the archives. See [Move a GoReleaser project](/guides/goreleaser/).
+- **Bun** (a `package.json` with `bin` and a `bun.lock`): tapster writes `.github/workflows/release.yml`. It builds every
+  platform in a job that can only read the repository. A second job attests the archives and opens the draft. See
+  [Bun projects](/guides/bun/).
+- **A Mac app with Sparkle**: see [Mac apps with Sparkle](/guides/sparkle/), which has its own order of steps.
+
+Every release workflow also gets a step named **Ring the tapster hub**. It does nothing until you add the
+[doorbell](/guides/doorbell/).
+
+### 2. The project is protected
+
+:::tip[You should see]{icon="approve-check-circle"}
+`- protected you/my-tool: only you can create, move or delete branches and tags; workflows and Apps, the hub's
+included, cannot. Push release tags yourself; GitHub then notes "Bypassed rule violations", which is your admin
+right at work.`
+:::
+
+This keeps a stolen App key from tagging code for your hub to sign. The rules cover every branch too: only you can push
+to the project now, so every push of yours shows the same note. Collaborators and bots such as Renovate or
+release-please can no longer push branches. Two cases have an option:
+
+- A workflow that pushes its own release tags needs `--auto-tag`. See [Releases tagged by a workflow](/guides/auto-tag/).
+- Dependabot opens its pull requests from branches, which the rules now close. See [Dependabot](/guides/dependabot/).
+
+### 3. The hub entry
+
+tapster writes the project's entry for the hub's `tapster.yml` and opens a pull request on the hub with it:
+
+:::tip[You should see]{icon="approve-check-circle"}
+`- proposed the hub entry in https://github.com/you/homebrew-tap/pull/1; merge it to start publishing`
+:::
+
+If the repository's GitHub description is one that Homebrew would reject, tapster says so and suggests a better one in
+the entry. Homebrew wants a short description that starts with a capital letter and has no full stop at the end.
+
+:::note
+A project whose archives tapster cannot predict yet, for example GoReleaser with its own name template, gets no
+entry until its first draft exists. Run `tapster add` again after that.
+:::
+
+### 4. The App's install link
+
+:::tip[You should see]{icon="approve-check-circle"}
+`- open this page and choose Install, unless the hub's App already reaches you/my-tool; the project is preselected
+(keep "Only select repositories"):` followed by a link.
+:::
+
+If you picked this project when you created the hub, skip it. Otherwise open the link and click **Install**.
+
+### Your turn
+
+tapster commits nothing. When it ends with
+`Review the changes with git diff, commit and push them, then push a tag to release.`, do this:
+
+- [ ] Merge the pull request on your hub.
+- [ ] Open the install link if tapster printed one for a project the App does not reach yet.
+- [ ] Review the changes in the project, then commit and push them:
+
+  ```sh
+  git diff
+  git add -A
+  git commit -m "Release through tapster"
+  git push
+  ```
+
+:::note[Where your keys go]{icon="padlock"}
+The project holds no keys. If it still has old release secrets such as `MACOS_*` or `HOMEBREW_TAP_*`, tapster lists
+them. Delete them once the hub has published a release.
+:::
+
+## Check the hub
+
+`tapster doctor` in a clone of the hub runs the same checks as **Health** in the browser and names the command that
+fixes each finding.

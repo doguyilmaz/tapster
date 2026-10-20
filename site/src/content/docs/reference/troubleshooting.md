@@ -8,6 +8,18 @@ sidebar:
 tapster says what went wrong and, on the next line, what to do. This page adds the why for the messages people meet
 most. Start with [`tapster doctor`](/reference/commands/#tapster-doctor) in your hub clone.
 
+## In tapster setup
+
+| Message | What to do |
+| --- | --- |
+| `Port 8277 is in use` (in the terminal) | Another tapster setup may be open; use that one or stop it. The new one uses another port. Your password manager may not offer the entries it saved for 8277. |
+| `Open tapster setup from your terminal` | The page has no session, for example after you closed its tab. Press Enter in the terminal where tapster setup runs for a fresh link. |
+| `this link was already used` | Someone opened the same link twice, so tapster ended every session. Open the fresh link the terminal printed. |
+| `Allow gh to change workflows` | Run the command the page shows, `gh auth refresh -s workflow`. The page continues by itself. |
+| `main changed in ways only you may change it` | Someone else pushed to the hub. Review those commits on GitHub and revert what you did not make, then write the hub files again. |
+| `git could not push without asking for a password or passphrase` | Push from a terminal in the project's folder; the page shows the command. |
+| `... is outside your home folder` | tapster reads clones inside your home folder only. Move the clone or link it into your home folder. |
+
 ## In your terminal
 
 | Message | What to do |
@@ -39,6 +51,7 @@ These stop a whole run. The run's summary names them.
 | `the App is installed on the hub` | Remove the hub from the App's repositories at [github.com/settings/installations](https://github.com/settings/installations). The App must reach your projects only. |
 | `tapster runs only from .github/workflows/tapster.yml on the hub's main branch` | Start the **tapster** workflow on `main`. Other workflows and branches never get the keys. |
 | `the hub workflow was written for another tapster version` | Run `tapster init --workflow` in the hub clone, then commit and push. |
+| `TAPSTER_APP_ID is not set` or another `... is not set` | The setup is not finished. Run `bunx @doguyilmaz/tapster setup` on your computer or `tapster init` in a clone of the hub. |
 
 These stop one project. The others still publish:
 
@@ -49,6 +62,16 @@ These stop one project. The others still publish:
 | `<name> ships macOS code, but this hub has no Apple credentials` | Run `tapster init --rotate certificate` and `tapster init --rotate notary`. |
 | `the Developer ID certificate expired on <date>` | Create a new certificate, then run `tapster init --rotate certificate`. |
 | `<name> is invalid: ...` or `<name>: ...` | Fix the entry in `tapster.yml`. See [tapster.yml](/reference/config/). |
+
+## The issue "tapster: the hub needs attention"
+
+The hub checks itself on every run. When something needs you, it opens this issue in the hub and lists each finding
+with its fix. It edits the issue when the findings change and closes it once all is well, so you never close it
+yourself. Fix the findings with `bunx @doguyilmaz/tapster setup` (under Health) or `tapster doctor` in a clone of the
+hub.
+
+If the hub's issues are turned off, the run's summary says so instead. Turn them on in the hub's settings to get the
+issue.
 
 ## On a draft
 

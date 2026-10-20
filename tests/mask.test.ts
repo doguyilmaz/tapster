@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { readSecret, register, resetMaskForTests, scrub, variants } from "../src/mask";
+import { readSecret, register, requireVar, resetMaskForTests, scrub, variants } from "../src/mask";
 import { TapsterError } from "../src/errors";
 
 afterEach(resetMaskForTests);
@@ -57,8 +57,15 @@ test("a missing workflow token points at the workflow, not the environment", () 
   delete process.env.GITHUB_TOKEN;
   try {
     expect(() => readSecret("GITHUB_TOKEN")).toThrow(expect.objectContaining({ fix: expect.stringContaining("tapster init --workflow") }));
-    expect(() => readSecret("MACOS_SIGN_P12")).toThrow(expect.objectContaining({ fix: expect.stringContaining('"tapster" environment') }));
   } finally {
     if (saved !== undefined) process.env.GITHUB_TOKEN = saved;
   }
+});
+
+test("a missing hub variable or secret says to finish the setup", () => {
+  delete process.env.MACOS_SIGN_P12;
+  delete process.env.TAPSTER_APP_ID;
+  const fix = "Finish the setup: run bunx @doguyilmaz/tapster setup on your computer or tapster init in a clone of the hub.";
+  expect(() => readSecret("MACOS_SIGN_P12")).toThrow(expect.objectContaining({ reason: "MACOS_SIGN_P12 is not set", fix }));
+  expect(() => requireVar("TAPSTER_APP_ID")).toThrow(expect.objectContaining({ reason: "TAPSTER_APP_ID is not set", fix }));
 });

@@ -19,7 +19,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-GitHub accepts the tag with the note you saw in [step 4](/tutorial/project/#2-the-project-is-protected).
+GitHub accepts the tag with the note from [step 4](/tutorial/project/#1-choose-the-options).
 
 ## 2. The project opens a draft
 
@@ -50,6 +50,9 @@ the hub's **Actions** tab, workflow **tapster**:
 4. **render** writes `Casks/my-tool.rb` (and `bucket/my-tool.json` for Windows builds) to the hub.
 
 </Steps>
+
+A fifth job, **report**, runs only when something needs you. It opens the issue `tapster: the hub needs attention` in
+the hub and closes it once all is well.
 
 :::caution[tapster waits here]{icon="clock"}
 Apple's notarization usually answers within a few minutes. tapster waits up to 30 minutes for it.

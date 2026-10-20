@@ -4,6 +4,11 @@ const BLOCK = /<!-- tapster -->[\s\S]*?<!-- \/tapster -->\n*/g;
 
 export const noteText = (reason: string) => `> **tapster will not publish this draft:** ${reason}`;
 
+export function noteIn(body: string | null | undefined): string | null {
+  const block = new RegExp(`${OPEN}\\s*([\\s\\S]*?)${CLOSE}`).exec(body ?? "")?.[1];
+  return block ? block.replace(/^>\s*/, "").replace(/\*\*/g, "").trim() : null;
+}
+
 export function withNote(body: string | null | undefined, reason: string | null): string {
   const rest = (body ?? "").replace(BLOCK, "");
   if (reason === null) return rest;

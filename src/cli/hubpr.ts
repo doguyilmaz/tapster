@@ -94,6 +94,17 @@ export function goEntry(name: string, repo: string, goreleaser: string | null, r
   return { entry: entryText(name, repo, "go", bins, assets, zip && goos.includes("windows")), reason: null };
 }
 
+const unpadded = (line: string) => line.replace(/([[{])\s+/g, "$1").replace(/\s+([\]}])/g, "$1");
+
+export function keepStyle(before: string, after: string): string {
+  const pool = new Map<string, string[]>();
+  for (const line of before.split("\n")) pool.set(unpadded(line), [...(pool.get(unpadded(line)) ?? []), line]);
+  return after
+    .split("\n")
+    .map((line) => pool.get(unpadded(line))?.shift() ?? line)
+    .join("\n");
+}
+
 export function withEntry(hubYaml: string, entry: string, name: string): string {
   const doc = parseDocument(hubYaml);
   const raw = (doc.toJS() as { packages?: { name?: string }[] }).packages ?? [];
@@ -110,7 +121,7 @@ export function withEntry(hubYaml: string, entry: string, name: string): string 
   if (!isSeq(item) || item.items.length !== 1) throw new TapsterError("the entry is not one package", "Report this as a tapster bug.");
   packages.flow = false;
   packages.items.push(item.items[0] as never);
-  return doc.toString();
+  return keepStyle(hubYaml, doc.toString());
 }
 
 export function suggestDescription(desc: string | null, name: string): string | null {
@@ -201,10 +212,17 @@ export function withoutMac(entry: string): string | null {
   return lines.join("\n");
 }
 
-export async function installOnProject(gh: GitHub, slug: string, repo: string): Promise<string> {
+export async function appInstallUrl(gh: GitHub, slug: string, repo: string): Promise<string> {
   const project = await gh.getRepo(repo);
   const owner = await gh.json<{ id: number }>("GET", `/users/${repo.split("/")[0]}`);
-  return `- open this page and choose Install, unless the hub's App already reaches ${repo}; the project is preselected (keep "Only select repositories"):\n  ${installLink(slug, owner.id, project.id)}`;
+  return installLink(slug, owner.id, project.id);
+}
+
+export const installSentence = (repo: string, url: string) =>
+  `- open this page and choose Install, unless the hub's App already reaches ${repo}; the project is preselected (keep "Only select repositories"):\n  ${url}`;
+
+export async function installOnProject(gh: GitHub, slug: string, repo: string): Promise<string> {
+  return installSentence(repo, await appInstallUrl(gh, slug, repo));
 }
 
 export function platformsOf(entry: string): Platform[] {

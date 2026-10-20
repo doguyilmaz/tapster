@@ -8,7 +8,7 @@ import type { GitHub } from "../github";
 import { currentRepo, userGitHub } from "./gh";
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
-import { fillWorkflow, sparkleLabels } from "./init";
+import { PIN, fillWorkflow, sparkleLabels } from "./hubfiles";
 import { releaseSecrets } from "./hubpr";
 import { everyFromFlow } from "./schedule";
 
@@ -91,7 +91,6 @@ export function credentialsCheck(config: HubConfig | null, secrets: string[], va
   return bad(name, `Missing: ${missing.join(", ")}. Run ${fixes.join(" and ")}.`);
 }
 
-const PIN = /doguyilmaz\/tapster@([0-9a-f]{40}) # (\S+)/;
 
 export function workflowCheck(text: string, me: { version: string; sha: string | null }): Check {
   const name = "the hub workflow is tapster's template";
@@ -261,11 +260,8 @@ async function mainFiles(gh: GitHub, hub: string): Promise<{ config: string | nu
   return { config: await readHubFile(gh, hub, "tapster.yml", "main"), flows };
 }
 
-export async function doctor(_args: string[]): Promise<number> {
-  const hub = await currentRepo(process.cwd());
+export async function doctorChecks(gh: GitHub, hub: string): Promise<{ checks: Check[]; note: string | null }> {
   const owner = hub.split("/")[0]!;
-  const gh = await userGitHub();
-  console.log(`Checking ${hub} as it is on GitHub's main branch.`);
   const files = await mainFiles(gh, hub);
   const checks: Check[] = [];
   const parsed = configChecks(files.config, owner);
@@ -277,11 +273,18 @@ export async function doctor(_args: string[]): Promise<number> {
   const { "tapster.yml": _, ...others } = files.flows;
   checks.push(otherWorkflowsCheck(others));
   checks.push(...(await apiChecks(gh, hub, owner, config, flow ?? "")));
+  return { checks, note: await appNote(gh, hub, config?.packages.map((p) => p.repo) ?? []) };
+}
+
+export async function doctor(_args: string[]): Promise<number> {
+  const hub = await currentRepo(process.cwd());
+  const gh = await userGitHub();
+  console.log(`Checking ${hub} as it is on GitHub's main branch.`);
+  const { checks, note } = await doctorChecks(gh, hub);
   for (const c of checks) {
     console.log(c.ok ? `ok   ${c.name}` : `fix  ${c.name}\n     ${c.fix}`);
     if (c.note) console.log(`     note: ${c.note}`);
   }
-  const note = await appNote(gh, hub, config?.packages.map((p) => p.repo) ?? []);
   if (note) console.log(note);
   return checks.every((c) => c.ok) ? 0 : 1;
 }

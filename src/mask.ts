@@ -2,6 +2,7 @@ import * as core from "@actions/core";
 import { TapsterError } from "./errors";
 
 const MIN = 4;
+const SETUP = "Finish the setup: run bunx @doguyilmaz/tapster setup on your computer or tapster init in a clone of the hub.";
 const registered = new Set<string>();
 
 export function variants(value: string): string[] {
@@ -38,7 +39,7 @@ export function readSecret(name: string): string {
   const value = process.env[name];
   delete process.env[name];
   if (!value) {
-    const fix = name === "GITHUB_TOKEN" ? "The hub workflow passes it; run tapster init --workflow to restore the workflow." : `Add ${name} to the hub's "tapster" environment; tapster doctor shows how.`;
+    const fix = name === "GITHUB_TOKEN" ? "The hub workflow passes it; run tapster init --workflow to restore the workflow." : SETUP;
     throw new TapsterError(`${name} is not set`, fix);
   }
   register(value);
@@ -47,7 +48,7 @@ export function readSecret(name: string): string {
 
 export function requireVar(name: string): string {
   const value = process.env[name];
-  if (!value) throw new TapsterError(`${name} is not set`, `Add the ${name} variable to the "tapster" environment.`);
+  if (!value) throw new TapsterError(`${name} is not set`, SETUP);
   return value;
 }
 
