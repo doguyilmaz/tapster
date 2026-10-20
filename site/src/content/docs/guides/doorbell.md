@@ -5,8 +5,8 @@ sidebar:
   order: 5
 ---
 
-The hub looks for new drafts every 10 minutes. GitHub runs these schedules best-effort, so a release can wait
-longer. The **doorbell** starts the hub as soon as a project opens its draft. It is a small Cloudflare Worker on the free
+The hub looks for new drafts every 10 minutes. GitHub runs these schedules best-effort: on a quiet hub they can come
+hours apart. The **doorbell** starts the hub as soon as a project opens its draft. It is a small Cloudflare Worker on the free
 plan, deployed to your own Cloudflare account.
 
 ## What you need
