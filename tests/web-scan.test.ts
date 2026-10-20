@@ -85,6 +85,15 @@ test("several clones of one repository make one row: the one on the default bran
   ]);
 });
 
+test("a clone in a folder named like the repository comes first, so a copy started from it is not picked", () => {
+  const facts: Record<string, CloneFacts> = {
+    "/h/FORK/ebb": { branch: "main", defaultBranch: "main", changed: 100 },
+    "/h/FORK/discain": { branch: "main", defaultBranch: "main", changed: 900 },
+  };
+  const rows = oneClonePerRepo([{ path: "/h/FORK/discain", repo: "me/ebb" }, { path: "/h/FORK/ebb", repo: "me/Ebb" }], (dir) => facts[dir]!);
+  expect(rows.map((r) => [r.path, r.others])).toEqual([["/h/FORK/ebb", ["/h/FORK/discain"]]]);
+});
+
 test("a clone's branch, default branch and last change come from its .git files", () => {
   const dir = join(base, "facts");
   clone(dir, "git@github.com:me/facts.git");

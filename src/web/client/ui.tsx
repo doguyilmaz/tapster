@@ -1,5 +1,6 @@
 import type { ComponentChildren, JSX } from "preact";
 import { useState } from "preact/hooks";
+import { capFirst } from "../steps";
 
 const PATHS: Record<string, JSX.Element> = {
   check: <path d="M20 6 9 17l-5-5" />,
@@ -96,7 +97,7 @@ export function Note({ tone = "info", title, children }: { tone?: Tone; title?: 
 
 export function Problem({ problem }: { problem: { reason: string; fix: string } | null }) {
   if (!problem) return null;
-  const reason = problem.reason.charAt(0).toUpperCase() + problem.reason.slice(1);
+  const reason = capFirst(problem.reason);
   return (
     <Note tone="error" title={`${reason}.`}>
       <span>{problem.fix}</span>

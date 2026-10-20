@@ -3,6 +3,7 @@ import type { HealthView, Problem as ProblemView } from "../contract";
 import { get, post } from "./api";
 import { go, hub, loadHub, openStop, problemOf, say } from "./state";
 import { Badge, Busy, Icon, Note, Out, Problem, Spinner } from "./ui";
+import { capFirst } from "../steps";
 
 const when = (iso: string) => {
   const d = new Date(iso);
@@ -67,7 +68,6 @@ function FixButton({ name, fix, hub: hubName, onFixed }: { name: string; fix: st
   );
 }
 
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const RESULT: Record<string, { tone?: "ok" | "warn" | "error"; text: string }> = {
   success: { tone: "ok", text: "Done" },
@@ -155,16 +155,16 @@ export function Health() {
                 <Icon name={c.ok ? "check" : "alert"} label={c.ok ? "ok" : "needs a fix"} />
               </span>
               <div class="stack tight" style="gap: 0.2rem">
-                <span style="font-weight: 550">{cap(c.name)}</span>
+                <span style="font-weight: 550">{capFirst(c.name)}</span>
                 {!c.ok && <span class="muted small">{c.fix}</span>}
                 {!c.ok && <FixButton name={c.name} fix={c.fix} hub={h.name} onFixed={() => void load()} />}
-                {c.note && <span class="faint small">{cap(c.note)}.</span>}
+                {c.note && <span class="faint small">{capFirst(c.note)}.</span>}
               </div>
             </div>
           ))}
         </div>
       )}
-      {view?.note && <p class="muted small">{cap(view.note.replace(/^note: /, ""))}.</p>}
+      {view?.note && <p class="muted small">{capFirst(view.note.replace(/^note: /, ""))}.</p>}
       {view && (
         <section class="stack tight">
           <h2 class="section-title">Recent hub runs</h2>
