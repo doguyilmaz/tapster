@@ -1,8 +1,32 @@
 {
   "name": "@doguyilmaz/tapster",
   "version": "0.0.0",
-  "description": "Sign, notarize and publish the releases of all your projects from one Homebrew tap",
+  "description": "Sign, notarize and publish the releases of all your projects from one Homebrew tap, set up in your browser",
+  "keywords": [
+    "homebrew",
+    "homebrew-tap",
+    "release",
+    "code-signing",
+    "notarization",
+    "github-actions",
+    "goreleaser",
+    "bun",
+    "sparkle",
+    "scoop",
+    "apt",
+    "dnf",
+    "mcp"
+  ],
+  "homepage": "https://tapster.doguyilmaz.com",
+  "bugs": {
+    "url": "https://github.com/doguyilmaz/tapster/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/doguyilmaz/tapster.git"
+  },
   "license": "MIT",
+  "author": "Dogu Yilmaz",
   "type": "module",
   "bin": {
     "tapster": "./dist/cli.js"

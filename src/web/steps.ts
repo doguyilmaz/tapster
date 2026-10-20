@@ -71,7 +71,7 @@ export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now())
           : h.files.workflow === "older"
             ? `Runs ${h.files.pinned}; update available`
             : h.files.workflow === "other"
-              ? `Runs ${h.files.pinned ?? "a workflow tapster did not write"}`
+              ? `Runs ${h.files.pinned ?? "a workflow tapster did not write"}; review it`
               : h.files.workflow === "newer"
                 ? `Runs ${h.files.pinned}, newer than this tapster`
                 : `Runs ${h.files.pinned}`,
