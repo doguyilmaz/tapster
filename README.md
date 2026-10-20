@@ -6,7 +6,8 @@ tapster turns your Homebrew tap into the one place that signs, notarizes and pub
 projects. Each project builds its files and opens a draft release. It holds no signing certificate, no notary key and
 no tap token.
 
-**Tutorial and docs: [tapster.doguyilmaz.com](https://tapster.doguyilmaz.com/)**
+**Tutorial and docs: [tapster.doguyilmaz.com](https://tapster.doguyilmaz.com/)**\
+**npm: [@doguyilmaz/tapster](https://www.npmjs.com/package/@doguyilmaz/tapster)**
 
 ## Set it up in your browser
 
