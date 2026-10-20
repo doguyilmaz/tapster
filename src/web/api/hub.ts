@@ -218,7 +218,7 @@ async function lockedEnvironment(gh: GitHub, hub: string): Promise<void> {
   if (!locked) throw new TapsterError(`${hub}'s tapster environment is not locked to main`, "Protect the hub first: keys go into that environment only once workflows on other branches cannot open it.");
 }
 
-export async function guardMain(gh: GitHub, hub: string, owner: string): Promise<void> {
+async function guardMain(gh: GitHub, hub: string, owner: string): Promise<void> {
   const writes = await foreignWrites(gh, hub, owner).catch((e) => {
     if (e instanceof GitHubError && e.status === 404) return [];
     throw e;

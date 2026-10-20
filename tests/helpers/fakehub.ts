@@ -21,7 +21,7 @@ export type FakeRepo = {
   actions: { allowed_actions: string; sha_pinning_required: boolean; selected: { github_owned_allowed: boolean; verified_allowed: boolean; patterns_allowed: string[] } | null };
   workflowPerm: string;
   releases: Release[];
-  pulls: { number: number; head: string; html_url: string; title: string; state?: "open" | "closed"; merged?: string; fork?: string }[];
+  pulls: { number: number; head: string; html_url: string; title: string; state?: "open" | "closed"; merged?: string; fork?: string; base?: string }[];
   issues: { number: number; title: string; body: string; html_url: string; updated_at: string; user: { login: string } }[];
   keys: { title: string; read_only: boolean }[];
   repoVars: Map<string, string>;
@@ -33,8 +33,8 @@ export type FakeRepo = {
   branches: Map<string, Map<string, string>>;
   bases: Map<string, Map<string, string>>;
   commit: { message: string; date: string };
-  history: { activity: { actor: string; after: string; type: string }[]; commits: { sha: string; files: Map<string, string> }[] } | null;
-  allowMerge: boolean;
+  history: { activity: { actor: string; after: string; type: string }[]; commits: { sha: string; files: Map<string, string>; message: string }[] } | null;
+  merges: string[];
 };
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => new Response(status === 204 ? null : JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
@@ -83,7 +83,7 @@ export class FakeHub {
       bases: new Map(),
       commit: { message: "Start", date: "2026-10-01T09:00:00Z" },
       history: null,
-      allowMerge: true,
+      merges: ["merge", "squash", "rebase"],
       ...o,
     };
     this.repos.set(full.toLowerCase(), r);
@@ -97,23 +97,41 @@ export class FakeHub {
   // Untracked repositories answer as before: /activity names the owner at every head and every compare is identical.
   track(full: string): void {
     const r = this.get(full)!;
-    r.history = { activity: [{ actor: this.login, after: r.head, type: "push" }], commits: [{ sha: r.head, files: new Map(r.files ?? []) }] };
+    r.history = { activity: [{ actor: this.login, after: r.head, type: "push" }], commits: [{ sha: r.head, files: new Map(r.files ?? []), message: "Start" }] };
   }
 
   branchHead(full: string, branch: string): string {
     return sha(`${full}${branch}${JSON.stringify([...(this.get(full)!.branches.get(branch) ?? [])])}`);
   }
 
-  private wrote(r: FakeRepo, type: string): void {
+  private readonly trees = new Map<string, Map<string, string>>();
+  private readonly commits = new Map<string, { tree: string; parents: string[]; message: string }>();
+
+  private filesAt(r: FakeRepo, full: string, at: string): Map<string, string> {
+    if (at === r.head) return new Map(r.files ?? []);
+    const made = this.commits.get(at);
+    const branch = [...r.branches.keys()].find((b) => this.branchHead(full, b) === at);
+    return new Map((made && this.trees.get(made.tree)) ?? (branch !== undefined ? r.branches.get(branch) : undefined) ?? r.history?.commits.findLast((c) => c.sha === at)?.files ?? r.files ?? []);
+  }
+
+  private wrote(r: FakeRepo, type: string, message = ""): void {
     if (!r.history) return;
-    r.history.commits.push({ sha: r.head, files: new Map(r.files ?? []) });
+    r.history.commits.push({ sha: r.head, files: new Map(r.files ?? []), message });
     r.history.activity.unshift({ actor: this.actor, after: r.head, type });
   }
 
-  private changedIn(r: FakeRepo, branch: string): string[] {
+  private changedIn(r: FakeRepo, branch: string): { filename: string; status: string; previous_filename?: string }[] {
     const before = r.bases.get(branch) ?? new Map<string, string>();
     const after = r.branches.get(branch) ?? new Map<string, string>();
-    return [...new Set([...before.keys(), ...after.keys()])].filter((f) => before.get(f) !== after.get(f)).sort();
+    const files = [...new Set([...before.keys(), ...after.keys()])].filter((f) => before.get(f) !== after.get(f)).sort();
+    const removed = files.filter((f) => !after.has(f));
+    const out: { filename: string; status: string; previous_filename?: string }[] = [];
+    for (const f of files.filter((x) => after.has(x))) {
+      const from = before.has(f) ? undefined : removed.find((x) => before.get(x) === after.get(f));
+      if (from) removed.splice(removed.indexOf(from), 1);
+      out.push({ filename: f, status: from ? "renamed" : before.has(f) ? "modified" : "added", ...(from ? { previous_filename: from } : {}) });
+    }
+    return [...out, ...removed.map((filename) => ({ filename, status: "removed" }))];
   }
 
   private pullView(r: FakeRepo, full: string, p: FakeRepo["pulls"][number]) {
@@ -124,17 +142,17 @@ export class FakeHub {
       state: p.state ?? "open",
       merged: Boolean(p.merged),
       head: { ref: p.head, sha: this.branchHead(full, p.head), repo: { full_name: p.fork ?? full } },
-      base: { ref: "main", sha: r.head },
+      base: { ref: p.base ?? "main", sha: r.head },
     };
   }
 
   private merge(r: FakeRepo, full: string, pr: FakeRepo["pulls"][number], body: Record<string, unknown>): Response {
     if ((pr.state ?? "open") !== "open") return json({ message: "Pull Request is not mergeable" }, 405);
-    if (body.merge_method === "merge" && !r.allowMerge) return json({ message: "Merge commits are not allowed on this repository." }, 405);
+    if (!r.merges.includes(String(body.merge_method ?? "merge"))) return json({ message: "That merge method is not allowed on this repository." }, 405);
     if (body.sha && body.sha !== this.branchHead(full, pr.head)) return json({ message: "Head branch was modified. Review and try the merge again." }, 409);
     const base = r.bases.get(pr.head) ?? new Map<string, string>();
     const head = r.branches.get(pr.head) ?? new Map<string, string>();
-    const files = this.changedIn(r, pr.head);
+    const files = this.changedIn(r, pr.head).flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]);
     if (files.some((f) => r.files?.get(f) !== base.get(f))) return json({ message: "Pull Request is not mergeable" }, 405);
     r.files ??= new Map();
     for (const f of files) {
@@ -142,7 +160,7 @@ export class FakeHub {
       else r.files.delete(f);
     }
     r.head = sha(`${r.head}merge${pr.number}`);
-    this.wrote(r, "pr_merge");
+    this.wrote(r, "pr_merge", pr.title);
     Object.assign(pr, { state: "closed", merged: String(body.merge_method ?? "merge") });
     return json({ sha: r.head, merged: true, message: "Pull Request successfully merged" });
   }
@@ -229,7 +247,7 @@ export class FakeHub {
   }
 
   private repoRoute(r: FakeRepo, full: string, method: string, rest: string, q: URLSearchParams, body: Record<string, unknown>): Response {
-    if (rest === "") return json({ id: r.id, private: r.private, description: r.description, html_url: `https://github.com/${full}`, default_branch: "main", allow_merge_commit: r.allowMerge, allow_squash_merge: true, allow_rebase_merge: true });
+    if (rest === "") return json({ id: r.id, private: r.private, description: r.description, html_url: `https://github.com/${full}`, default_branch: "main", allow_merge_commit: r.merges.includes("merge"), allow_squash_merge: r.merges.includes("squash"), allow_rebase_merge: r.merges.includes("rebase") });
     if (rest === "/installation") return this.installation?.repos.some((x) => x.toLowerCase() === full.toLowerCase()) ? json({ id: this.installation.id }) : json({}, 404);
     if (rest === "/git/ref/heads/main") return r.files ? json({ object: { sha: r.head } }) : json({}, 409);
     const headRef = /^\/git\/ref\/heads\/(.+)$/.exec(rest);
@@ -256,18 +274,35 @@ export class FakeHub {
       const at = commit[1] === "main" ? r.head : commit[1]!;
       return json({ sha: at, html_url: `https://github.com/${full}/commit/${at}`, commit: { message: r.commit.message, committer: { date: r.commit.date } } });
     }
-    if (rest.startsWith("/git/commits/")) return json({ tree: { sha: `tree-${r.head}` } });
-    if (rest === "/git/trees" && method === "POST") {
-      for (const t of body.tree as { path: string; content?: string; sha?: null }[]) {
-        if (t.sha === null) r.files!.delete(t.path);
-        else r.files!.set(t.path, t.content ?? "");
-      }
-      return json({ sha: "newtree" }, 201);
+    const gitCommit = /^\/git\/commits\/([0-9a-f]+)$/.exec(rest);
+    if (gitCommit) {
+      const at = gitCommit[1]!;
+      const tree = `tree${sha(`${at}${Math.random()}`)}`;
+      this.trees.set(tree, this.filesAt(r, full, at));
+      return json({ sha: at, tree: { sha: tree }, parents: (this.commits.get(at)?.parents ?? []).map((p) => ({ sha: p })) });
     }
-    if (rest === "/git/commits" && method === "POST") return json({ sha: sha(`${r.head}${Math.random()}`) }, 201);
+    if (rest === "/git/trees" && method === "POST") {
+      const files = new Map(this.trees.get(String(body.base_tree)) ?? r.files ?? []);
+      for (const t of body.tree as { path: string; content?: string; sha?: null }[]) {
+        if (t.sha === null) files.delete(t.path);
+        else files.set(t.path, t.content ?? "");
+      }
+      const id = `tree${sha(`${Math.random()}`)}`;
+      this.trees.set(id, files);
+      return json({ sha: id }, 201);
+    }
+    if (rest === "/git/commits" && method === "POST") {
+      const id = sha(`${r.head}${Math.random()}`);
+      this.commits.set(id, { tree: String(body.tree), parents: (body.parents as string[]) ?? [], message: String(body.message ?? "") });
+      return json({ sha: id }, 201);
+    }
     if (rest === "/git/refs/heads/main" && method === "PATCH") {
+      const made = this.commits.get(String(body.sha));
+      if (made && body.force === false && !made.parents.includes(r.head)) return json({ message: "Update is not a fast forward" }, 422);
+      if (made) r.files = new Map(this.trees.get(made.tree) ?? []);
       r.head = String(body.sha);
-      this.wrote(r, "push");
+      this.wrote(r, "push", made?.message);
+      for (const p of r.pulls) if ((p.state ?? "open") === "open" && made?.parents.includes(this.branchHead(full, p.head))) Object.assign(p, { state: "closed", merged: "merge" });
       return json({});
     }
     if (rest === "/git/refs" && method === "POST") {
@@ -298,7 +333,8 @@ export class FakeHub {
       if (i < 0 || j < 0) return json({ message: "Not Found" }, 404);
       if (i >= j) return json({ status: i === j ? "identical" : "behind", files: [] });
       const [a, b] = [r.history.commits[i]!.files, r.history.commits[j]!.files];
-      return json({ status: "ahead", files: [...new Set([...a.keys(), ...b.keys()])].filter((f) => a.get(f) !== b.get(f)).map((filename) => ({ filename })) });
+      const commits = r.history.commits.slice(i + 1, j + 1).map((c) => ({ sha: c.sha, commit: { message: c.message } }));
+      return json({ status: "ahead", commits, files: [...new Set([...a.keys(), ...b.keys()])].filter((f) => a.get(f) !== b.get(f)).map((filename) => ({ filename })) });
     }
     if (rest.startsWith("/compare/")) return json({ status: "identical", files: [] });
     const content = /^\/contents\/(.+)$/.exec(rest);
@@ -312,7 +348,7 @@ export class FakeHub {
         r.files ??= new Map();
         r.files.set(path, Buffer.from(String(body.content), "base64").toString("utf8"));
         r.head = sha(`${r.head}${path}`);
-        this.wrote(r, "push");
+        this.wrote(r, "push", String(body.message ?? ""));
         return json({ commit: { sha: r.head } }, 201);
       }
       const ref = q.get("ref");
@@ -379,16 +415,14 @@ export class FakeHub {
       r.pulls.push(pr);
       return json(pr, 201);
     }
-    if (rest === "/pulls") return json(r.pulls.filter((x) => (q.get("state") !== "open" || (x.state ?? "open") === "open") && (!q.get("head") || q.get("head")!.endsWith(`:${x.head}`))).map((x) => this.pullView(r, full, x)));
+    if (rest === "/pulls") return json(r.pulls.filter((x) => (q.get("state") !== "open" || (x.state ?? "open") === "open") && (!q.get("head") || q.get("head")!.toLowerCase() === `${(x.fork ?? full).split("/")[0]}:${x.head}`.toLowerCase())).map((x) => this.pullView(r, full, x)));
     const pull = /^\/pulls\/(\d+)(\/files|\/merge)?$/.exec(rest);
     if (pull) {
       const pr = r.pulls.find((x) => x.number === Number(pull[1]));
       if (!pr) return json({ message: "Not Found" }, 404);
       if (pull[2] === "/merge" && method === "PUT") return this.merge(r, full, pr, body);
-      if (pull[2] !== "/files") return json(this.pullView(r, full, pr));
-      const base = r.bases.get(pr.head);
-      const head = r.branches.get(pr.head);
-      return json(this.changedIn(r, pr.head).map((filename) => ({ filename, status: !base?.has(filename) ? "added" : head?.has(filename) ? "modified" : "removed" })));
+      if (!pull[2] && method === "PATCH" && body.state === "closed") pr.state = "closed";
+      return json(pull[2] === "/files" ? this.changedIn(r, pr.head) : this.pullView(r, full, pr));
     }
     if (rest === "/issues") return json(r.issues);
     if (rest === "/keys") return json(r.keys);
