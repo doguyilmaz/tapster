@@ -60,6 +60,8 @@ jobs:
       - run: bun test
       - name: Homebrew accepts the casks tapster renders
         run: bun tests/brew/audit.ts
+      - name: Homebrew installs a tool's app from a cask that also serves Linux
+        run: bun tests/brew/install.ts macos
   linux:
     runs-on: ubuntu-24.04
     permissions: { contents: read }
@@ -82,3 +84,5 @@ jobs:
         run: bun tests/linux/e2e.ts "$RUNNER_TEMP" "$RUNNER_TEMP/key.asc" "$RUNNER_TEMP/previous.asc"
       - name: Install from it with apt and dnf
         run: bash tests/linux/install.sh "$RUNNER_TEMP/site1"
+      - name: Homebrew on Linux installs the bare binary from a cask whose macOS side is an app
+        run: bun tests/brew/install.ts linux

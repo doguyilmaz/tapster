@@ -142,6 +142,10 @@ function checkPackage(p: PackageConfig, top: Omit<HubConfig, "packages">, hubOwn
   if (post && !linked(p).includes(post.binary)) {
     throw new TapsterError(`${p.name}: cask.postflight runs ${post.binary}, which the cask does not link`, `Name one of the commands the cask links: ${linked(p).join(", ") || "none yet"}.`);
   }
+  const linuxNames = !isApp(p) && p.app && Object.keys(p.assets).some((k) => k.startsWith("linux")) ? p.binaries.map((b) => b.split("/").pop()!) : null;
+  if (post && linuxNames && !linuxNames.includes(post.binary)) {
+    throw new TapsterError(`${p.name}: cask.postflight runs ${post.binary}, which the cask does not link on Linux`, `Name one of binaries, which the cask links on macOS and Linux: ${linuxNames.join(", ")}.`);
+  }
   if (p.repo.split("/")[0]!.toLowerCase() !== hubOwner.toLowerCase()) {
     throw new TapsterError(`${p.name}: ${p.repo} is not owned by ${hubOwner}`, "tapster publishes only repositories of the hub's owner.");
   }
@@ -258,7 +262,11 @@ export function parseConfig(text: string, hubOwner: string): HubConfig {
 function checkToolApp(p: CliPackage, app: ToolApp): void {
   const platforms = Object.keys(p.assets);
   if (!platforms.some((k) => k.startsWith("darwin"))) throw new TapsterError(`${p.name}: app needs a macOS archive that holds ${app.name}`, "Map a darwin-* asset or remove app.");
-  if (platforms.some((k) => k.startsWith("linux"))) throw new TapsterError(`${p.name}: a tool with an app has a cask for macOS only, but it also has a Linux archive`, "Remove the linux-* assets or remove app.");
+  for (const [platform, asset] of Object.entries(p.assets)) {
+    if (!platform.startsWith("linux")) continue;
+    if (asset.toLowerCase().includes(app.name.toLowerCase())) throw new TapsterError(`${p.name}: the ${platform} asset names ${app.name}, but a Linux archive holds the bare binaries`, "Pack the app only into the macOS archives.");
+    if (!asset.endsWith(".tar.gz")) throw new TapsterError(`${p.name}: the ${platform} asset must be a .tar.gz`, "Pack Linux builds as tar.gz; tapster checks that they hold no app.");
+  }
   const inside = p.binaries.find((b) => b === app.name || b.startsWith(`${app.name}/`));
   if (inside) throw new TapsterError(`${p.name}: ${inside} is inside ${app.name}`, "Remove it from binaries: the hub signs the app as a whole. List commands to link under app.binaries.");
 }

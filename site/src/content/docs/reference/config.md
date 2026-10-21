@@ -98,7 +98,32 @@ packages:
 The hub checks the app as it checks a Mac app, signs it inside out with the hardened runtime, notarizes it with the
 binaries and staples it. Other code in the app gets no entitlements. The archive must hold no other
 copy of the app, its symlinks must stay inside it and the app may not carry an update feed: Homebrew updates the
-tool. A tool with an app has macOS archives only, since the cask's `app` works only on macOS.
+tool.
+
+#### With Linux builds
+
+A tool with an app may also map `linux-*` assets. Each Linux archive is a `.tar.gz` that holds the bare binaries and no
+app. Its name may not contain the app's name. The hub signs the app in the macOS archives only and leaves the
+Linux archives as they are. The cask keeps the app on macOS and links the bare binary on Linux:
+
+```ruby
+  on_macos do
+    # sha256 and url of the macOS archives
+    app "MyTool.app"
+    binary "#{appdir}/MyTool.app/Contents/MacOS/mytool"
+
+    uninstall launchctl: "com.you.mytool.agent"
+  end
+  on_linux do
+    # sha256 and url of the Linux archives
+    binary "mytool"
+  end
+```
+
+`cask.uninstall` goes into `on_macos` with the app, because `launchctl` and `quit` exist only on macOS. Other
+binaries, completions, `zap`, `caveats` and `postflight` stay outside the blocks and apply to both, so
+`cask.postflight` must run one of `binaries`. The cask has no `depends_on :macos`, so Homebrew on Linux installs it. A tool with an app and no `linux-*` assets gets the same cask
+as before.
 
 ### A command after install
 

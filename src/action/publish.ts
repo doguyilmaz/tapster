@@ -14,7 +14,7 @@ import { type Outgoing, assertFinal, assertRecorded, makeLatest, resumeSwap, sta
 import { failure, info, record, warn } from "../report";
 import { STATE_PATH, type State, type StateEntry, parseState, recordedChecksums, serializeState, upsert } from "../state";
 import { type InstallationToken, installationToken } from "../token";
-import { type DarwinArchive, loadManifest, workdir } from "../workdir";
+import { type DarwinArchive, type Fetched, loadManifest, workdir } from "../workdir";
 import type { Context } from "./context";
 
 async function recordState(gh: GitHub, hub: string, pkg: string, entry: StateEntry): Promise<void> {
@@ -46,7 +46,18 @@ export async function repackTool(original: Buffer, a: DarwinArchive, mtime: numb
   return writeTarGz(entries, mtime);
 }
 
-export const attestLines = (files: Outgoing[]) => writeChecksums(files.map((f) => ({ sha256: sha256(f.data), name: f.name })));
+export async function toolOutputs(item: Pick<Fetched, "archives" | "checksums">, dir: string, mtime: number): Promise<{ files: Outgoing[]; sums: Buffer }> {
+  const lines = item.checksums.map((l) => ({ ...l }));
+  const files: Outgoing[] = [];
+  for (const a of item.archives) {
+    const data = await repackTool(await readFile(join(dir, "assets", a.asset)), a, mtime);
+    files.push({ name: a.asset, data });
+    lines.find((l) => l.name === a.asset)!.sha256 = sha256(data);
+  }
+  return { files, sums: Buffer.from(writeChecksums(lines)) };
+}
+
+export const attestLines =(files: Outgoing[]) => writeChecksums(files.map((f) => ({ sha256: sha256(f.data), name: f.name })));
 
 export function attestDecision(signed: boolean, hubPrivate: boolean): { attest: boolean; note: string | null } {
   if (!signed) return { attest: false, note: null };
@@ -86,15 +97,8 @@ export async function publishMode(ctx: Context): Promise<void> {
       } else {
         const dir = join(workdir(), pkg.name, item.tag);
         const mtime = Math.floor(Date.parse(release.created_at) / 1000);
-        const lines = item.checksums.map((l) => ({ ...l }));
-        const files: Outgoing[] = [];
-        for (const a of item.archives) {
-          const data = await repackTool(await readFile(join(dir, "assets", a.asset)), a, mtime);
-          files.push({ name: a.asset, data });
-          signed.push({ name: a.asset, data });
-          lines.find((l) => l.name === a.asset)!.sha256 = sha256(data);
-        }
-        const sums = Buffer.from(writeChecksums(lines));
+        const { files, sums } = await toolOutputs(item, dir, mtime);
+        signed.push(...files);
         files.push({ name: "checksums.txt", data: sums });
         expected = sha256(sums);
         await recordState(hubGh, ctx.hub, pkg.name, { tag: item.tag, releaseId: item.releaseId, checksums: expected, status: "publishing" });

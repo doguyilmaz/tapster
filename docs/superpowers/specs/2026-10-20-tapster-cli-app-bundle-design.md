@@ -47,9 +47,9 @@ A `go` or `bun` package may name one app that sits at the top of every macOS arc
 - `app.binaries`: paths inside the app that the cask links into the PATH, default none.
 - `app.entitlements`: entitlements for the app's main executable, from the list `entitlements` allows, default none.
 
-The config refuses: `app` without a `darwin-*` asset; `app` with a `linux-*` asset (the cask's `app` stanza is
-macOS only; see open questions); a `binaries` entry inside the app (the hub signs the bundle as a whole); a bundle id
-that overlaps another package's, of either kind; and an app binary whose name another package ships.
+The config refuses: `app` without a `darwin-*` asset; a `linux-*` asset that is not a `.tar.gz` or whose name
+contains `app.name` (see section 5); a `binaries` entry inside the app (the hub signs the bundle as a whole); a bundle
+id that overlaps another package's, of either kind; and an app binary whose name another package ships.
 
 `kind: app` stays the way to publish a Mac app with a DMG and Sparkle. `app` on a tool is for an app that wraps the
 tool and ships in the tool's archive.
@@ -208,6 +208,63 @@ the hub publishes and stays ahead if the hub refuses the draft.
 Not recommended: opening the branch rules to the workflow token, a tag policy on the `release` environment or a
 Cloudflare token in the project.
 
+## 5. A tool with an app and Linux builds
+
+aims ships macOS, Linux and Windows archives and wants an app on macOS only. A tool with an app may map `linux-*`
+assets. Nothing changes for an entry without both.
+
+- **Config.** Each Linux asset must be a `.tar.gz` whose name does not contain `app.name`. `cask.postflight` must
+  run one of `binaries`, because Linux links only those. The other refusals stay.
+- **Fetch.** The app rules apply to the macOS archives only. Each Linux archive must hold every entry of `binaries` as a
+  plain file and nothing named `app.name` in any case. Its Mach-O check is the one of today.
+- **Sign and publish.** Only the macOS archives are unpacked, signed and repacked. The Linux archives keep their bytes.
+- **Cask.** The app, its linked commands and `uninstall` go into `on_macos`, after the downloads. The bare binaries
+  that an app binary replaces go into `on_linux`. Other binaries, completions, `postflight_steps`, `zap` and `caveats`
+  stay at the top and apply to both. There is no `depends_on :macos`:
+
+```ruby
+  on_macos do
+    on_arm do
+      sha256 "..."
+      url "https://github.com/doguyilmaz/aims/releases/download/v#{version}/aims_#{version}_darwin_arm64.tar.gz"
+    end
+
+    app "aims.app"
+    binary "#{appdir}/aims.app/Contents/MacOS/aims"
+
+    uninstall launchctl: "com.doguyilmaz.aims.keepalive"
+  end
+  on_linux do
+    on_intel do
+      sha256 "..."
+      url "https://github.com/doguyilmaz/aims/releases/download/v#{version}/aims_#{version}_linux_amd64.tar.gz"
+    end
+
+    binary "aims"
+  end
+```
+
+Checked with Homebrew 7.0.10 on 2026-10-20:
+
+- This layout passes `brew style` and `brew audit --cask --strict` for macOS on arm and intel and for Linux on arm and
+  intel. Homebrew's `Cask-Cookbook.md` says cross-platform casks put OS-specific artifacts inside `on_macos` or
+  `on_linux`. Its `Homebrew/OSDependsOn` cop asks to "Move this macOS-only stanza into an `on_macos` block for
+  cross-platform casks" for a top-level `app` beside `on_linux`.
+- A second `on_macos` block after `livecheck` fails `Cask/StanzaOrder`, so the artifacts share the block that holds the
+  downloads.
+- `depends_on :macos` has to go. At the top it makes the cask macOS only. Inside `on_macos`,
+  `Cask/NoNestedOSDependency` refuses it and the cookbook calls it redundant.
+- A top-level `uninstall launchctl:` is accepted on Linux. Uninstall prints "Removing launchctl service" and does
+  nothing, because Homebrew finds no `launchctl` there. Inside `on_macos` Linux never sees it, so the hub puts it there.
+- `brew install --cask` from a local tap works on Linux (Homebrew's container image) with the bare binary and on macOS
+  (CI) with an ad hoc signed app. `tests/brew/install.ts` repeats both in CI.
+
+`tapster add` reads the same layout from GoReleaser's `custom_block`: `app` and `binary "#{appdir}/..."` lines inside
+`on_macos` become `app`. A `binary` line inside `on_linux` that names a carried app command needs nothing, because
+the hub links `binaries` there. Lines deeper than right inside those blocks, an `app` inside `on_linux` and other
+`binary` lines are listed as not carried. A `custom_block` without a top-level `on_macos` or `on_linux` and any run
+without Apple credentials are read as before.
+
 ## Security
 
 - **Nothing unchecked is signed.** Every Mach-O file in a macOS archive is either listed in `binaries` or inside the
@@ -222,7 +279,6 @@ Cloudflare token in the project.
 
 ## Open questions
 
-- A tool with an app and Linux builds: rendering `app` inside `on_macos` needs a check against `brew style` first.
 - Per-path identifiers and entitlements for code inside a tool's app (`code` of `kind: app`): left out until a project
   needs them.
 - `postflight_steps` needs Homebrew 7. A user on an older Homebrew with auto-update off cannot load such a cask.
@@ -238,3 +294,6 @@ Cloudflare token in the project.
 - Sign and publish, on macOS: the app is signed ad hoc under the configured identifier with `app.entitlements`,
   repacked, unpacked again and passes `codesign --verify --strict --deep`; the other entries keep their bytes.
 - add: ebb's `.goreleaser.yaml` gives the entry above; the branch move step is reported.
+- Linux builds: ebb's and aims's casks stay byte for byte. An aims-like entry renders `tests/golden/aims-app.rb` and a
+  universal one with `launchctl` and `quit` renders `tests/golden/ebb-linux.rb`. CI checks both with `brew style` and
+  `brew audit` and installs the first from a local tap on macOS and in Homebrew's Linux image.
