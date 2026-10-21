@@ -18,6 +18,8 @@ export function webApp(fake: FakeHub, home: string, o: Partial<Deps> = {}) {
     open: () => {},
     notary: async () => false,
     keychain: async () => null,
+    gpg: async () => null,
+    store: () => null,
     ...o,
   };
   const s = newSession(deps, 8277);

@@ -1,6 +1,8 @@
 import type { ComponentChildren, JSX } from "preact";
 import { useState } from "preact/hooks";
+import type { Problem as ProblemView } from "../contract";
 import { capFirst } from "../steps";
+import { problemOf } from "./state";
 
 const PATHS: Record<string, JSX.Element> = {
   check: <path d="M20 6 9 17l-5-5" />,
@@ -231,4 +233,49 @@ export function Busy({ busy, children, ...rest }: { busy: boolean; children: Com
       {children}
     </button>
   );
+}
+
+export function Head({ title, lead, children }: { title: string; lead: string; children?: preact.ComponentChildren }) {
+  return (
+    <div class="panel-head">
+      <div class="spread">
+        <h2 class="title">{title}</h2>
+        {children}
+      </div>
+      <p class="lead">{lead}</p>
+    </div>
+  );
+}
+
+export function Done({ text }: { text: string }) {
+  return (
+    <div class="row">
+      <span class="seal" aria-hidden="true">
+        <Icon name="check" />
+      </span>
+      <strong>{text}</strong>
+    </div>
+  );
+}
+
+export function useAction(): [boolean, ProblemView | null, (f: () => Promise<void>) => Promise<void>] {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<ProblemView | null>(null);
+  const run = async (f: () => Promise<void>) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      await f();
+    } catch (e) {
+      setProblem(problemOf(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return [busy, problem, run];
+}
+
+export function savedFor(text: string): void {
+  history.pushState(null, "", `/setup?saved=${encodeURIComponent(text)}`);
+  setTimeout(() => history.replaceState(null, "", "/setup"), 1500);
 }

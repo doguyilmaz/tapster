@@ -3,6 +3,8 @@ import type { z } from "zod";
 import { TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import type { NotaryKey } from "../cli/apple";
+import type { CloudflareTarget } from "../cli/cloudflare";
+import type { Store } from "../cli/keystore";
 import { scrub } from "../mask";
 import { COURIER_URI, LOGO_URI } from "../ui/images";
 import { logoPng, webScript } from "./assets";
@@ -19,6 +21,8 @@ export type Deps = {
   open(url: string): void;
   notary(key: NotaryKey): Promise<boolean>;
   keychain(account: string): Promise<string | null>;
+  gpg(): Promise<string | null>;
+  store(): Store | null;
 };
 
 export type Session = {
@@ -27,8 +31,10 @@ export type Session = {
   token: string;
   codes: Map<string, number>;
   claimed: Set<string>;
-  pending: Map<string, { hub: string; owner: string; at: number }>;
+  pending: Map<string, { hub: string; owner: string; at: number; kind?: "doorbell" }>;
   apps: Map<string, { id: string; pem: string; slug: string }>;
+  bells: Map<string, { id: string; pem: string; slug: string }>;
+  cloudflare: Map<string, { token: string; target: CloudflareTarget; at: number }>;
   sparkle: Map<string, { seed: string; at: number }>;
   dispatched: Map<string, { at: number; known: number[] }>;
   touched: number;
@@ -73,6 +79,8 @@ export function newSession(deps: Deps, port: number): Session {
     claimed: new Set(),
     pending: new Map(),
     apps: new Map(),
+    bells: new Map(),
+    cloudflare: new Map(),
     sparkle: new Map(),
     dispatched: new Map(),
     touched: Date.now(),

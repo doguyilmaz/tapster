@@ -9,7 +9,10 @@ import pins from "../templates/pins.json";
 import { newSparkleKey } from "../src/cli/keystore";
 import { run } from "../src/run";
 import { setup } from "../src/web/start";
+import { findGpg } from "../src/cli/linuxkey";
+import { FakeCloudflare, both } from "../tests/helpers/fakecloudflare";
 import { FakeHub } from "../tests/helpers/fakehub";
+import { memoryStore } from "../tests/helpers/memstore";
 
 const EBB = {
   "go.mod": "module github.com/octo/ebb\n\ngo 1.25\n",
@@ -94,17 +97,19 @@ export async function sampleHome(fake: FakeHub): Promise<string> {
   return home;
 }
 
-export async function demo(port: number, log: (line: string) => void): Promise<{ fake: FakeHub; home: string; done: Promise<void>; sparkle: { seed: string; publicKey: string } }> {
+export async function demo(port: number, log: (line: string) => void): Promise<{ fake: FakeHub; cf: FakeCloudflare; home: string; done: Promise<void>; sparkle: { seed: string; publicKey: string } }> {
   const sparkle = newSparkleKey();
   const fake = new FakeHub("octo");
   fake.repo("homebrew-tap", { files: new Map([["README.md", "# octo/tap\n"], [".github/workflows/tests.yml", "jobs:\n  t:\n    steps:\n      - uses: Homebrew/actions/setup-homebrew@master\n"]]) });
   const home = await sampleHome(fake);
   fake.runDelay = 2500;
+  const cf = new FakeCloudflare();
+  const store = memoryStore();
   useGhWrite(fake.ghWrite);
   const pin = "0123456789abcdef0123456789abcdef01234567";
   const done = setup(["--port", String(port), "--no-open"], {
     github: async () => new GitHub("demo", fake.fetch, async () => {}, "user"),
-    fetch: fake.fetch as typeof fetch,
+    fetch: both(fake.fetch, cf),
     home,
     cwd: join(home, "Developer", "ebb"),
     pin,
@@ -112,8 +117,10 @@ export async function demo(port: number, log: (line: string) => void): Promise<{
     open: () => {},
     notary: async () => true,
     keychain: async (account) => (account === "ed25519" ? sparkle.seed : null),
+    gpg: () => findGpg(),
+    store: () => store,
   });
-  return { fake, home, done, sparkle };
+  return { fake, cf, home, done, sparkle };
 }
 
 if (import.meta.main) {
