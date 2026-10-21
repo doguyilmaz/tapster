@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { createPrivateKey, generateKeyPairSync } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseHub } from "../src/config";
@@ -38,8 +38,8 @@ function io(answers: string[], env: Record<string, string | undefined>) {
   return { value, lines, opened, asked };
 }
 
-beforeAll(() => {
-  writeFileSync(pemPath, bellPem);
+beforeAll(async () => {
+  await Bun.write(pemPath, bellPem);
   const hub = fake.repo("homebrew-tap");
   hub.env = { policies: ["main"], custom: true, vars: new Map([["TAPSTER_DOORBELL_APP_ID", "888"], ["TAPSTER_DOORBELL_APP_SLUG", "tapster-doorbell-octo-tap"]]), secrets: new Set() };
   fake.repo("ebb");
@@ -78,7 +78,7 @@ test("tapster init --doorbell stops once the hub has a doorbell", async () => {
 
 test("tapster init --rotate doorbell asks for the token with a hidden prompt and redeploys with the new key", async () => {
   const fresh = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString();
-  writeFileSync(pemPath, fresh);
+  await Bun.write(pemPath, fresh);
   fake.bell!.pem = fresh;
   const run = io([pemPath, cf.token], {});
   await rotateDoorbell(gh, HUB, 10, run.value);
@@ -91,13 +91,13 @@ test("tapster init --rotate doorbell asks for the token with a hidden prompt and
 });
 
 test("a .pem of another App is refused before anything reaches Cloudflare", async () => {
-  writeFileSync(pemPath, fake.pem);
+  await Bun.write(pemPath, fake.pem);
   const before = cf.calls.length;
   await expect(rotateDoorbell(gh, HUB, 10, io([pemPath], { CLOUDFLARE_API_TOKEN: cf.token }).value)).rejects.toThrow("that key does not belong to the doorbell App");
   expect(cf.calls.length).toBe(before);
 });
 
 test("a wrong token stops the CLI with the same words as setup", async () => {
-  writeFileSync(pemPath, fake.bell!.pem);
+  await Bun.write(pemPath, fake.bell!.pem);
   await expect(rotateDoorbell(gh, HUB, 10, io([pemPath], { CLOUDFLARE_API_TOKEN: "cf_wrongwrongwrongwrongwrong0123456789" }).value)).rejects.toThrow("Cloudflare did not accept that token");
 });
