@@ -277,7 +277,14 @@ export class FakeHub {
     const q = url.searchParams;
     if (p === "/user") return json({ login: this.login, type: "User" }, 200, { "x-oauth-scopes": "gist, read:org, repo, workflow" });
     if (p === `/users/${this.login}`) return json({ id: 42, login: this.login });
-    if (p === "/user/repos" && method === "GET") return json([...this.repos.entries()].map(([full, r]) => ({ full_name: `${this.login}/${r.name}`, name: r.name, private: r.private, html_url: `https://github.com/${full}`, owner: { login: this.login } })));
+    if (p === "/user/repos" && method === "GET") {
+      const all = [...this.repos.entries()].map(([full, r]) => ({ full_name: `${this.login}/${r.name}`, name: r.name, private: r.private, html_url: `https://github.com/${full}`, owner: { login: this.login } }));
+      const per = Number(q.get("per_page") ?? 30);
+      const page = Number(q.get("page") ?? 1);
+      const last = Math.max(1, Math.ceil(all.length / per));
+      const at = (n: number) => `<https://api.github.com/user/repos?affiliation=owner&per_page=${per}&page=${n}>`;
+      return json(all.slice((page - 1) * per, page * per), 200, page < last ? { link: `${at(page + 1)}; rel="next", ${at(last)}; rel="last"` } : {});
+    }
     if (p === "/user/repos" && method === "POST") {
       if (this.get(`${this.login}/${body.name}`)) return json({ message: "exists" }, 422);
       const r = this.repo(String(body.name), { private: Boolean(body.private) });

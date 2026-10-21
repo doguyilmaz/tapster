@@ -60,17 +60,29 @@ const mainRef = async (gh: GitHub, hub: string): Promise<string | null> => {
   }
 };
 
+type OwnedRepo = { full_name: string; name: string; private: boolean; html_url: string; owner: { login: string } };
+
+const PAGE = 50;
+const PAGES = 10;
+
+// The first page's Link header says how many pages follow; those load at once. Each tap's environment is checked as
+// soon as its page arrives.
 export async function hubChoices(gh: GitHub, owner: string): Promise<HubChoice[]> {
-  const repos: { full_name: string; name: string; private: boolean; html_url: string; owner: { login: string } }[] = [];
-  for (let page = 1; page <= 5; page++) {
-    const batch = await gh.json<typeof repos>("GET", `/user/repos?affiliation=owner&sort=updated&per_page=100&page=${page}`);
-    repos.push(...batch);
-    if (batch.length < 100) break;
-  }
-  const taps = repos.filter((r) => r.name.startsWith("homebrew-") && r.owner.login.toLowerCase() === owner.toLowerCase());
-  return Promise.all(
-    taps.map(async (r) => ({ name: r.full_name, private: r.private, url: r.html_url, tapster: (await or404(gh.json("GET", `/repos/${r.full_name}/environments/tapster`))) !== null })),
-  );
+  const page = (n: number) => gh.request("GET", `/user/repos?affiliation=owner&sort=updated&per_page=${PAGE}&page=${n}`);
+  const first = await page(1);
+  const last = Math.min(PAGES, Number(/[?&]page=(\d+)>; rel="last"/.exec(first.headers.get("link") ?? "")?.[1] ?? 1));
+  const seen = new Set<string>();
+  const taps = (repos: OwnedRepo[]) =>
+    repos.filter((r) => {
+      const key = r.full_name.toLowerCase();
+      if (!r.name.startsWith("homebrew-") || r.owner.login.toLowerCase() !== owner.toLowerCase() || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  const choice = async (r: OwnedRepo): Promise<HubChoice> => ({ name: r.full_name, private: r.private, url: r.html_url, tapster: (await or404(gh.json("GET", `/repos/${r.full_name}/environments/tapster`))) !== null });
+  const pages = [Promise.resolve(first), ...Array.from({ length: last - 1 }, (_, i) => page(i + 2))];
+  const lists = await Promise.all(pages.map((p) => p.then((res) => res.json() as Promise<OwnedRepo[]>).then((repos) => Promise.all(taps(repos).map(choice)))));
+  return lists.flat();
 }
 
 export function otherWorkflows(flows: Record<string, string>): OtherWorkflow[] {
