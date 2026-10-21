@@ -176,7 +176,7 @@ test("a project whose entry waits in a hub pull request is listed with the link;
   hub.pulls.push({ number: 3, head: "tapster-add-ebb", html_url: "https://github.com/octo/homebrew-tap/pull/3", title: "Add ebb" });
   const ebb = (await statuses()).find((p) => p.name === "ebb")!;
   expect(ebb.entry).toMatchObject({ state: "proposed", pr: "https://github.com/octo/homebrew-tap/pull/3" });
-  expect(ebb.setup).toEqual({ ok: false, problems: ["there is no .goreleaser.yaml on main", "there is no .github/workflows/release.yml on main"] });
+  expect(ebb.setup).toEqual({ ok: false, problems: ["there is no .goreleaser.yaml on main", "there is no .github/workflows/release.yml on main"], triggers: [] });
   expect(ebb.release.next).toBe("v0.1.0");
   hub.pulls.length = 0;
   hub.branches.delete("tapster-add-ebb");

@@ -335,12 +335,14 @@ function Follow({ s, tag, onStatus }: { s: ProjectStatus; tag: string; onStatus:
 }
 
 function ReleaseBox({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatus) => void }) {
-  const [version, setVersion] = useState(s.release.next);
+  const preferred = s.release.suggest ? bumps(s.release.highest)[s.release.suggest.kind] : s.release.next;
+  const [version, setVersion] = useState(preferred);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<ProblemView | null>(null);
   const [started, setStarted] = useState<string | null>(null);
-  useEffect(() => setVersion(s.release.next), [s.release.next]);
-  if (started) return <Follow s={s} tag={started} onStatus={onStatus} />;
+  useEffect(() => setVersion(preferred), [preferred]);
+  const inFlight = started ?? (s.release.atHead && s.release.latest?.tag !== s.release.atHead ? s.release.atHead : null);
+  if (inFlight) return <Follow s={s} tag={inFlight} onStatus={onStatus} />;
   const gate = canRelease(s);
   const parent = s.release.head?.skip ? releasableParent(s.release.head) : null;
   const before = parent ? tagCommand(s.repo, s.release.next, { sha: parent.sha }) : null;
@@ -363,6 +365,7 @@ function ReleaseBox({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSt
     try {
       await post("/api/projects/release", { hub: hubName.value, repo: s.repo, tag, sha: head.sha });
       setStarted(tag);
+      void statusOf(s.repo).then((fresh) => fresh && onStatus(fresh), () => undefined);
       say("ok", `Tagged ${tag} on ${s.repo}.`);
     } catch (e) {
       setProblem(problemOf(e));
@@ -398,6 +401,7 @@ function ReleaseBox({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSt
         <input id={id} class="input mono" value={version} onInput={(e) => setVersion((e.currentTarget as HTMLInputElement).value)} spellcheck={false} autoComplete="off" aria-invalid={bad ? "true" : undefined} aria-describedby={`${id}-hint`} />
         <span class={bad ? "hint bad" : "hint"} id={`${id}-hint`}>
           {bad ? `${bad}.` : !s.release.highest ? "GitHub has no version tag for this project yet." : `${tag === next.major ? "The next major" : tag === next.minor ? "The next minor" : tag === next.patch ? "The next patch" : "A version"} after ${s.release.highest}, the highest tag on GitHub.`}
+          {!bad && s.release.suggest && tag === preferred && ` Suggested because ${s.release.suggest.reason}.`}
         </span>
       </div>
       {s.entry.state !== "merged" && <Note tone="info">The hub publishes it once you merge the hub entry.</Note>}
@@ -458,7 +462,16 @@ export function StatusCard({ s, onStatus, fix }: { s: ProjectStatus; onStatus: (
       <ol class="checks status">
         <Step state={state("setup")} title="Release workflow">
           {s.setup.ok ? (
-            <span class="muted">On {s.defaultBranch}, the release workflow opens drafts, attests the archives and leaves signing to the hub.</span>
+            <>
+              <span class="muted">On {s.defaultBranch}, the release workflow opens drafts, attests the archives and leaves signing to the hub.</span>
+              {s.setup.triggers.length > 0 && (
+                <Note tone="warn" title="A merge can start a release">
+                  <span>
+                    The release workflow also starts on {s.setup.triggers.join(" and ")}. Merge such a change only once the hub entry is merged and the hub's App reaches {s.repo}. Otherwise the hub refuses the draft and you release again.
+                  </span>
+                </Note>
+              )}
+            </>
           ) : (
             <>
               <span class="muted">{sentence(s.setup.problems)}</span>

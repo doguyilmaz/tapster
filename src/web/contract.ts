@@ -132,7 +132,7 @@ export type ProjectStatus = {
   url: string;
   kind: string;
   defaultBranch: string;
-  setup: { ok: boolean; problems: string[] };
+  setup: { ok: boolean; problems: string[]; triggers: string[] };
   protection: { ok: boolean; off: boolean; problems: string[] };
   entry: { state: "merged" | "proposed" | "missing"; pr: string | null; proposal: { head: string; entry: string } | null; blocked: string | null };
   app: ReachView & { installUrl: string };
@@ -143,6 +143,7 @@ export type ProjectStatus = {
     next: string;
     autoTag: boolean;
     atHead: string | null;
+    suggest: { kind: "patch" | "minor" | "major"; reason: string } | null;
     head: CommitView | null;
   };
   secrets: { names: string[]; published: boolean };

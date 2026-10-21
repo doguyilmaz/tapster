@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { HubView, ProjectStatus } from "../src/web/contract";
-import { bumps, canRelease, followSteps, highestTag, nextTag, projectNext, projectStop, projectSteps, tagCommand, tagProblem } from "../src/web/status";
+import { bumps, canRelease, followSteps, highestTag, nextTag, suggestBump, projectNext, projectStop, projectSteps, tagCommand, tagProblem } from "../src/web/status";
 import { stops } from "../src/web/steps";
 
 const reach = (reaches: boolean | null): ProjectStatus["app"] => ({
@@ -20,11 +20,11 @@ const aims = (over: Partial<ProjectStatus> = {}): ProjectStatus => ({
   url: "https://github.com/octo/aims",
   kind: "go",
   defaultBranch: "main",
-  setup: { ok: true, problems: [] },
+  setup: { ok: true, problems: [], triggers: [] },
   protection: { ok: true, off: false, problems: [] },
   entry: { state: "merged", pr: null, proposal: null, blocked: null },
   app: reach(true),
-  release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, atHead: null, head: { sha: "a".repeat(40), subject: "Start", date: "2026-10-01T00:00:00Z", url: "https://github.com/octo/aims/commit/a" } },
+  release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, atHead: null, suggest: null, head: { sha: "a".repeat(40), subject: "Start", date: "2026-10-01T00:00:00Z", url: "https://github.com/octo/aims/commit/a" } },
   secrets: { names: [], published: false },
   unreadable: null,
   ...over,
@@ -117,7 +117,7 @@ test("an App reach the hub has not checked yet is a step but blocks no release",
 
 test("the release button waits for tapster's workflow but not for the App and never replaces a tagging workflow", () => {
   expect(canRelease(aims())).toEqual({ ok: true, why: null });
-  expect(canRelease(aims({ setup: { ok: false, problems: ["x"] } }))).toEqual({ ok: false, why: "First the release workflow on main must be tapster's." });
+  expect(canRelease(aims({ setup: { ok: false, problems: ["x"], triggers: [] } }))).toEqual({ ok: false, why: "First the release workflow on main must be tapster's." });
   expect(canRelease(aims({ app: reach(false) }))).toEqual({ ok: true, why: null });
   expect(canRelease(aims({ release: { ...aims().release, autoTag: true } }))).toEqual({ ok: false, why: "The release workflow tags each release by itself." });
   expect(canRelease(aims({ release: { ...aims().release, head: null } })).ok).toBe(false);
@@ -166,4 +166,14 @@ test("each release step waits while it is really in progress, so steps can overl
   expect(f({ run: "failed" })).toEqual(["attention", "open", "open"]);
   expect(f({ run: "ok", draft: "note" })).toEqual(["done", "attention", "open"]);
   expect(f({ run: "ok", draft: "open", published: true })).toEqual(["done", "done", "done"]);
+});
+
+test("the suggested bump follows Conventional Commits since the highest tag", () => {
+  expect(suggestBump(["fix: crash on start", "docs: typo"], "v1.4.2")).toEqual({ kind: "patch", reason: "1 commit fixes something (fix:)" });
+  expect(suggestBump(["feat: dark mode", "feat(ui): picker", "fix: x"], "v1.4.2")).toEqual({ kind: "minor", reason: "2 commits add features (feat:)" });
+  expect(suggestBump(["feat!: drop the old config", "fix: x"], "v1.4.2")).toEqual({ kind: "major", reason: "1 commit marks a breaking change" });
+  expect(suggestBump(["refactor: x\n\nBREAKING CHANGE: the flag is gone"], "v1.4.2")).toEqual({ kind: "major", reason: "1 commit marks a breaking change" });
+  expect(suggestBump(["feat!: drop it"], "v0.4.2")).toEqual({ kind: "minor", reason: "1 commit marks a breaking change; before 1.0 that bumps the minor version" });
+  expect(suggestBump(["Say in setup whether moving the pin changes the hub"], "v1.6.3")).toEqual({ kind: "patch", reason: "no commit since v1.6.3 uses Conventional Commits types, so pick the bump yourself" });
+  expect(suggestBump([], null).kind).toBe("patch");
 });
