@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { HubView, ProjectStatus } from "../src/web/contract";
-import { canRelease, highestTag, nextTag, projectNext, projectStop, projectSteps, tagCommand, tagProblem } from "../src/web/status";
+import { bumps, canRelease, followStates, highestTag, nextTag, projectNext, projectStop, projectSteps, tagCommand, tagProblem } from "../src/web/status";
 import { stops } from "../src/web/steps";
 
 const reach = (reaches: boolean | null): ProjectStatus["app"] => ({
@@ -150,4 +150,17 @@ test("the route's project stop sums up the projects the same way", () => {
   expect(projectStop([aims({ entry: { state: "proposed", pr: "p", proposal: null, blocked: null } })], 0)).toEqual({ done: false, status: "aims: Merge the hub entry" });
   const other = aims({ name: "ebb", repo: "octo/ebb", app: reach(false) });
   expect(projectStop([aims({ entry: { state: "proposed", pr: "p", proposal: null, blocked: null } }), other], 1)).toEqual({ done: false, status: "2 projects need you" });
+});
+
+test("Release offers the next patch, minor and major after the highest tag", () => {
+  expect(bumps("v0.2.2")).toEqual({ patch: "v0.2.3", minor: "v0.3.0", major: "v1.0.0" });
+  expect(bumps("v1.4.0-rc.2")).toEqual({ patch: "v1.4.0", minor: "v1.4.0", major: "v2.0.0" });
+  expect(bumps(null)).toEqual({ patch: "v0.1.0", minor: "v0.1.0", major: "v1.0.0" });
+});
+
+test("only the first unfinished step of a release waits; the ones after it are still to do", () => {
+  expect(followStates(["wait", "wait", "wait"])).toEqual(["wait", "open", "open"]);
+  expect(followStates(["done", "wait", "wait"])).toEqual(["done", "wait", "open"]);
+  expect(followStates(["done", "attention", "wait"])).toEqual(["done", "attention", "open"]);
+  expect(followStates(["done", "done", "done"])).toEqual(["done", "done", "done"]);
 });

@@ -16,6 +16,22 @@ export function nextTag(highest: string | null): string {
   return v.pre === null ? `v${v.major}.${v.minor}.${v.patch + 1}` : `v${v.major}.${v.minor}.${v.patch}`;
 }
 
+export function bumps(highest: string | null): { patch: string; minor: string; major: string } {
+  const v = highest ? parseTag(highest) : null;
+  if (!v) return { patch: "v0.1.0", minor: "v0.1.0", major: "v1.0.0" };
+  const at = (major: number, minor: number, patch: number) => `v${major}.${minor}.${patch}`;
+  if (v.pre !== null) {
+    const same = at(v.major, v.minor, v.patch);
+    return { patch: same, minor: v.patch === 0 ? same : at(v.major, v.minor + 1, 0), major: v.minor === 0 && v.patch === 0 ? same : at(v.major + 1, 0, 0) };
+  }
+  return { patch: at(v.major, v.minor, v.patch + 1), minor: at(v.major, v.minor + 1, 0), major: at(v.major + 1, 0, 0) };
+}
+
+export function followStates<S extends string>(states: S[]): (S | "open")[] {
+  const first = states.findIndex((st) => st !== "done");
+  return states.map((st, i) => (first !== -1 && i > first && st === "wait" ? "open" : st));
+}
+
 export function tagProblem(tag: string, highest: string | null): string | null {
   const v = parseTag(tag);
   if (!v) return "Use the shape v1.2.3, such as v1.2.3 or v1.2.3-rc.1";
