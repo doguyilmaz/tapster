@@ -1,12 +1,11 @@
 import { z } from "zod";
 import type { HubConfig } from "../../config";
 import { TapsterError } from "../../errors";
-import { commitToHub } from "../../hubcommit";
 import { hubEnv } from "../../cli/gh";
 import { linuxChoices, linuxKeyAllowed, makeLinuxKey, withLinux } from "../../cli/linuxkey";
 import type { LinuxView } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
-import { guardMain, hubFrom, lockedEnvironment } from "./access";
+import { hubFrom, lockedEnvironment, writeMain } from "./access";
 
 export async function linuxView(s: Session, hub: string, text: string | null, config: HubConfig | null, secrets: string[]): Promise<LinuxView> {
   let tools: LinuxView["tools"] = [];
@@ -44,12 +43,11 @@ const configBody = z.object({ hub: z.string(), maintainer: z.string().trim().max
 async function config(c: Ctx) {
   const body = await readJson(c.req, configBody);
   const { gh, hub, login } = await hubFrom(c, body.hub);
-  await guardMain(gh, hub, login);
-  const result = await commitToHub(gh, hub, "Ship command line tools to apt and dnf", async (read) => {
+  const result = await writeMain(gh, hub, login, async (_, read) => {
     const text = await read("tapster.yml");
     if (text === null) throw new TapsterError(`${hub} has no tapster.yml yet`, "Write the hub files first.");
     const next = withLinux(text, hub.split("/")[0]!, body.maintainer, body.tools);
-    return next === text ? [] : [{ path: "tapster.yml", content: next }];
+    return { message: "Ship command line tools to apt and dnf", files: next === text ? [] : [{ path: "tapster.yml", content: next }] };
   });
   return { result };
 }

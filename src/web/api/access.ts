@@ -1,6 +1,7 @@
 import { GitHubError, TapsterError } from "../../errors";
-import { foreignWrites } from "../../foreign";
+import { foreignWritesAt } from "../../foreign";
 import type { GitHub } from "../../github";
+import { type FileChange, readHubFile } from "../../hubcommit";
 import type { Ctx, Session } from "../server";
 
 const HUB = /^[A-Za-z0-9-]+\/homebrew-[A-Za-z0-9._-]+$/;
@@ -38,16 +39,61 @@ export async function lockedEnvironment(gh: GitHub, hub: string): Promise<void> 
   if (!locked) throw new TapsterError(`${hub}'s tapster environment is not locked to main`, "Protect the hub first: keys go into that environment only once workflows on other branches cannot open it.");
 }
 
-export async function guardMain(gh: GitHub, hub: string, owner: string): Promise<void> {
-  const writes = await foreignWrites(gh, hub, owner).catch((e) => {
-    if (e instanceof GitHubError && e.status === 404) return [];
-    throw e;
-  });
-  const real = writes.filter((w) => !w.startsWith("GitHub shows no push by"));
-  if (real.length) {
-    throw new TapsterError(
-      `main changed in ways only you may change it: ${real.join("; ")}`,
-      "Review those commits on GitHub and revert what you did not make. tapster writes nothing to main until then, because a write from you would mark them as reviewed.",
-    );
+const FOREIGN = "Review those commits on GitHub and revert what you did not make. tapster writes nothing to main until then, because a write from you would mark them as reviewed.";
+
+const mainSha = (gh: GitHub, hub: string) => gh.json<{ object: { sha: string } }>("GET", `/repos/${hub}/git/ref/heads/main`).then((r) => r.object.sha);
+
+export async function checkedMain(gh: GitHub, hub: string, owner: string, strict = false): Promise<string> {
+  const seen = strict
+    ? await foreignWritesAt(gh, hub, owner)
+    : await foreignWritesAt(gh, hub, owner).catch((e) => {
+        if (e instanceof GitHubError && e.status === 404) return { head: null, writes: [] };
+        throw e;
+      });
+  const real = strict ? seen.writes : seen.writes.filter((w) => !w.startsWith("GitHub shows no push by"));
+  if (real.length) throw new TapsterError(`main changed in ways only you may change it: ${real.join("; ")}`, FOREIGN);
+  return seen.head ?? (await mainSha(gh, hub));
+}
+
+async function movedOn(gh: GitHub, hub: string, from: string): Promise<string[]> {
+  const now = await mainSha(gh, hub);
+  if (now === from) return [];
+  const cmp = await gh.json<{ commits?: { sha: string; commit: { message: string } }[] }>("GET", `/repos/${hub}/compare/${from}...${now}`).catch(() => ({ commits: [] }));
+  const list = (cmp.commits ?? []).slice(0, 10).map((x) => `${x.sha.slice(0, 7)} ${(x.commit.message.split("\n")[0] ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, 80)}`);
+  return list.length ? list : [now.slice(0, 7)];
+}
+
+export type MainWrite = { message: string; files: FileChange[]; parents?: string[]; ready?: () => Promise<void> };
+
+// Each attempt builds on the exact main the foreign-write check passed and moves main only from that commit (force: false).
+// When main moved meanwhile, the next attempt checks it again from scratch, so a push by someone else is refused, never built on.
+export async function writeMain(
+  gh: GitHub,
+  hub: string,
+  owner: string,
+  plan: (head: string, read: (path: string) => Promise<string | null>) => Promise<MainWrite | null>,
+  o: { strict?: boolean; moved?: (commits: string[]) => TapsterError } = {},
+): Promise<"committed" | "unchanged"> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const head = await checkedMain(gh, hub, owner, o.strict);
+    const w = await plan(head, (path) => readHubFile(gh, hub, path, head));
+    if (!w || w.files.length === 0) return "unchanged";
+    const base = await gh.json<{ tree: { sha: string } }>("GET", `/repos/${hub}/git/commits/${head}`);
+    const tree = await gh.json<{ sha: string }>("POST", `/repos/${hub}/git/trees`, {
+      base_tree: base.tree.sha,
+      tree: w.files.map((f) => ({ path: f.path, mode: "100644", type: "blob", ...(f.content === null ? { sha: null } : { content: f.content }) })),
+    });
+    const commit = await gh.json<{ sha: string }>("POST", `/repos/${hub}/git/commits`, { message: w.message, tree: tree.sha, parents: [head, ...(w.parents ?? [])] });
+    await w.ready?.();
+    try {
+      await gh.json("PATCH", `/repos/${hub}/git/refs/heads/main`, { sha: commit.sha, force: false });
+      return "committed";
+    } catch (e) {
+      if (!(e instanceof GitHubError && e.status === 422)) throw e;
+      const moved = await movedOn(gh, hub, head);
+      if (!moved.length) throw new TapsterError("GitHub refused to move main", "Nothing was written. Try again.");
+      if (o.moved) throw o.moved(moved);
+    }
   }
+  throw new TapsterError("the hub's main branch kept moving", "Nothing was written. Try again in a minute.");
 }

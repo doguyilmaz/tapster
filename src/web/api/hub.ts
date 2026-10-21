@@ -5,7 +5,7 @@ import { type HubConfig, isApp, macosCode, parseHub } from "../../config";
 import { GitHubError, TapsterError } from "../../errors";
 import { foreignWrites } from "../../foreign";
 import { GitHub } from "../../github";
-import { commitToHub, readHubFile } from "../../hubcommit";
+import { readHubFile } from "../../hubcommit";
 import { appJwt, installationRepos } from "../../token";
 import { TAPSTER } from "../../version";
 import { P12_LIMIT, P8_LIMIT, inspectP12, notaryKey, saveCertificate, saveNotary } from "../../cli/apple";
@@ -20,7 +20,7 @@ import { protectHub } from "../../cli/init";
 import { everyFromFlow } from "../../cli/schedule";
 import type { AccountView, AppStart, FilePlan, FilesView, HealthView, HubChoice, HubView, InstallView, OtherWorkflow } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
-import { checkHub, guardMain, hubFrom, lockedEnvironment, me, or404 } from "./access";
+import { checkHub, checkedMain, hubFrom, lockedEnvironment, me, or404, writeMain } from "./access";
 import { bellCallback, doorbellView } from "./doorbell";
 import { linuxView } from "./linux";
 
@@ -324,10 +324,9 @@ async function filesCommit(c: Ctx) {
     await gh.json("PUT", `/repos/${hub}/contents/README.md`, { message: "Start the tap", content: Buffer.from(readme.content).toString("base64"), branch: "main" });
     if ((await gh.json<{ default_branch: string }>("GET", `/repos/${hub}`)).default_branch !== "main") await gh.json("PATCH", `/repos/${hub}`, { default_branch: "main" });
   }
-  await guardMain(gh, hub, login);
-  const result = await commitToHub(gh, hub, "Set up tapster", async (read) => {
+  const result = await writeMain(gh, hub, login, async (_, read) => {
     const plan = await filePlan(c, gh, hub, q.every, q.remove, q.readme, read);
-    return plan.files.filter((f) => f.change !== "same").map((f) => ({ path: f.path, content: f.change === "remove" ? null : f.content }));
+    return { message: "Set up tapster", files: plan.files.filter((f) => f.change !== "same").map((f) => ({ path: f.path, content: f.change === "remove" ? null : f.content })) };
   });
   return { result };
 }
@@ -373,13 +372,12 @@ async function sparkleStore(c: Ctx) {
   if (body.pasted.trim() !== held.seed) throw new TapsterError("that is not the key shown above", "Paste the key itself, so the copy your password manager keeps is the right one.");
   const config = await sparkleConfig(gh, hub, body.label);
   await lockedEnvironment(gh, hub);
-  await guardMain(gh, hub, login);
+  await checkedMain(gh, hub, login);
   await setEnvSecret(hub, `SPARKLE_KEY_${body.label.toUpperCase()}`, held.seed);
-  const result = await commitToHub(gh, hub, `Pass the Sparkle key ${body.label} to the hub workflow`, async (read) => {
+  const result = await writeMain(gh, hub, login, async (_, read) => {
     const flow = await read(FLOW);
-    if (flow === null) return [];
-    const next = patchSparkleEnv(flow, sparkleLabels(config));
-    return next === flow ? [] : [{ path: FLOW, content: next }];
+    const next = flow === null ? null : patchSparkleEnv(flow, sparkleLabels(config));
+    return { message: `Pass the Sparkle key ${body.label} to the hub workflow`, files: next === null || next === flow ? [] : [{ path: FLOW, content: next }] };
   });
   c.s.sparkle.delete(`${hub} ${body.label}`);
   return { stored: true, workflow: result };
