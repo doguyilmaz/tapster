@@ -49,6 +49,7 @@ export class FakeHub {
   manifestApp: { id: number; slug: string; pem: string } | null = null;
   runDelay: number | null = null;
   listDelay = 0;
+  lag = 0;
   appKeyWorks = true;
   failWrites = false;
   calls: string[] = [];
@@ -234,6 +235,7 @@ export class FakeHub {
     const method = (init.method ?? "GET").toUpperCase();
     const body = typeof init.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : {};
     this.calls.push(`${method} ${url.pathname}`);
+    if (this.lag) await Bun.sleep(this.lag);
     const auth = (init.headers as Record<string, string> | undefined)?.Authorization ?? "";
     return this.asBell(auth, method, url.pathname) ?? this.route(method, url, body);
   };
@@ -302,7 +304,7 @@ export class FakeHub {
   }
 
   private repoRoute(r: FakeRepo, full: string, method: string, rest: string, q: URLSearchParams, body: Record<string, unknown>): Response {
-    if (rest === "") return json({ id: r.id, private: r.private, description: r.description, html_url: `https://github.com/${full}`, default_branch: "main", allow_merge_commit: r.merges.includes("merge"), allow_squash_merge: r.merges.includes("squash"), allow_rebase_merge: r.merges.includes("rebase") });
+    if (rest === "") return json({ id: r.id, owner: { login: this.login, id: 42 }, private: r.private, description: r.description, html_url: `https://github.com/${full}`, default_branch: "main", allow_merge_commit: r.merges.includes("merge"), allow_squash_merge: r.merges.includes("squash"), allow_rebase_merge: r.merges.includes("rebase") });
     if (rest === "/installation") return this.installation?.repos.some((x) => x.toLowerCase() === full.toLowerCase()) ? json({ id: this.installation.id }) : json({}, 404);
     if (rest === "/git/ref/heads/main") return r.files ? json({ object: { sha: r.head } }) : json({}, 409);
     const headRef = /^\/git\/ref\/heads\/(.+)$/.exec(rest);

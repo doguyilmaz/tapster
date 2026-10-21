@@ -17,9 +17,7 @@ export function appManifest(owner: string, hub: string, redirect: string): objec
 }
 
 export async function storeApp(hub: string, created: CreatedApp): Promise<void> {
-  await setEnvVariable(hub, "TAPSTER_APP_ID", String(created.id));
-  await setEnvVariable(hub, "TAPSTER_APP_SLUG", created.slug);
-  await setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", created.pem);
+  await Promise.all([setEnvVariable(hub, "TAPSTER_APP_ID", String(created.id)), setEnvVariable(hub, "TAPSTER_APP_SLUG", created.slug), setEnvSecret(hub, "TAPSTER_APP_PRIVATE_KEY", created.pem)]);
 }
 
 export type AppInstallation = { id: number | null; onHub: boolean };

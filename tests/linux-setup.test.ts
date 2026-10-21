@@ -3,7 +3,8 @@ import { rmSync } from "node:fs";
 import { parseHub } from "../src/config";
 import { useGhWrite } from "../src/cli/gh";
 import { findGpg, linuxChoices, withLinux } from "../src/cli/linuxkey";
-import type { HubView } from "../src/web/contract";
+import type { HubView, LinuxChange } from "../src/web/contract";
+import { changeText } from "../src/web/steps";
 import { sampleHome } from "../scripts/demo";
 import { FakeHub } from "./helpers/fakehub";
 import { memoryStore } from "./helpers/memstore";
@@ -22,6 +23,14 @@ packages:
     linux: true
   - { name: maconly, repo: octo/maconly, binaries: [m], assets: { darwin-arm64: m.tar.gz } }
 `;
+
+const PREVIEW = [
+  '+ linux: { maintainer: "Octo Cat <octo@example.com>" }',
+  "-   - { name: ebb, repo: octo/ebb, binaries: [ebb], assets: { linux-amd64: ebb.tgz, darwin-arm64: ebb-mac.tar.gz } }",
+  "+   - { name: ebb, repo: octo/ebb, binaries: [ebb], assets: { linux-amd64: ebb.tgz, darwin-arm64: ebb-mac.tar.gz }, linux: true }",
+];
+const EBB = { name: "ebb", repo: "octo/ebb", kind: "go" as const, archives: ["linux-amd64"], on: false };
+const AIMS = { name: "aims", repo: "octo/aims", kind: "go" as const, archives: ["linux-arm64"], on: true };
 
 const shown = (on: Record<string, boolean>, was: Record<string, boolean> = { ebb: false, aims: true }) => Object.entries(on).map(([name, value]) => ({ name, was: was[name] ?? false, on: value }));
 
@@ -61,8 +70,8 @@ test("an existing linux section keeps its url and only the maintainer changes", 
 });
 
 test("the choices keep each tool's flag while the maintainer is missing or broken", () => {
-  expect(linuxChoices(YML, "octo")).toEqual([{ name: "ebb", on: false }, { name: "aims", on: true }]);
-  expect(linuxChoices(YML.replace("packages:", 'linux: { maintainer: "nobody" }\npackages:'), "octo")).toEqual([{ name: "ebb", on: false }, { name: "aims", on: true }]);
+  expect(linuxChoices(YML, "octo")).toEqual([EBB, AIMS]);
+  expect(linuxChoices(YML.replace("packages:", 'linux: { maintainer: "nobody" }\npackages:'), "octo")).toEqual([EBB, AIMS]);
 });
 
 test("a bad maintainer is refused", () => {
@@ -98,7 +107,7 @@ const reason = (r: { data: Record<string, unknown> }) => (r.data.error as { reas
 test("the page lists the tools with Linux archives and says whether GnuPG is there", async () => {
   const saved = gpg;
   gpg = null;
-  expect(await linux()).toEqual({ wanted: true, stored: false, gpg: false, keystore: "keychain", maintainer: null, tools: [{ name: "ebb", on: false }, { name: "aims", on: true }] });
+  expect(await linux()).toEqual({ wanted: true, stored: false, gpg: false, keystore: "keychain", maintainer: null, tools: [EBB, AIMS], left: [{ name: "maconly", why: "has no Linux archive" }] });
   expect(reason(await call("POST", "/api/hub/linux/key", { hub: HUB }))).toBe("GnuPG is not installed");
   gpg = saved;
 });
@@ -126,11 +135,18 @@ test("the maintainer and the picked tools go to tapster.yml in one commit on mai
   expect(reason(bad)).toBe("the maintainer is not Name <address>");
   const stale = await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: shown({ ebb: true, aims: true }, { ebb: true, aims: true }) });
   expect(reason(stale)).toBe("tapster.yml changed");
+  const before = fake.get(HUB)!.files!.get("tapster.yml")!;
+  const change = (await call("POST", "/api/hub/linux/preview", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: shown({ ebb: true, aims: true }) })).data as unknown as LinuxChange;
+  expect(change.before).toBe(before);
+  expect(changeText(change.before, change.after).split("\n").filter((l) => /^[+-] /.test(l))).toEqual(PREVIEW);
+  expect(fake.get(HUB)!.files!.get("tapster.yml")).toBe(before);
+  expect(reason(await call("POST", "/api/hub/linux/preview", { hub: HUB, maintainer: "nobody", tools: shown({ ebb: true }) }))).toBe("the maintainer is not Name <address>");
   const ok = await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: shown({ ebb: true, aims: true }) });
   expect(ok.data).toEqual({ result: "committed" });
   const text = fake.get(HUB)!.files!.get("tapster.yml")!;
+  expect(text).toBe(change.after);
   expect(text).toContain('linux: { maintainer: "Octo Cat <octo@example.com>" }');
-  expect((await linux()).tools).toEqual([{ name: "ebb", on: true }, { name: "aims", on: true }]);
+  expect((await linux()).tools).toEqual([{ ...EBB, on: true }, AIMS]);
   expect((await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: shown({ ebb: true, aims: true }, { ebb: true, aims: true }) })).data).toEqual({ result: "unchanged" });
   const health = await call("GET", `/api/hub/health?hub=${HUB}`);
   expect(health.status).toBe(200);

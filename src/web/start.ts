@@ -61,12 +61,16 @@ function openBrowser(url: string): void {
 }
 
 export function realDeps(pin: string | null): Deps {
-  let cached: { gh: GitHub; at: number } | null = null;
+  let cached: { gh: Promise<GitHub>; at: number } | null = null;
   return {
-    async github() {
+    github() {
       if (cached && Date.now() - cached.at < 60_000) return cached.gh;
-      const gh = await userGitHub();
-      cached = { gh, at: Date.now() };
+      const gh = userGitHub();
+      const mine = { gh, at: Date.now() };
+      cached = mine;
+      gh.catch(() => {
+        if (cached === mine) cached = null;
+      });
       return gh;
     },
     fetch,

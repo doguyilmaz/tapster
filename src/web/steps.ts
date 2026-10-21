@@ -1,9 +1,9 @@
-import type { HubView, ProjectStatus } from "./contract";
+import type { HubView, Problem, ProjectStatus } from "./contract";
 import { projectStop } from "./status";
 
 export type StopId = "protect" | "app" | "macos" | "certificate" | "notary" | "files" | "project";
 export type StopState = "done" | "now" | "later" | "skipped" | "attention";
-export type Stop = { id: StopId; name: string; state: StopState; status: string };
+export type Stop = { id: StopId; name: string; state: StopState; status: string[] };
 
 const DAY = 86_400_000;
 
@@ -21,29 +21,26 @@ export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now(),
   const mac = macNeeded(h, choice);
   const passed = h.protect.checks.filter((c) => c.ok).length;
   const mine = projectStop(projects, h.packages.length);
-  const raw: { id: StopId; name: string; done: boolean; skipped?: boolean; attention?: boolean; status: string; open: string }[] = [
+  const raw: { id: StopId; name: string; done: boolean; skipped?: boolean; attention?: boolean; status: string[] }[] = [
     {
       id: "protect",
       name: "Protect the hub",
       done: h.protect.done,
-      status: h.protect.done ? "All protections are on" : passed ? `${passed} of ${h.protect.checks.length} protections on` : "Not protected yet",
-      open: "Not protected yet",
+      status: [h.protect.done ? "All protections are on" : passed ? `${passed} of ${h.protect.checks.length} protections on` : "Not protected yet"],
     },
     {
       id: "app",
       name: "Create the GitHub App",
       done: Boolean(h.app.id && h.app.slug && h.app.key),
       attention: Boolean(h.app.id && !h.app.key),
-      status: h.app.id && !h.app.key ? "The App's private key is missing" : h.app.slug ? h.app.slug : "Not created yet",
-      open: "Not created yet",
+      status: [h.app.id && !h.app.key ? "The App's private key is missing" : h.app.slug ? h.app.slug : "Not created yet"],
     },
     {
       id: "macos",
       name: "macOS or not",
       done: mac === true,
       skipped: mac === false,
-      status: mac === true ? "Signs macOS software" : mac === false ? "No macOS builds" : "Your answer",
-      open: "Your answer",
+      status: [mac === true ? "Signs macOS software" : mac === false ? "No macOS builds" : "Your answer"],
     },
     {
       id: "certificate",
@@ -51,16 +48,14 @@ export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now(),
       done: Boolean(h.apple.certificate && h.apple.certificateStored),
       skipped: mac === false,
       attention: Boolean(h.apple.certificate && expiresSoon(h.apple.certificate.expires, now)),
-      status: mac === false ? "Not needed" : h.apple.certificate ? `Team ${h.apple.certificate.team}, expires ${h.apple.certificate.expires}` : "Not stored yet",
-      open: "Not stored yet",
+      status: mac === false ? ["Not needed"] : h.apple.certificate ? [`Team ${h.apple.certificate.team}`, `Expires ${h.apple.certificate.expires}`] : ["Not stored yet"],
     },
     {
       id: "notary",
       name: "Notarization key",
       done: h.apple.notary,
       skipped: mac === false,
-      status: mac === false ? "Not needed" : h.apple.notary ? "Stored" : "Not stored yet",
-      open: "Not stored yet",
+      status: [mac === false ? "Not needed" : h.apple.notary ? "Stored" : "Not stored yet"],
     },
     {
       id: "files",
@@ -69,22 +64,20 @@ export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now(),
       attention: h.files.workflow === "older" || h.files.workflow === "other",
       status:
         h.files.workflow === "missing"
-          ? "Not written yet"
+          ? ["Not written yet"]
           : h.files.workflow === "older"
-            ? `Runs ${h.files.pinned}; update available`
+            ? [`Runs ${h.files.pinned}`, "Update available"]
             : h.files.workflow === "other"
-              ? `Runs ${h.files.pinned ?? "a workflow tapster did not write"}; review it`
+              ? [`Runs ${h.files.pinned ?? "a workflow tapster did not write"}`, "Review it"]
               : h.files.workflow === "newer"
-                ? `Runs ${h.files.pinned}, newer than this tapster`
-                : `Runs ${h.files.pinned}`,
-      open: "Not written yet",
+                ? [`Runs ${h.files.pinned}`, "Newer than this tapster"]
+                : [`Runs ${h.files.pinned}`],
     },
     {
       id: "project",
       name: "Your projects",
       done: mine.done,
-      status: mine.status,
-      open: "None yet",
+      status: [mine.status],
     },
   ];
   let current = false;
@@ -176,4 +169,34 @@ export function notes(lines: string[]): NoteItem[] {
     if (i < more.length) item.block = dedent(more.slice(i));
   }
   return out;
+}
+
+export type Answer = { kind: "created" } | { kind: "failed" | "unstored"; problem: Problem } | { kind: "unknown" };
+export type Landing = { hub: string | null; open: "app" | "extras"; title: string; app: Answer | null; doorbell: Exclude<Answer, { kind: "unknown" }> | null };
+
+export function landing(search: string): Landing | null {
+  const q = new URLSearchParams(search);
+  const app = q.get("app");
+  const bell = q.get("doorbell");
+  if (!app && !bell) return null;
+  const hub = q.get("hub");
+  const problem = { reason: q.get("reason") ?? "the App could not be created", fix: q.get("fix") ?? "Try again." };
+  if (bell) return { hub, open: "extras", title: "Back from GitHub: finishing the doorbell App", app: null, doorbell: bell === "created" ? { kind: "created" } : { kind: bell === "unstored" ? "unstored" : "failed", problem } };
+  const answer: Answer = app === "created" ? { kind: "created" } : app === "failed" || app === "unstored" ? { kind: app, problem } : { kind: "unknown" };
+  return { hub, open: "app", title: "Back from GitHub: finishing the GitHub App", app: answer, doorbell: null };
+}
+
+export type InstallStep = "ask" | "waiting" | "done" | "wide";
+
+// Only the person's click on GitHub installs an App, so nothing waits on GitHub until they went there.
+export function installStep(found: { id: number | null; wide: boolean } | null, asked: boolean): InstallStep {
+  if (found && found.id !== null) return found.wide ? "wide" : "done";
+  return asked ? "waiting" : "ask";
+}
+
+export const toolState = (saved: boolean, picked: boolean) => (saved === picked ? (saved ? "On" : "Off") : picked ? "Turns on" : "Turns off");
+
+export function linuxWrite(maintainer: boolean, tools: number): string {
+  const parts = [...(maintainer ? ["the maintainer"] : []), ...(tools ? [`${tools} ${tools === 1 ? "tool" : "tools"}`] : [])];
+  return parts.length ? `Write ${parts.join(" and ")} to tapster.yml` : "Nothing to write";
 }

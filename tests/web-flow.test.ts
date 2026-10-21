@@ -43,7 +43,7 @@ test("a fresh tap shows every step open and warns about its old workflows", asyn
   const h = await hubView();
   expect(h.protect.done).toBe(false);
   expect(h.protect.others).toEqual([{ file: "tests.yml", actions: ["Homebrew/actions/setup-homebrew@master"] }]);
-  expect(h.app).toEqual({ id: null, slug: null, key: false, held: false, installed: null });
+  expect(h.app).toEqual({ id: null, slug: null, key: false, held: false, install: null });
   expect(h.files.workflow).toBe("missing");
 });
 
@@ -77,7 +77,8 @@ test("the App goes through GitHub and back with a single-use state, and its key 
   expect(repo.env!.vars.get("TAPSTER_APP_SLUG")).toBe("tapster-octo-tap");
   const h = await hubView();
   expect(h.app.key).toBe(true);
-  expect(h.app.installed).toEqual({ checked: true, id: null, onHub: false, repos: [] });
+  expect(h.app.install).toBe("https://github.com/apps/tapster-octo-tap/installations/new");
+  expect((await call("GET", "/api/hub/installation?hub=octo/homebrew-tap")).data).toEqual({ checked: true, id: null, onHub: false, repos: [] });
   fake.installation = { id: 5, repos: ["octo/ebb", "octo/homebrew-tap"] };
   expect((await call("GET", "/api/hub/installation?hub=octo/homebrew-tap")).data).toEqual({ checked: true, id: 5, onHub: true, repos: ["octo/ebb", "octo/homebrew-tap"] });
   fake.installation = { id: 5, repos: ["octo/ebb"] };

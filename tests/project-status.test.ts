@@ -130,17 +130,17 @@ test("the setup route's project stop reads the project statuses", () => {
     private: false,
     empty: false,
     protect: { done: true, environment: true, checks: [], others: [] },
-    app: { id: "1", slug: "s", key: true, held: false, installed: null },
+    app: { id: "1", slug: "s", key: true, held: false, install: null },
     apple: { needed: null, certificate: null, certificateStored: false, notary: false },
     files: { config: true, state: true, readme: true, workflow: "current", pinned: null, every: null },
     packages: [{ name: "aims", repo: "octo/aims", kind: "go" }],
     invalid: [],
     issue: null,
-    extras: { doorbell: { on: false, origin: null, app: null, key: false, cloudflare: null, accounts: null, tokenPage: "" }, linux: { wanted: false, stored: false, gpg: false, keystore: null, maintainer: null, tools: [] }, sparkle: [] },
+    extras: { doorbell: { on: false, origin: null, app: null, install: null, key: false, cloudflare: null, accounts: null, tokenPage: "" }, linux: { wanted: false, stored: false, gpg: false, keystore: null, maintainer: null, tools: [], left: [] }, sparkle: [] },
   };
   const project = (list: ProjectStatus[] | null) => stops(h, "no", Date.now(), list).find((s) => s.id === "project")!;
-  expect(project(null)).toMatchObject({ state: "done", status: "1 in the hub" });
-  expect(project([aims({ app: reach(false) })])).toMatchObject({ state: "now", status: "aims: Install the App" });
+  expect(project(null)).toMatchObject({ state: "done", status: ["1 in the hub"] });
+  expect(project([aims({ app: reach(false) })])).toMatchObject({ state: "now", status: ["aims: Install the App"] });
 });
 
 test("the route's project stop sums up the projects the same way", () => {

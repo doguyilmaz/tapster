@@ -1,8 +1,10 @@
 import { useEffect, useState } from "preact/hooks";
-import type { AppStart, BellInstallView, DoorbellDone, HubView } from "../contract";
-import { ApiError, get, post } from "./api";
-import { doorbellResult, loadHub, problemOf, say } from "./state";
-import { Badge, Busy, Cmd, Copy, Done, Field, FileDrop, Head, Icon, Note, Out, Password, Problem, Spinner, savedFor, useAction } from "./ui";
+import type { AppStart, BellCloud, BellInstallView, DoorbellDone, HubView, LinuxChange, Problem as ProblemView } from "../contract";
+import { installStep, linuxWrite, toolState } from "../steps";
+import { ApiError, post } from "./api";
+import { doorbellResult, loadHub, problemOf, say, setCloud } from "./state";
+import { KIND } from "./status";
+import { Badge, Busy, Cmd, Copy, DiffBlock, Done, Field, FileDrop, Head, Icon, ManifestForm, Note, Out, Password, Problem, Spinner, savedFor, useAction, useInstall } from "./ui";
 
 const GUIDE = "https://tapster.doguyilmaz.com/guides/";
 
@@ -22,6 +24,7 @@ function Step({ n, title, done, children }: { n: number; title: string; done?: b
 
 function BellToken({ h }: { h: HubView }) {
   const [busy, problem, run] = useAction();
+  const [chosen, setChosen] = useState<string | null>(null);
   const cloud = h.extras.doorbell.cloudflare;
   if (cloud) {
     return (
@@ -32,24 +35,27 @@ function BellToken({ h }: { h: HubView }) {
   }
   const accounts = h.extras.doorbell.accounts;
   if (accounts) {
-    const pick = (account: string) =>
-      run(async () => {
-        await post("/api/hub/doorbell/account", { hub: h.name, account });
-        await loadHub();
-      });
+    const pick = (account: string) => {
+      setChosen(account);
+      void run(async () => setCloud(h.name, await post<BellCloud>("/api/hub/doorbell/account", { hub: h.name, account })));
+    };
     return (
       <>
         <p class="muted">The token reaches several Cloudflare accounts. Pick the one the doorbell runs in. Next time you can narrow the token to that account under Account Resources on Cloudflare's token page.</p>
         <div class="choices">
-          {accounts.map((a) => (
-            <button type="button" class="choice" key={a.id} disabled={busy} onClick={() => void pick(a.id)}>
-              <Icon name="circle" />
-              <span class="grow">
-                <strong>{a.name}</strong>
-                <span class="muted small mono">{a.id}</span>
-              </span>
-            </button>
-          ))}
+          {accounts.map((a) => {
+            const checking = busy && chosen === a.id;
+            return (
+              <button type="button" class="choice" key={a.id} disabled={busy} aria-pressed={checking} aria-busy={checking} onClick={() => pick(a.id)}>
+                {checking ? <Spinner label="Checking" /> : <Icon name="circle" />}
+                <span class="grow">
+                  <strong>{a.name}</strong>
+                  <span class="muted small mono">{a.id}</span>
+                  {checking && <span class="small">Checking its Workers on Cloudflare</span>}
+                </span>
+              </button>
+            );
+          })}
         </div>
         <Problem problem={problem} />
       </>
@@ -59,9 +65,9 @@ function BellToken({ h }: { h: HubView }) {
     e.preventDefault();
     const token = String(new FormData(e.currentTarget as HTMLFormElement).get("token") ?? "");
     void run(async () => {
-      await post("/api/hub/doorbell/cloudflare", { hub: h.name, token });
+      const cloud = await post<BellCloud>("/api/hub/doorbell/cloudflare", { hub: h.name, token });
       savedFor("cloudflare");
-      await loadHub();
+      setCloud(h.name, cloud);
     });
   };
   return (
@@ -158,18 +164,7 @@ function BellApp({ h }: { h: HubView }) {
       </Note>
       <Problem problem={problem} />
       {start ? (
-        <form method="post" action={start.action} class="stack tight">
-          <input type="hidden" name="manifest" value={start.manifest} />
-          <div class="row">
-            <button class="btn primary" type="submit">
-              Continue to GitHub
-              <Icon name="arrow" />
-            </button>
-          </div>
-          <p class="muted small">
-            GitHub shows the App <code>{start.name}</code>. Click <strong>Create GitHub App</strong> there and GitHub brings you back here.
-          </p>
-        </form>
+        <ManifestForm start={start} />
       ) : (
         !problem && (
           <p class="row muted">
@@ -181,10 +176,16 @@ function BellApp({ h }: { h: HubView }) {
   );
 }
 
-function BellInstall({ h, view }: { h: HubView; view: BellInstallView | null }) {
-  const slug = h.extras.doorbell.app?.slug ?? "";
-  if (!h.extras.doorbell.key) return <p class="muted small">After the App.</p>;
-  if (view?.id && view.others.length) {
+type Watch = ReturnType<typeof useInstall<BellInstallView>>;
+
+const bellStep = (h: HubView, w: Watch) => installStep(w.view && { id: w.view.id, wide: w.view.others.length > 0 }, w.asked);
+
+function BellInstall({ h, watch }: { h: HubView; watch: Watch }) {
+  const d = h.extras.doorbell;
+  const view = watch.view;
+  if (!d.key) return <p class="muted small">After the App.</p>;
+  const step = bellStep(h, watch);
+  if (step === "wide" && view) {
     return (
       <Note tone="error" title="The doorbell App reaches more than the hub">
         <span>
@@ -196,57 +197,35 @@ function BellInstall({ h, view }: { h: HubView; view: BellInstallView | null }) 
       </Note>
     );
   }
-  if (view?.id) return <p class="muted">Installed on {h.name} only.</p>;
+  if (step === "done") return <p class="muted">Installed on {h.name} only.</p>;
   return (
     <>
       <p class="muted">
-        On GitHub, choose <strong>Only select repositories</strong> and pick {h.name}, only that one. Click <strong>Install</strong>.
+        This step needs your click on GitHub. Click <strong>Install the doorbell App</strong>: GitHub opens with <strong>Only select repositories</strong> and {h.name} picked. Keep only {h.name} and click <strong>Install</strong> there.
       </p>
       <div class="row">
-        <Out href={`https://github.com/apps/${slug}/installations/new`} class="btn primary">
+        <Out href={d.install ?? ""} class="btn primary" onClick={watch.ask}>
           Install the doorbell App
         </Out>
       </div>
-      <p class="row muted small" role="status">
-        <Spinner /> Not installed yet. This updates by itself.
-      </p>
+      {step === "waiting" && (
+        <p class="row muted small" role="status">
+          <Spinner label="Waiting for GitHub" /> Waiting for your click on GitHub. This step updates by itself once you click Install there.
+        </p>
+      )}
     </>
   );
-}
-
-function useBellInstall(h: HubView): BellInstallView | null {
-  const [view, setView] = useState<BellInstallView | null>(null);
-  const held = h.extras.doorbell.key;
-  useEffect(() => {
-    if (!held) return;
-    let timer = 0;
-    let wait = 4000;
-    const tick = async () => {
-      if (!document.hidden) {
-        try {
-          const next = await get<BellInstallView>(`/api/hub/doorbell/installation?hub=${encodeURIComponent(h.name)}`);
-          setView(next);
-          wait = next.id !== null && next.others.length === 0 ? 30000 : 4000;
-        } catch {
-          wait = Math.min(wait * 2, 30000);
-        }
-      }
-      timer = window.setTimeout(tick, wait);
-    };
-    timer = window.setTimeout(tick, 300);
-    return () => clearTimeout(timer);
-  }, [h.name, held]);
-  return held ? view : null;
 }
 
 const COST = "It costs nothing on Cloudflare's free plan, which allows 100,000 requests a day and 5 cron triggers. At a 10 minute interval the doorbell uses about 150 requests a day and one cron trigger.";
 
 function Doorbell({ h }: { h: HubView }) {
   const d = h.extras.doorbell;
-  const install = useBellInstall(h);
+  const watch = useInstall<BellInstallView>(d.key ? `/api/hub/doorbell/installation?hub=${encodeURIComponent(h.name)}` : null, (v) => v.id !== null && v.others.length === 0);
   const [busy, problem, run] = useAction();
   const [done, setDone] = useState<DoorbellDone | null>(null);
-  const ready = Boolean(d.cloudflare && d.key && install?.id && install.others.length === 0);
+  const installed = d.key && bellStep(h, watch) === "done";
+  const ready = Boolean(d.cloudflare && installed);
   const deploy = () =>
     run(async () => {
       const res = await post<DoorbellDone>("/api/hub/doorbell/deploy", { hub: h.name });
@@ -256,7 +235,7 @@ function Doorbell({ h }: { h: HubView }) {
       say("ok", `The doorbell answers at ${res.origin}.`);
     });
   return (
-    <section class="stack tight">
+    <section class="stack tight anchor" id="doorbell">
       <div class="spread">
         <h3 class="section-title">Faster releases: the doorbell</h3>
         <Badge tone={d.on ? "ok" : undefined}>{d.on ? "On" : "Off"}</Badge>
@@ -298,8 +277,8 @@ function Doorbell({ h }: { h: HubView }) {
           <Step n={2} title="The doorbell App" done={d.key}>
             <BellApp h={h} />
           </Step>
-          <Step n={3} title="Install it on the hub only" done={Boolean(install?.id && install.others.length === 0)}>
-            <BellInstall h={h} view={install} />
+          <Step n={3} title="Install it on the hub only" done={installed}>
+            <BellInstall h={h} watch={watch} />
           </Step>
           <Step n={4} title="Deploy">
             <p class="muted">tapster bundles the Worker, uploads it to your Cloudflare account with the App's key as a secret and gives every project in tapster.yml its address.</p>
@@ -319,9 +298,8 @@ function Doorbell({ h }: { h: HubView }) {
   );
 }
 
-function Linux({ h }: { h: HubView }) {
+function LinuxTools({ h }: { h: HubView }) {
   const l = h.extras.linux;
-  const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [maintainer, setMaintainer] = useState(l.maintainer ?? "");
   const [shown, setShown] = useState(l.tools);
   const [picked, setPicked] = useState<string[]>(l.tools.filter((t) => t.on).map((t) => t.name));
@@ -331,8 +309,91 @@ function Linux({ h }: { h: HubView }) {
     setShown(l.tools);
     setPicked(l.tools.filter((t) => t.on).map((t) => t.name));
   }, [seen]);
-  const [making, makeProblem, make] = useAction();
   const [writing, writeProblem, write] = useAction();
+  const [change, setChange] = useState<LinuxChange | null>(null);
+  const [checkProblem, setCheckProblem] = useState<ProblemView | null>(null);
+  const body = { hub: h.name, maintainer, tools: shown.map((t) => ({ name: t.name, was: t.on, on: picked.includes(t.name) })) };
+  const toolsChanged = body.tools.filter((t) => t.was !== t.on).length;
+  const maintainerChanged = maintainer.trim() !== (l.maintainer ?? "");
+  const changed = maintainerChanged || toolsChanged > 0;
+  const asked = JSON.stringify(body);
+  useEffect(() => {
+    setChange(null);
+    setCheckProblem(null);
+    if (!changed || !maintainer.trim()) return;
+    let live = true;
+    const timer = setTimeout(() => {
+      post<LinuxChange>("/api/hub/linux/preview", body).then(
+        (c) => live && setChange(c),
+        (e) => live && setCheckProblem(problemOf(e)),
+      );
+    }, 350);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [asked]);
+  const submit = (e: Event) => {
+    e.preventDefault();
+    void write(async () => {
+      const res = await post<{ result: string }>("/api/hub/linux/config", body);
+      await loadHub();
+      say("ok", res.result === "committed" ? "Wrote the Linux settings to tapster.yml on main." : "tapster.yml already had these settings.");
+    });
+  };
+  const on = l.tools.filter((t) => t.on).map((t) => t.name);
+  return (
+    <form class="stack tight" onSubmit={submit}>
+      <Field name="maintainer" label="Maintainer" value={maintainer} onInput={setMaintainer} placeholder="Your Name <you@example.com>" hint="Every .deb and .rpm names this person, as Name <address>." />
+      <div class="stack tight">
+        <div class="spread">
+          <h4 class="section-title">Command line tools to ship</h4>
+          <span class="small" role="status">
+            On now: {on.length ? on.join(", ") : "none"}
+          </span>
+        </div>
+        <p class="muted small">Only tools with Linux archives in tapster.yml are listed. Each switch sets linux: true or false on the tool's entry.</p>
+        {shown.length ? (
+          shown.map((t) => {
+            const now = picked.includes(t.name);
+            return (
+              <label class="switch" key={t.name}>
+                <input type="checkbox" checked={now} aria-describedby={`tool-${t.name}`} onChange={(e) => setPicked((e.currentTarget as HTMLInputElement).checked ? [...picked, t.name] : picked.filter((x) => x !== t.name))} />
+                <span class="grow">
+                  <strong>Ship {t.name} to apt and dnf</strong>
+                  <span id={`tool-${t.name}`}>
+                    {t.repo} · {KIND[t.kind] ?? t.kind} · {t.archives.join(", ")}
+                  </span>
+                </span>
+                <Badge tone={t.on !== now ? "next" : now ? "ok" : undefined}>{toolState(t.on, now)}</Badge>
+              </label>
+            );
+          })
+        ) : (
+          <p class="muted small">No command line tool in tapster.yml maps a Linux archive yet.</p>
+        )}
+        {l.left.length > 0 && <p class="muted small">Not listed: {l.left.map((x) => `${x.name} ${x.why}`).join("; ")}.</p>}
+      </div>
+      {change && change.after !== change.before && (
+        <div class="stack tight">
+          <h4 class="section-title">The change to tapster.yml</h4>
+          <DiffBlock before={change.before} after={change.after} label="The change to tapster.yml" />
+        </div>
+      )}
+      <Problem problem={checkProblem ?? writeProblem} />
+      <div class="row">
+        <Busy busy={writing} class="btn primary" type="submit" disabled={!changed || !change || change.after === change.before}>
+          {linuxWrite(maintainerChanged, toolsChanged)}
+        </Busy>
+      </div>
+    </form>
+  );
+}
+
+function Linux({ h }: { h: HubView }) {
+  const l = h.extras.linux;
+  const [fingerprint, setFingerprint] = useState<string | null>(null);
+  const [making, makeProblem, make] = useAction();
   const makeKey = () =>
     make(async () => {
       const res = await post<{ fingerprint: string; keychain: boolean }>("/api/hub/linux/key", { hub: h.name });
@@ -340,15 +401,6 @@ function Linux({ h }: { h: HubView }) {
       await loadHub();
       say("ok", `Stored the Linux signing key in the hub and in your ${res.keychain ? "login keychain" : "keyring"}.`);
     });
-  const submit = (e: Event) => {
-    e.preventDefault();
-    void write(async () => {
-      const res = await post<{ result: string }>("/api/hub/linux/config", { hub: h.name, maintainer, tools: shown.map((t) => ({ name: t.name, was: t.on, on: picked.includes(t.name) })) });
-      await loadHub();
-      say("ok", res.result === "committed" ? "Wrote the Linux settings to tapster.yml on main." : "tapster.yml already had these settings.");
-    });
-  };
-  const changed = maintainer !== (l.maintainer ?? "") || shown.some((t) => t.on !== picked.includes(t.name));
   return (
     <section class="stack tight">
       <div class="spread">
@@ -420,28 +472,7 @@ function Linux({ h }: { h: HubView }) {
             explains how users move to the new key.
           </p>
           {h.files.config ? (
-            <form class="stack tight" onSubmit={submit}>
-              <Field name="maintainer" label="Maintainer" value={maintainer} onInput={setMaintainer} placeholder="Your Name <you@example.com>" hint="Every .deb and .rpm names this person, as Name <address>." />
-              {shown.length ? (
-                shown.map((t) => (
-                  <label class="switch" key={t.name}>
-                    <input type="checkbox" checked={picked.includes(t.name)} onChange={(e) => setPicked((e.currentTarget as HTMLInputElement).checked ? [...picked, t.name] : picked.filter((x) => x !== t.name))} />
-                    <span>
-                      <strong>Ship {t.name} to apt and dnf</strong>
-                      <span>Sets linux: true on its entry in tapster.yml.</span>
-                    </span>
-                  </label>
-                ))
-              ) : (
-                <p class="muted small">No command line tool in tapster.yml maps a Linux archive yet.</p>
-              )}
-              <Problem problem={writeProblem} />
-              <div class="row">
-                <Busy busy={writing} class="btn primary" type="submit" disabled={!changed || !maintainer}>
-                  Write to tapster.yml
-                </Busy>
-              </div>
-            </form>
+            <LinuxTools h={h} />
           ) : (
             <p class="muted small">Write the hub files first; then pick the tools here.</p>
           )}
