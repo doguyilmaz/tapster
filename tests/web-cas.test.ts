@@ -86,6 +86,30 @@ test("the hub files write refuses the same race", async () => {
   expect(hub().files!.has(".github/workflows/tapster.yml")).toBe(false);
 });
 
+test("an entry update's merge is built on the checked main: a push in between stops it and the hub's check then names that push", async () => {
+  hub().files!.delete(".github/workflows/evil.yml");
+  await push(".keep", "reviewed\n", "octo");
+  const before = ((await call("POST", "/api/projects/entry/check", { hub: HUB, name: "ebb", repo: "octo/ebb", entry: "x" })).data as { before: string }).before;
+  const entry = before.replace(/ }$/, ", license: MIT }");
+  const opened = (await call("POST", "/api/projects/entry/propose", { hub: HUB, name: "ebb", repo: "octo/ebb", entry, before })).data as { head: string; entry: string };
+  const merge = () => call("POST", "/api/projects/entry/merge", { hub: HUB, name: "ebb", repo: "octo/ebb", entry: opened.entry, before, sha: opened.head });
+  const yml = hub().files!.get("tapster.yml");
+  between(() => push("README.md", "mine now\n", "mallory"));
+  const at = fake.calls.length;
+  const raced = await merge();
+  fake.fetch = real;
+  expect(reason(raced)).toMatch(/^main changed while tapster merged the entry: [0-9a-f]{7} Write README\.md$/);
+  expect((raced.data.error as { fix: string }).fix).toBe("Nothing was merged. Review those commits on GitHub, then click Merge the update again.");
+  expect(since(at, `PATCH /repos/${HUB}/git/refs/heads/main`)).toBe(1);
+  expect(hub().files!.get("tapster.yml")).toBe(yml);
+  expect(reason(await merge())).toStartWith("main changed in ways only you may change it: README.md changed after your last push");
+  hub().files!.delete("README.md");
+  await push("README.md", "reviewed\n", "octo");
+  expect((await merge()).data).toEqual({ merged: true, deleted: true });
+  expect(hub().files!.get("tapster.yml")).toContain("license: MIT }");
+  expect(hub().history!.activity[0]).toMatchObject({ actor: "octo", after: hub().head });
+});
+
 test("moving main with force: false takes any fast-forward and lets a rewind to an ancestor through, as GitHub does", async () => {
   const api = (method: string, path: string, body?: unknown) => real(`https://api.github.com/repos/${HUB}${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) });
   const commitOn = async (parent: string, content: string) => {
