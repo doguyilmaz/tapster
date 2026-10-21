@@ -21,7 +21,7 @@ export type HubView = {
   protect: { done: boolean; environment: boolean; checks: Check[]; others: OtherWorkflow[] };
   app: { id: string | null; slug: string | null; key: boolean; held: boolean; install: string | null };
   apple: { needed: boolean | null; certificate: { team: string; expires: string } | null; certificateStored: boolean; notary: boolean };
-  files: { config: boolean; state: boolean; readme: boolean; workflow: "missing" | "current" | "older" | "newer" | "other"; pinned: string | null; every: number | null };
+  files: { config: boolean; state: boolean; readme: boolean; workflow: "missing" | "current" | "older" | "newer" | "other"; pinned: string | null; update: "needed" | "optional" | null; every: number | null };
   packages: { name: string; repo: string; kind: string }[];
   invalid: { name: string; reason: string }[];
   issue: { url: string; number: number; updated: string; body: string } | null;
@@ -55,7 +55,8 @@ export type AppStart = { action: string; manifest: string; permissions: string[]
 
 export type FilePlan = { path: string; content: string; before: string | null; change: "create" | "update" | "same" | "remove" };
 
-export type FilesView = { files: FilePlan[]; kept: string[]; pin: string; notes: string[]; foreign: string[]; readme: boolean };
+export type HubCode = { from: string; to: string; changed: string[]; compare: string };
+export type FilesView = { files: FilePlan[]; kept: string[]; pin: string; notes: string[]; foreign: string[]; readme: boolean; hubCode: HubCode | null };
 
 export type ProjectKind = "go" | "bun" | "app";
 

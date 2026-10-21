@@ -61,12 +61,12 @@ export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now(),
       id: "files",
       name: "Hub files",
       done: h.files.config && h.files.state && h.files.workflow !== "missing",
-      attention: h.files.workflow === "older" || h.files.workflow === "other",
+      attention: (h.files.workflow === "older" && h.files.update !== "optional") || h.files.workflow === "other",
       status:
         h.files.workflow === "missing"
           ? ["Not written yet"]
           : h.files.workflow === "older"
-            ? [`Runs ${h.files.pinned}`, "Update available"]
+            ? [`Runs ${h.files.pinned}`, h.files.update === "optional" ? "Newer setup, same hub code" : "Update available"]
             : h.files.workflow === "other"
               ? [`Runs ${h.files.pinned ?? "a workflow tapster did not write"}`, "Review it"]
               : h.files.workflow === "newer"

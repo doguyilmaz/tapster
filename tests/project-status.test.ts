@@ -132,7 +132,7 @@ test("the setup route's project stop reads the project statuses", () => {
     protect: { done: true, environment: true, checks: [], others: [] },
     app: { id: "1", slug: "s", key: true, held: false, install: null },
     apple: { needed: null, certificate: null, certificateStored: false, notary: false },
-    files: { config: true, state: true, readme: true, workflow: "current", pinned: null, every: null },
+    files: { config: true, state: true, readme: true, workflow: "current", pinned: null, update: null, every: null },
     packages: [{ name: "aims", repo: "octo/aims", kind: "go" }],
     invalid: [],
     issue: null,

@@ -19,7 +19,7 @@ import { setEnvSecret } from "../../cli/gh";
 import { decodeSparkleKey } from "../../sparkle-key";
 import { protectHub } from "../../cli/init";
 import { everyFromFlow } from "../../cli/schedule";
-import type { AccountView, AppStart, FilePlan, FilesView, HealthView, HubChoice, HubView, InstallView, OtherWorkflow } from "../contract";
+import type { AccountView, AppStart, FilePlan, FilesView, HealthView, HubCode, HubChoice, HubView, InstallView, OtherWorkflow } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
 import { checkHub, checkedMain, hubFrom, lockedEnvironment, me, or404, writeMain } from "./access";
 import { bellCallback, doorbellView } from "./doorbell";
@@ -224,6 +224,8 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
   const macPackages = parsed?.config.packages.some(macosCode) ?? false;
   const hasApple = Boolean(v("TAPSTER_TEAM_ID")) || names(secrets).includes("MACOS_NOTARY_KEY");
   const pinned = flow ? PIN.exec(flow) : null;
+  const workflow = pinState(flow, TAPSTER, s.deps.pin);
+  const code = workflow === "older" ? await hubCode(gh, flow, s.deps.pin) : null;
   const issue = issues.find((i) => i.title === ISSUE_TITLE && i.user?.login === "github-actions[bot]");
   return {
     name: hub,
@@ -242,8 +244,9 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
       config: config !== null,
       state: state !== null,
       readme: readme !== null,
-      workflow: pinState(flow, TAPSTER, s.deps.pin),
+      workflow,
       pinned: pinned ? `${pinned[2]} (${pinned[1]!.slice(0, 7)})` : null,
+      update: code ? (code.changed.length ? "needed" : "optional") : null,
       every: flow ? everyFromFlow(flow) : null,
     },
     packages: (parsed?.config.packages ?? []).map((p) => ({ name: p.name, repo: p.repo, kind: isApp(p) ? "app" : p.kind })),
@@ -370,10 +373,28 @@ async function notary(c: Ctx) {
 
 const filesQuery = z.object({ hub: z.string(), every: z.number().int().nullable(), remove: z.array(z.string()).max(20), readme: z.boolean() }).strict();
 
+// Code that runs in the hub: the bundled Action, its metadata and the hub's workflow template.
+const HUB_CODE = /^(dist\/|action\.yml$|templates\/hub\/)/;
+export const hubCodeFiles = (files: string[]) => files.filter((f) => HUB_CODE.test(f));
+
+async function hubCode(gh: GitHub, flow: string | null, target: string | null): Promise<HubCode | null> {
+  const pinned = flow ? PIN.exec(flow) : null;
+  if (!pinned || !target || pinned[1] === target) return null;
+  try {
+    const cmp = await gh.json<{ status: string; files?: { filename: string }[] }>("GET", `/repos/doguyilmaz/tapster/compare/${pinned[1]}...${target}`);
+    if (cmp.status !== "ahead") return null;
+    const files = (cmp.files ?? []).map((f) => f.filename);
+    return { from: pinned[2]!, to: `v${TAPSTER.version}`, changed: files.length >= 300 ? ["dist/index.js"] : hubCodeFiles(files), compare: `https://github.com/doguyilmaz/tapster/compare/${pinned[1]!.slice(0, 12)}...${target.slice(0, 12)}` };
+  } catch {
+    return null;
+  }
+}
+
 async function filePlan(c: Ctx, gh: GitHub, hub: string, every: number | null, remove: string[], readme: boolean, read: (p: string) => Promise<string | null>): Promise<FilesView> {
   const repo = await gh.json<{ private: boolean }>("GET", `/repos/${hub}`);
   const plan = await hubFiles(gh, hub, read, c.s.deps.pin, { every, isPrivate: repo.private });
-  const newer = pinState(await read(FLOW), TAPSTER, c.s.deps.pin) === "newer";
+  const flow = await read(FLOW);
+  const newer = pinState(flow, TAPSTER, c.s.deps.pin) === "newer";
   const files: FilePlan[] = [];
   for (const f of plan.files.filter((x) => !(newer && x.path === FLOW))) files.push({ path: f.path, content: f.content, before: f.before, change: f.before === null ? "create" : f.before === f.content ? "same" : "update" });
   const ours = starterFiles(hub).find((f) => f.path === "README.md")!;
@@ -384,7 +405,7 @@ async function filePlan(c: Ctx, gh: GitHub, hub: string, every: number | null, r
     const before = await read(`.github/workflows/${r}`);
     if (before !== null) files.push({ path: `.github/workflows/${r}`, content: "", before, change: "remove" });
   }
-  return { files, kept: plan.kept, pin: newer ? "kept: the hub runs a newer tapster than this one" : plan.change, notes: newer ? [] : plan.notes, foreign: [], readme: current !== null && current !== ours.content };
+  return { files, kept: plan.kept, pin: newer ? "kept: the hub runs a newer tapster than this one" : plan.change, notes: newer ? [] : plan.notes, foreign: [], readme: current !== null && current !== ours.content, hubCode: newer ? null : await hubCode(gh, flow, c.s.deps.pin) };
 }
 
 async function filesPreview(c: Ctx): Promise<FilesView> {

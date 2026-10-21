@@ -10,7 +10,7 @@ const hub = (o: { apple?: Partial<HubView["apple"]>; files?: Partial<HubView["fi
   protect: { done: true, environment: true, checks: [], others: [] },
   app: { id: "1", slug: "s", key: true, held: false, install: null },
   apple: { needed: true, certificate: { team: "5MYT4VYJFC", expires: "2099-02-01" }, certificateStored: true, notary: true, ...o.apple },
-  files: { config: true, state: true, readme: true, workflow: "current", pinned: "v1.6.0 (0123456)", every: null, ...o.files },
+  files: { config: true, state: true, readme: true, workflow: "current", pinned: "v1.6.0 (0123456)", update: null, every: null, ...o.files },
   packages: [],
   invalid: [],
   issue: null,
@@ -18,6 +18,14 @@ const hub = (o: { apple?: Partial<HubView["apple"]>; files?: Partial<HubView["fi
 });
 
 const status = (h: HubView, id: string) => stops(h, null).find((s) => s.id === id)!.status;
+
+test("an older pin needs attention only when the hub's code changed", () => {
+  const files = (h: HubView) => stops(h, null).find((s) => s.id === "files")!;
+  expect(files(hub({ files: { workflow: "older", update: "needed" } })).state).toBe("attention");
+  expect(files(hub({ files: { workflow: "older", update: "optional" } })).state).not.toBe("attention");
+  expect(files(hub({ files: { workflow: "older", update: "optional" } })).status).toEqual(["Runs v1.6.0 (0123456)", "Newer setup, same hub code"]);
+  expect(files(hub({ files: { workflow: "older", update: null } })).state).toBe("attention");
+});
 
 test("a stop that holds two facts shows each on its own line", () => {
   expect(status(hub(), "certificate")).toEqual(["Team 5MYT4VYJFC", "Expires 2099-02-01"]);

@@ -42,6 +42,7 @@ const json = (data: unknown, status = 200, headers: Record<string, string> = {})
 const sha = (s: string) => createHash("sha1").update(s).digest("hex");
 
 export class FakeHub {
+  tapsterCompare: { status: string; files?: { filename: string }[] } | null = null;
   readonly repos = new Map<string, FakeRepo>();
   readonly pem = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString();
   installation: { id: number; repos: string[] } | null = null;
@@ -300,7 +301,7 @@ export class FakeHub {
     if (p === "/installation/repositories") return json({ repositories: (this.installation?.repos ?? []).map((full_name) => ({ full_name })) });
     if (p === "/installation/token") return json({}, 204);
     if (p.startsWith("/user/installations")) return json({ message: "You must authenticate with an access token authorized to a GitHub App in order to list installations" }, 403);
-    if (p.startsWith("/repos/doguyilmaz/tapster/compare/")) return json({ status: "identical" });
+    if (p.startsWith("/repos/doguyilmaz/tapster/compare/")) return json(this.tapsterCompare ?? { status: "identical" });
     const m = /^\/repos\/([^/]+\/[^/]+)(\/.*)?$/.exec(p);
     if (!m) return json({ message: "not found" }, 404);
     const full = m[1]!;
