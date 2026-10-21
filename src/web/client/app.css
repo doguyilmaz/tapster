@@ -68,6 +68,8 @@ a:hover { text-decoration-thickness: 2px; }
 h1, h2, h3 { margin: 0; letter-spacing: -0.015em; line-height: 1.2; }
 p { margin: 0; }
 code, .mono { font-family: var(--mono); font-size: 0.88em; }
+.repo { color: var(--navy); font-weight: 600; }
+.stale { opacity: 0.6; transition: opacity 0.15s; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 6px; }
 button, input, select { font: inherit; color: inherit; }
 .noscript { padding: 2rem; }
