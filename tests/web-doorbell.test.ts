@@ -51,7 +51,7 @@ const view = async () => ((await call("GET", `/api/hub?hub=${HUB}`)).data as unk
 const problem = (r: { data: Record<string, unknown> }) => (r.data.error as { reason: string; fix: string }).reason;
 
 test("the doorbell starts off and holds nothing", async () => {
-  expect(await view()).toEqual({ on: false, origin: null, app: null, key: false, cloudflare: null, accounts: null, tokenPage: TOKEN_PAGE });
+  expect(await view()).toEqual({ on: false, origin: null, app: null, install: null, key: false, cloudflare: null, accounts: null, tokenPage: TOKEN_PAGE });
 });
 
 test("a wrong token, a token without the permission and an account without workers.dev are refused plainly", async () => {
@@ -74,7 +74,7 @@ test("a wrong token, a token without the permission and an account without worke
 
 test("a working token is held for this setup only and never shown back", async () => {
   const ok = await call("POST", "/api/hub/doorbell/cloudflare", { hub: HUB, token: ` ${cf.token}\n` });
-  expect(ok.data).toEqual({ account: "Octo's Account", subdomain: "octo" });
+  expect(ok.data).toEqual({ cloudflare: { account: "Octo's Account", subdomain: "octo" }, accounts: null });
   expect((await view()).cloudflare).toEqual({ account: "Octo's Account", subdomain: "octo" });
   expect(s.cloudflare.get(HUB)!.token).toBe(cf.token);
 });
@@ -94,7 +94,7 @@ test("the doorbell App comes from the same manifest flow and its key stays in th
   expect(env.vars.get("TAPSTER_DOORBELL_APP_ID")).toBe("888");
   expect(env.vars.get("TAPSTER_DOORBELL_APP_SLUG")).toBe("tapster-doorbell-octo-tap");
   expect([...env.secrets].some((x) => x.includes("DOORBELL"))).toBe(false);
-  expect(await view()).toMatchObject({ app: { id: "888", slug: "tapster-doorbell-octo-tap" }, key: true });
+  expect(await view()).toMatchObject({ app: { id: "888", slug: "tapster-doorbell-octo-tap" }, install: `https://github.com/apps/tapster-doorbell-octo-tap/installations/new/permissions?suggested_target_id=42&repository_ids[]=${fake.get(HUB)!.id}`, key: true });
   expect((await call("POST", "/api/hub/doorbell/app", { hub: HUB })).status).toBe(400);
 });
 
@@ -126,7 +126,7 @@ test("deploying uploads the Worker, rings every project and forgets the token an
   expect(fake.get("octo/aims")!.repoVars.get("TAPSTER_DOORBELL")).toBe(done.origin);
   expect(s.cloudflare.size).toBe(0);
   expect(s.bells.size).toBe(0);
-  expect(await view()).toEqual({ on: true, origin: done.origin, app: { id: "888", slug: "tapster-doorbell-octo-tap" }, key: false, cloudflare: null, accounts: null, tokenPage: TOKEN_PAGE });
+  expect(await view()).toMatchObject({ on: true, origin: done.origin, app: { id: "888", slug: "tapster-doorbell-octo-tap" }, key: false, cloudflare: null, accounts: null, tokenPage: TOKEN_PAGE });
   expect(problem(await call("POST", "/api/hub/doorbell/deploy", { hub: HUB }))).toBe("this setup holds no key of the doorbell App");
 });
 

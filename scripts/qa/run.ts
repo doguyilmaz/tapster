@@ -20,9 +20,9 @@ const { fake, cf, sparkle, home } = await demo(8299, (line) => {
 while (!links.length) await Bun.sleep(50);
 const page = await launch();
 const shots: string[] = [];
-const shot = async (name: string) => {
+const shot = async (name: string, full = true) => {
   const path = join(out, `${name}.png`);
-  await page.shot(path);
+  await page.shot(path, full);
   shots.push(path);
 };
 const axe = process.env.AXE ? await Bun.file(process.env.AXE).text() : null;
@@ -32,6 +32,51 @@ const audit = async (name: string) => {
   await page.eval(`window.axe ? 0 : (0, eval)(${JSON.stringify(axe)})`);
   const found = await page.eval<{ id: string; impact: string; nodes: string[] }[]>("axe.run(document, { resultTypes: ['violations'] }).then((r) => r.violations.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) })))");
   findings.push(...found.map((v) => `${name}: ${v.id} (${v.impact}) ${v.nodes.join(", ")}`));
+};
+const wrong: string[] = [];
+const RED = String.raw`(() => {
+  const red = (c) => {
+    const m = /rgba?\((\d+),? (\d+),? (\d+)/.exec(c) ?? /color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/.exec(c);
+    if (!m) return false;
+    const scale = c.startsWith('color(') ? 1 : 255;
+    const [r, g, b] = [m[1], m[2], m[3]].map((x) => Number(x) / scale);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    if (max - min < 0.15) return false;
+    const h = max === r ? (60 * ((g - b) / (max - min)) + 360) % 360 : max === g ? 60 * ((b - r) / (max - min)) + 120 : 60 * ((r - g) / (max - min)) + 240;
+    return h < 18 || h > 335;
+  };
+  const out = [];
+  for (const svg of document.querySelectorAll('svg.icon')) if (svg.querySelector('path[d="M20 6 9 17l-5-5"]') && red(getComputedStyle(svg).color)) out.push('check icon in ' + (svg.parentElement.className || svg.parentElement.tagName));
+  for (const el of document.querySelectorAll('.seal, .done .dot, .badge.ok, .note.ok, .checks .ok')) {
+    const s = getComputedStyle(el);
+    const c = [s.color, s.backgroundColor, ...(s.backgroundImage.match(/(rgba?|color)\([^)]*\)/g) ?? [])].find(red);
+    if (c) out.push(el.className + ' ' + c);
+  }
+  return out;
+})()`;
+const colors = async (name: string) => wrong.push(...(await page.eval<string[]>(RED)).map((x) => `${name}: ${x}`));
+const FLASH = ["Checking your GitHub sign-in", "Reading octo/homebrew-tap from GitHub", "Choose your hub"];
+const SEEN = `window.__seen = []; new MutationObserver(() => { const t = document.body ? document.body.innerText : ''; for (const w of ${JSON.stringify(FLASH)}) if (t.includes(w) && !window.__seen.includes(w)) window.__seen.push(w); }).observe(document, { subtree: true, childList: true, characterData: true });`;
+const comeBack = async (url: string, title: string) => {
+  const { identifier } = await page.send<{ identifier: string }>("Page.addScriptToEvaluateOnNewDocument", { source: SEEN });
+  fake.lag = 400;
+  await page.goto(url);
+  await page.waitFor(`document.body.textContent.includes(${JSON.stringify(title)})`, 5000);
+  fake.lag = 0;
+  await page.send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+};
+const flashed = async (name: string) => {
+  const seen = await page.eval<string[]>("window.__seen");
+  if (seen.length) throw new Error(`${name} flashed ${seen.join(", ")}`);
+};
+const clickOut = (text: string) =>
+  page.eval<string>(`(() => { const a = [...document.querySelectorAll('a')].find((e) => e.textContent.includes(${JSON.stringify(text)})); a.addEventListener('click', (e) => e.preventDefault(), { once: true }); a.click(); return a.getAttribute('href'); })()`);
+const toLinux = "(() => { const h = [...document.querySelectorAll('h3')].find((e) => e.textContent === 'apt and dnf repositories'); scrollTo(0, h.getBoundingClientRect().top + scrollY - 90); })()";
+const cfFetch = cf.fetch;
+let cfLag = 0;
+cf.fetch = async (input, init) => {
+  if (cfLag) await Bun.sleep(cfLag);
+  return cfFetch(input, init);
 };
 try {
   await page.size(1280, 860);
@@ -48,9 +93,18 @@ try {
   await page.waitFor("document.querySelector('form[action^=\"https://github.com/settings/apps/new\"]')");
   await shot("03-app");
   const state = await page.eval<string>("new URL(document.querySelector('form').action).searchParams.get('state')");
-  await page.goto(`http://127.0.0.1:8299/app/callback?code=democode&state=${state}`);
+  await comeBack(`http://127.0.0.1:8299/app/callback?code=democode&state=${state}`, "Back from GitHub: finishing the GitHub App");
+  await shot("04a-app-back", false);
   await page.waitFor("document.body.textContent.includes('Install it on your projects')");
+  await flashed("the App's return");
+  if (await page.eval<boolean>("document.body.textContent.includes('Waiting for your click') || Boolean(document.querySelector('.panel .spin'))")) throw new Error("the App's install step spins before the click");
   await shot("04-app-created");
+  await audit("app-install-ask");
+  const appLink = await clickOut("Install the App");
+  if (appLink !== "https://github.com/apps/tapster-octo-tap/installations/new") throw new Error(`the App's install link is ${appLink}`);
+  await page.waitFor("document.body.textContent.includes('Waiting for your click on GitHub')");
+  await shot("04b-app-waiting");
+  await audit("app-install-waiting");
   fake.installation = { id: 9, repos: ["octo/ebb"] };
   await page.waitFor("document.body.textContent.includes('The App is installed')", 15000);
   await shot("05-installed");
@@ -70,6 +124,8 @@ try {
   await page.clickText("Check and store");
   await page.waitFor("document.body.textContent.includes('Replace the certificate')", 15000);
   await shot("07b-certificate-stored");
+  await page.waitFor("[...document.querySelectorAll('.route li')].some((li) => /^Team ABCDE12345\\|Expires \\d{4}-\\d{2}-\\d{2}$/.test([...li.querySelectorAll('.stop-state')].map((s) => s.textContent).join('|')))");
+  await shot("07c-route-two-lines", false);
   await page.clickText("Notarization key", ".route button");
   await shot("08-notary");
   await page.upload("input[name=p8]", join(dir, "AuthKey_ABCDE12345.p8"));
@@ -85,11 +141,16 @@ try {
   await page.clickText("to main", "button");
   await page.waitFor("document.body.textContent.includes('git pull')");
   await shot("10-files-written");
+  await page.waitFor("document.body.textContent.includes('The hub files are up to date')");
+  await page.eval("(() => { document.querySelector('.toast')?.click(); document.querySelector('.seal').scrollIntoView({ block: 'center' }); })()");
+  await shot("10a-files-done-seal", false);
+  await colors("files-done");
   fake.get("octo/homebrew-tap")!.files!.set("tapster.yml", `version: 1\ntap: octo/tap\npackages:\n  - { name: pix, repo: octo/pix, kind: app, app: Pix.app, bundle_id: com.octo.Pix, assets: { darwin-arm64: "Pix-{version}.app.tar.gz" }, dmg: { name: "Pix-{version}.dmg" }, sparkle: { key: pix, public_key: "${sparkle.publicKey}" } }\n`);
   await page.eval("location.reload()");
   await page.waitFor("document.querySelector('.route')");
   await page.clickText("Optional extras", ".route button");
   await shot("10b-extras");
+  await colors("extras");
   await page.clickText("Read it from my keychain");
   await page.waitFor("document.body.textContent.includes('Paste the key')");
   await shot("10c-sparkle");
@@ -110,6 +171,7 @@ try {
   await Bun.sleep(300);
   await shot("11b-aims");
   await audit("aims-sheet");
+  await colors("status-card");
   await page.clickText("Install the App on aims", ".sheet a");
   await page.waitFor("document.body.textContent.includes('come back to this page') || document.body.textContent.includes('The hub checks its App now')");
   fake.installation = { id: 9, repos: ["octo/ebb", "octo/aims"] };
@@ -190,17 +252,37 @@ try {
   await page.waitFor("document.body.textContent.includes('The token reaches several Cloudflare accounts')", 15000);
   await shot("13d2-doorbell-accounts");
   await audit("doorbell-accounts");
+  cfLag = 1500;
   await page.clickText("Octo's Account", ".choice");
+  await page.waitFor(`document.querySelector('.choice[aria-pressed="true"][aria-busy="true"]') && [...document.querySelectorAll('.choice')].every((b) => b.disabled)`, 1000);
+  await shot("13d3-doorbell-picking");
+  await audit("doorbell-picking");
+  cfLag = 0;
   await page.waitFor("document.body.textContent.includes('tapster keeps the token in memory')", 15000);
   await page.waitFor("document.querySelector('form[action^=\"https://github.com/settings/apps/new\"]')");
   await shot("13e-doorbell-app");
   await audit("doorbell-app");
+  await page.eval(`(() => { const f = document.querySelector('form[action^="https://github.com/settings/apps/new"]'); f.addEventListener('submit', (e) => e.preventDefault()); f.requestSubmit(); })()`);
+  await page.waitFor(`[...document.querySelectorAll('button[aria-busy="true"]')].some((b) => b.textContent.includes('Opening GitHub'))`, 2000);
+  await shot("13e2-doorbell-app-opening");
+  await audit("doorbell-app-opening");
   const bellState = await page.eval<string>("new URL(document.querySelector('form[action^=\"https://github.com/settings/apps/new\"]').action).searchParams.get('state')");
   fake.manifestApp = { id: 888, slug: "tapster-doorbell-octo-tap", pem: fake.pem };
   fake.bell = { id: 888, slug: "tapster-doorbell-octo-tap", pem: fake.pem, installation: null };
-  await page.goto(`http://127.0.0.1:8299/app/callback?code=bellcode&state=${bellState}`);
+  await comeBack(`http://127.0.0.1:8299/app/callback?code=bellcode&state=${bellState}`, "Back from GitHub: finishing the doorbell App");
+  await shot("13f0-doorbell-back", false);
   await page.waitFor("document.body.textContent.includes('Install the doorbell App')", 15000);
+  await flashed("the doorbell App's return");
+  await page.waitFor("window.scrollY > 0 && document.getElementById('doorbell').getBoundingClientRect().top < innerHeight / 2", 3000);
+  await shot("13f1-doorbell-landed", false);
+  if (await page.eval<boolean>("Boolean(document.querySelector('#doorbell .steps > li:nth-child(3) .spin')) || document.body.textContent.includes('Waiting for your click')")) throw new Error("the doorbell's install step spins before the click");
   await shot("13f-doorbell-install");
+  await audit("doorbell-install-ask");
+  const bellLink = await clickOut("Install the doorbell App");
+  if (bellLink !== `https://github.com/apps/tapster-doorbell-octo-tap/installations/new/permissions?suggested_target_id=42&repository_ids[]=${fake.get("octo/homebrew-tap")!.id}`) throw new Error(`the doorbell's install link is ${bellLink}`);
+  await page.waitFor("document.body.textContent.includes('Waiting for your click on GitHub') && Boolean(document.querySelector('#doorbell .steps > li:nth-child(3) .spin'))");
+  await shot("13f2-doorbell-waiting");
+  await audit("doorbell-install-waiting");
   fake.bell.installation = { id: 56, repos: ["octo/homebrew-tap"] };
   await page.waitFor("document.body.textContent.includes('Installed on octo/homebrew-tap only')", 15000);
   await page.clickText("Deploy the doorbell");
@@ -212,13 +294,19 @@ try {
   await shot("13h-linux-key");
   await page.type("input[name=maintainer]", "Octo Cat <octo@example.com>");
   await page.clickText("Ship aims to apt and dnf", "label");
-  await page.clickText("Write to tapster.yml");
-  await page.waitFor("document.body.textContent.includes('Wrote the Linux settings')", 15000);
-  await shot("13i-linux-config");
+  await page.waitFor("document.body.textContent.includes('The change to tapster.yml') && [...document.querySelectorAll('button')].some((b) => b.textContent.includes('Write the maintainer and 1 tool to tapster.yml'))", 15000);
+  await page.eval(toLinux);
+  await shot("13i0-linux-change", false);
+  await audit("linux-change");
+  await page.clickText("Write the maintainer and 1 tool to tapster.yml", "button");
+  await page.waitFor("document.body.textContent.includes('Wrote the Linux settings') && document.body.textContent.includes('On now: aims')", 15000);
+  await page.eval(toLinux);
+  await shot("13i-linux-config", false);
   await audit("linux-config");
   await page.clickText("Health", "nav a");
   await page.waitFor("document.querySelector('.card.list')", 15000);
   await shot("14-health");
+  await colors("health");
   await page.size(390, 844, true);
   await page.clickText("Setup", "nav a");
   await page.waitFor("document.querySelector('.route')");
@@ -226,9 +314,21 @@ try {
   await page.clickText("Optional extras", ".route button");
   await shot("15b-phone-extras");
   await audit("phone-extras");
+  await page.waitFor("document.body.textContent.includes('The signing key is stored')");
+  await page.clickText("Ship hafifpix to apt and dnf", "label");
+  await page.waitFor("document.body.textContent.includes('The change to tapster.yml')", 15000);
+  await page.eval(toLinux);
+  await shot("15c-phone-linux", false);
+  await audit("phone-linux");
+  await colors("phone-linux");
   await page.scheme(true);
+  await shot("15d-phone-linux-dark", false);
+  await audit("phone-linux-dark");
+  await colors("phone-linux-dark");
+  await page.eval("scrollTo(0, 0)");
   await shot("16-phone-dark");
   await audit("phone-extras-dark");
+  await colors("phone-extras-dark");
   await page.clickText("Projects", "nav a");
   await page.waitFor("document.body.textContent.includes('Set up the release workflow')", 20000);
   await shot("16b-phone-projects-dark");
@@ -249,6 +349,9 @@ try {
   await page.clickText("Optional extras", ".route button");
   await shot("17b-extras-dark");
   await audit("extras-dark");
+  await colors("extras-dark");
+  await page.eval(toLinux);
+  await shot("17c-linux-dark", false);
   await page.clickText("Projects", "nav a");
   await page.scheme(false);
   await Bun.sleep(400);
@@ -320,6 +423,8 @@ try {
   console.log(shots.join("\n"));
   console.log(page.errors.length ? `CONSOLE ERRORS:\n${page.errors.join("\n")}` : "no console errors");
   if (axe) console.log(findings.length ? `AXE VIOLATIONS:\n${findings.join("\n")}` : "no axe violations");
+  console.log(wrong.length ? `RED SUCCESS MARKS:\n${wrong.join("\n")}` : "no red success marks");
+  if (findings.length || wrong.length) process.exitCode = 1;
   page.close();
   process.exit();
 }

@@ -11,6 +11,7 @@ import { TAPSTER } from "../../version";
 import { P12_LIMIT, P8_LIMIT, inspectP12, notaryKey, saveCertificate, saveNotary } from "../../cli/apple";
 import { convertManifest, permissionLines } from "../../cli/appflow";
 import { doctorChecks, hubRulesetCheck, policyCheck } from "../../cli/doctor";
+import { installLink } from "../../cli/hubpr";
 import { appInstallation, appManifest, storeApp } from "../../cli/hubapp";
 import { FLOW, PIN, hubFiles, patchSparkleEnv, pinState, sparkleLabels, starterFiles } from "../../cli/hubfiles";
 import { keyPins } from "../../cli/init";
@@ -99,32 +100,56 @@ export function otherWorkflows(flows: Record<string, string>): OtherWorkflow[] {
 
 type Named = { name: string; value?: string };
 
+const quiet = (...ps: Promise<unknown>[]) => ps.forEach((p) => p.catch(() => undefined));
+
+const repoIds = (s: Session, gh: GitHub, repos: string[]) =>
+  Promise.all(
+    repos.map((r) => {
+      const key = `repo-id:${r.toLowerCase()}`;
+      const known = s.memo.get(key) as Promise<number> | undefined;
+      if (known) return known;
+      const id = gh.getRepo(r).then((x) => x.id);
+      s.memo.set(key, id);
+      id.catch(() => s.memo.delete(key));
+      return id;
+    }),
+  );
+
+// The hub App must never reach the hub, so its install page preselects the hub's projects and nothing else.
+async function appInstall(s: Session, gh: GitHub, hub: string, slug: string, ownerId: number, packages: { repo: string }[]): Promise<string> {
+  const owner = hub.split("/")[0]!.toLowerCase();
+  const repos = [...new Set(packages.map((p) => p.repo).filter((r) => r.split("/")[0]!.toLowerCase() === owner && r.toLowerCase() !== hub.toLowerCase()))];
+  if (!repos.length) return `https://github.com/apps/${slug}/installations/new`;
+  const ids = await repoIds(s, gh, repos).catch(() => null);
+  return ids ? installLink(slug, ownerId, ...ids) : `https://github.com/apps/${slug}/installations/new`;
+}
+
 export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubView> {
-  const repo = await gh.json<{ private: boolean; html_url: string }>("GET", `/repos/${hub}`);
-  const branch = await mainRef(gh, hub);
+  const repoP = gh.json<{ id: number; private: boolean; html_url: string; owner: { id: number } }>("GET", `/repos/${hub}`);
+  const branchP = mainRef(gh, hub);
+  const envP = or404(gh.json<{ deployment_branch_policy: { custom_branch_policies: boolean } | null }>("GET", `/repos/${hub}/environments/tapster`));
+  const rulesetIdsP = gh.json<{ id: number }[]>("GET", `/repos/${hub}/rulesets`).catch(() => []);
+  const actionsP = gh.json<{ allowed_actions?: string; sha_pinning_required?: boolean }>("GET", `/repos/${hub}/actions/permissions`);
+  const tokenPermsP = gh.json<{ default_workflow_permissions: string }>("GET", `/repos/${hub}/actions/permissions/workflow`);
+  const issuesP = gh.json<{ title: string; html_url: string; number: number; updated_at: string; body: string | null; user: { login: string } | null }[]>("GET", `/repos/${hub}/issues?state=open&creator=${encodeURIComponent("github-actions[bot]")}&per_page=100`).catch(() => []);
+  quiet(branchP, envP, actionsP, tokenPermsP);
+  const repo = await repoP;
+  const [branch, env, rulesetIds, actions, tokenPerms, issues] = await Promise.all([branchP, envP, rulesetIdsP, actionsP, tokenPermsP, issuesP]);
   const empty = branch === null;
-  const env = await or404(gh.json<{ deployment_branch_policy: { custom_branch_policies: boolean } | null }>("GET", `/repos/${hub}/environments/tapster`));
   const list = async (kind: "variables" | "secrets") => (env ? ((await gh.json<Record<string, Named[]>>("GET", `/repos/${hub}/environments/tapster/${kind}?per_page=100`))[kind] ?? []) : []);
-  const [vars, secrets, policies, rulesetIds, actions, tokenPerms] = await Promise.all([
+  const read = (path: string) => (empty ? Promise.resolve(null) : readHubFile(gh, hub, path, "main"));
+  const [vars, secrets, policies, rulesets, selected, config, state, readme, flow, flowDir] = await Promise.all([
     list("variables"),
     list("secrets"),
     env ? gh.json<{ branch_policies: { name: string; type?: string }[] }>("GET", `/repos/${hub}/environments/tapster/deployment-branch-policies`) : Promise.resolve({ branch_policies: [] }),
-    gh.json<{ id: number }[]>("GET", `/repos/${hub}/rulesets`).catch(() => []),
-    gh.json<{ allowed_actions?: string; sha_pinning_required?: boolean }>("GET", `/repos/${hub}/actions/permissions`),
-    gh.json<{ default_workflow_permissions: string }>("GET", `/repos/${hub}/actions/permissions/workflow`),
-  ]);
-  const rulesets = await Promise.all(rulesetIds.map((r) => gh.json<Parameters<typeof hubRulesetCheck>[0][number]>("GET", `/repos/${hub}/rulesets/${r.id}`)));
-  const selected = actions.allowed_actions === "selected" ? await gh.json<{ github_owned_allowed?: boolean; verified_allowed?: boolean; patterns_allowed?: string[] }>("GET", `/repos/${hub}/actions/permissions/selected-actions`) : null;
-  const read = (path: string) => (empty ? Promise.resolve(null) : readHubFile(gh, hub, path, "main"));
-  const [config, state, readme, flow, flowDir] = await Promise.all([
+    Promise.all(rulesetIds.map((r) => gh.json<Parameters<typeof hubRulesetCheck>[0][number]>("GET", `/repos/${hub}/rulesets/${r.id}`))),
+    actions.allowed_actions === "selected" ? gh.json<{ github_owned_allowed?: boolean; verified_allowed?: boolean; patterns_allowed?: string[] }>("GET", `/repos/${hub}/actions/permissions/selected-actions`) : Promise.resolve(null),
     read("tapster.yml"),
     read(".tapster/state.json"),
     read("README.md"),
     read(FLOW),
     empty ? Promise.resolve([]) : gh.json<{ name: string; type: string }[]>("GET", `/repos/${hub}/contents/.github/workflows?ref=main`).catch(() => []),
   ]);
-  const flows: Record<string, string> = {};
-  for (const f of flowDir.filter((x) => x.type === "file" && /\.ya?ml$/.test(x.name))) flows[f.name] = (await read(`.github/workflows/${f.name}`)) ?? "";
   const names = (xs: Named[]) => xs.map((x) => x.name);
   const v = (n: string) => vars.find((x) => x.name === n)?.value ?? null;
   const parsed = config === null ? null : (() => {
@@ -134,6 +159,13 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
       return null;
     }
   })();
+  const appSlug = v("TAPSTER_APP_SLUG");
+  const others = flowDir.filter((x) => x.type === "file" && /\.ya?ml$/.test(x.name) && x.name !== "tapster.yml");
+  const [flows, install, linux] = await Promise.all([
+    Promise.all(others.map(async (f) => [f.name, (await read(`.github/workflows/${f.name}`)) ?? ""] as const)).then((pairs) => Object.fromEntries(pairs)),
+    appSlug ? appInstall(s, gh, hub, appSlug, repo.owner.id, parsed?.config.packages ?? []) : Promise.resolve(null),
+    linuxView(s, hub, config, parsed?.config ?? null, names(secrets)),
+  ]);
   const policyOk = Boolean(env?.deployment_branch_policy?.custom_branch_policies) && policies.branch_policies.length === 1 && policies.branch_policies[0]!.name === "main";
   const checks = [
     { label: "a tapster environment that only main may open", ok: policyOk },
@@ -146,7 +178,6 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
   const macPackages = parsed?.config.packages.some(macosCode) ?? false;
   const hasApple = Boolean(v("TAPSTER_TEAM_ID")) || names(secrets).includes("MACOS_NOTARY_KEY");
   const pinned = flow ? PIN.exec(flow) : null;
-  const issues = await gh.json<{ title: string; html_url: string; number: number; updated_at: string; body: string | null; user: { login: string } | null }[]>("GET", `/repos/${hub}/issues?state=open&creator=${encodeURIComponent("github-actions[bot]")}&per_page=100`).catch(() => []);
   const issue = issues.find((i) => i.title === ISSUE_TITLE && i.user?.login === "github-actions[bot]");
   return {
     name: hub,
@@ -154,7 +185,7 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
     private: repo.private,
     empty,
     protect: { done: checks.every((x) => x.ok), environment: policyOk, checks, others: otherWorkflows(flows) },
-    app: { id: appId, slug: v("TAPSTER_APP_SLUG"), key: names(secrets).includes("TAPSTER_APP_PRIVATE_KEY"), held: Boolean(held), installed: held ? await installView(s, hub) : null },
+    app: { id: appId, slug: appSlug, key: names(secrets).includes("TAPSTER_APP_PRIVATE_KEY"), held: Boolean(held), install },
     apple: {
       needed: hasApple || macPackages ? true : null,
       certificate: v("TAPSTER_TEAM_ID") ? { team: v("TAPSTER_TEAM_ID")!, expires: v("TAPSTER_CERT_EXPIRES") ?? "" } : null,
@@ -173,8 +204,8 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
     invalid: (parsed?.invalid ?? []).map((i) => ({ name: i.name, reason: i.reason })),
     issue: issue ? { url: issue.html_url, number: issue.number, updated: issue.updated_at, body: issue.body ?? "" } : null,
     extras: {
-      doorbell: doorbellView(s, hub, v),
-      linux: await linuxView(s, hub, config, parsed?.config ?? null, names(secrets)),
+      doorbell: doorbellView(s, hub, v, { owner: repo.owner.id, hub: repo.id }),
+      linux,
       sparkle: (parsed ? sparkleLabels(parsed.config) : []).map((label) => ({ label, stored: names(secrets).includes(`SPARKLE_KEY_${label.toUpperCase()}`) })),
     },
   };
@@ -218,6 +249,8 @@ export async function appCallback(c: Ctx): Promise<Response> {
   if (!pending || !/^[A-Za-z0-9_-]{1,128}$/.test(code)) return back({ app: "unknown" });
   c.s.pending.delete(state);
   if (pending.kind === "doorbell") return bellCallback(c, pending, code, back);
+  const locked = c.s.deps.github().then((gh) => lockedEnvironment(gh, pending.hub));
+  quiet(locked);
   let created: Awaited<ReturnType<typeof convertManifest>>;
   try {
     created = await convertManifest(code, pending.owner, "If GitHub created the App anyway, delete it at https://github.com/settings/apps first, because its name would block a new one. Then create it again.", c.s.deps.fetch);
@@ -227,7 +260,7 @@ export async function appCallback(c: Ctx): Promise<Response> {
   }
   c.s.apps.set(pending.hub, { id: String(created.id), pem: created.pem, slug: created.slug });
   try {
-    await lockedEnvironment(await c.s.deps.github(), pending.hub);
+    await locked;
     await storeApp(pending.hub, created);
     return back({ app: "created", hub: pending.hub });
   } catch (e) {

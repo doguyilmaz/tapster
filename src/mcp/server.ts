@@ -69,7 +69,7 @@ export const TOOLS: Tool[] = [
       const view = await hubView(newSession(ctx.deps, 0), gh, hub);
       return {
         hub,
-        steps: stops(view, null).map((s) => ({ step: s.name, state: s.state, status: s.status })),
+        steps: stops(view, null).map((s) => ({ step: s.name, state: s.state, status: s.status.join("; ") })),
         projects: view.packages,
         refused: view.invalid,
         healthIssue: view.issue ? { url: view.issue.url, updated: view.issue.updated, body: view.issue.body } : null,

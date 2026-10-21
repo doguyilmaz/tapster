@@ -362,8 +362,8 @@ export async function tagAt(gh: GitHub, repo: string, refs: TagRef[], sha: strin
 
 export const releaseSecrets = (names: string[]) => names.filter((n) => /^(HOMEBREW_TAP_|MACOS_)/.test(n));
 
-export const installLink = (slug: string, ownerId: number, repoId: number) =>
-  `https://github.com/apps/${slug}/installations/new/permissions?suggested_target_id=${ownerId}&repository_ids[]=${repoId}`;
+export const installLink = (slug: string, ownerId: number, ...repoIds: number[]) =>
+  `https://github.com/apps/${slug}/installations/new/permissions?suggested_target_id=${ownerId}${repoIds.map((id) => `&repository_ids[]=${id}`).join("")}`;
 
 export function autoTagSteps(checkout: { sha: string; tag: string }): string {
   return [

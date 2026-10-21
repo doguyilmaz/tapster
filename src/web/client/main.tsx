@@ -6,8 +6,9 @@ import { AccountGate, Stopped, Waiting, NoSession } from "./gates";
 import { Health } from "./health";
 import { HubChooser } from "./hubs";
 import { Projects } from "./projects";
-import { Setup } from "./setup";
-import { account, appResult, chooseHub, doorbellResult, go, hubName, loadAccount, loadHub, openStop, path, problemOf, say, session, toast } from "./state";
+import { Back, Setup } from "./setup";
+import { landing } from "../steps";
+import { account, appResult, back, chooseHub, doorbellResult, go, hubName, loadAccount, loadHub, openStop, path, problemOf, say, session, toast } from "./state";
 import { Icon, Note } from "./ui";
 
 type Boot = { kind: "claiming" } | { kind: "ready" } | { kind: "no-session" } | { kind: "failed"; problem: ProblemView } | { kind: "stopped" };
@@ -15,20 +16,14 @@ const boot = signal<Boot>({ kind: "claiming" });
 const choosing = signal(false);
 
 function readReturn(): void {
-  const q = new URLSearchParams(location.search);
-  const app = q.get("app");
-  const bell = q.get("doorbell");
-  if (!app && !bell) return;
-  const name = q.get("hub");
-  if (name && name !== hubName.value) chooseHub(name);
-  const problem = { reason: q.get("reason") ?? "the App could not be created", fix: q.get("fix") ?? "Try again." };
-  if (bell) {
-    doorbellResult.value = bell === "created" ? { kind: "created" } : { kind: bell === "unstored" ? "unstored" : "failed", problem };
-    openStop.value = "extras";
-  } else if (app === "created") appResult.value = { kind: "created" };
-  else if (app === "failed" || app === "unstored") appResult.value = { kind: app, problem };
-  else appResult.value = { kind: "unknown" };
+  const l = landing(location.search);
+  if (!l) return;
   history.replaceState(null, "", location.pathname);
+  if (l.hub && l.hub !== hubName.value) chooseHub(l.hub, false);
+  appResult.value = l.app;
+  doorbellResult.value = l.doorbell;
+  openStop.value = l.open;
+  back.value = l;
 }
 
 async function start(): Promise<void> {
@@ -52,8 +47,7 @@ async function start(): Promise<void> {
     session.value = s;
     if (!hubName.value && s.here.hub) chooseHub(s.here.hub);
   });
-  await loadAccount();
-  if (hubName.value) void loadHub();
+  await Promise.all([loadAccount(), hubName.value ? loadHub() : null]);
 }
 
 whenSignedOut(() => {
@@ -164,6 +158,16 @@ function App() {
   if (b.kind === "stopped") return <Stopped />;
   if (b.kind === "no-session" || b.kind === "failed") return <NoSession problem={b.kind === "failed" ? b.problem : null} />;
   const acc = account.value;
+  if (!acc && back.value) {
+    return (
+      <>
+        <Header />
+        <main id="main">
+          <Back title={back.value.title} />
+        </main>
+      </>
+    );
+  }
   if (!acc) return <Waiting text="Checking your GitHub sign-in" />;
   if (acc.state !== "ok" || acc.missing.length) return <AccountGate />;
   return (

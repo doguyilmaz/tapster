@@ -16,7 +16,7 @@ export type HubView = {
   private: boolean;
   empty: boolean;
   protect: { done: boolean; environment: boolean; checks: Check[]; others: OtherWorkflow[] };
-  app: { id: string | null; slug: string | null; key: boolean; held: boolean; installed: InstallView | null };
+  app: { id: string | null; slug: string | null; key: boolean; held: boolean; install: string | null };
   apple: { needed: boolean | null; certificate: { team: string; expires: string } | null; certificateStored: boolean; notary: boolean };
   files: { config: boolean; state: boolean; readme: boolean; workflow: "missing" | "current" | "older" | "newer" | "other"; pinned: string | null; every: number | null };
   packages: { name: string; repo: string; kind: string }[];
@@ -29,17 +29,22 @@ export type DoorbellView = {
   on: boolean;
   origin: string | null;
   app: { id: string; slug: string } | null;
+  install: string | null;
   key: boolean;
-  cloudflare: { account: string; subdomain: string } | null;
-  accounts: { id: string; name: string }[] | null;
   tokenPage: string;
-};
+} & BellCloud;
+
+export type BellCloud = { cloudflare: { account: string; subdomain: string } | null; accounts: { id: string; name: string }[] | null };
 
 export type BellInstallView = { id: number | null; others: string[] };
 
 export type DoorbellDone = { origin: string; rung: string[]; missed: string[] };
 
-export type LinuxView = { wanted: boolean; stored: boolean; gpg: boolean; keystore: "keychain" | "keyring" | null; maintainer: string | null; tools: { name: string; on: boolean }[] };
+export type LinuxTool = { name: string; repo: string; kind: "go" | "bun"; archives: string[]; on: boolean };
+
+export type LinuxView = { wanted: boolean; stored: boolean; gpg: boolean; keystore: "keychain" | "keyring" | null; maintainer: string | null; tools: LinuxTool[]; left: { name: string; why: string }[] };
+
+export type LinuxChange = { before: string; after: string };
 
 export type InstallView = { checked: boolean; id: number | null; onHub: boolean; repos: string[] };
 

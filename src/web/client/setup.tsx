@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { AppStart, FilesView, HubView, InstallView, Problem as ProblemView } from "../contract";
-import { ApiError, get, post } from "./api";
-import { type Stop, type StopId, changedOnly, expiresSoon, firstOpen, lineDiff, macNeeded, stops } from "../steps";
+import { ApiError, post } from "./api";
+import { type Stop, type StopId, changedOnly, expiresSoon, firstOpen, installStep, lineDiff, macNeeded, stops } from "../steps";
 import { clonePaths, targetOf } from "./projects";
 import { type SheetTarget, ProjectSheet } from "./sheet";
-import { appResult, clones, go, hub, hubError, hubLoading, hubName, loadClones, loadHub, loadStatuses, mac, macChoice, openStop, problemOf, say, setMac, statusError, statuses } from "./state";
+import { appResult, back, clones, go, hub, hubError, hubLoading, hubName, loadClones, loadHub, loadStatuses, mac, macChoice, openStop, problemOf, say, setMac, statusError, statuses } from "./state";
 import { StatusRows } from "./status";
 import { Extras } from "./extras";
-import { Badge, Busy, Cmd, Done, Field, FileDrop, Head, Icon, Note, Out, Password, Problem, Spinner, savedFor, useAction } from "./ui";
+import { Badge, Busy, Cmd, Done, Field, FileDrop, Head, Icon, ManifestForm, Note, Out, Password, Problem, Spinner, savedFor, useAction, useInstall } from "./ui";
 
 function Dot({ stop, index }: { stop: Stop; index: number }) {
   if (stop.state === "done") return <span class="dot"><Icon name="check" /></span>;
@@ -73,58 +73,48 @@ function Protect({ h }: { h: HubView }) {
 }
 
 function Installation({ h, slug }: { h: HubView; slug: string }) {
-  const [view, setView] = useState<InstallView | null>(h.app.installed);
-  useEffect(() => {
-    if (!h.app.installed) return;
-    let timer = 0;
-    let wait = 4000;
-    const tick = async () => {
-      if (!document.hidden) {
-        try {
-          const next = await get<InstallView>(`/api/hub/installation?hub=${encodeURIComponent(h.name)}`);
-          setView(next);
-          wait = next.id !== null && !next.onHub ? 30000 : 4000;
-        } catch {
-          wait = Math.min(wait * 2, 30000);
-        }
-      }
-      timer = window.setTimeout(tick, wait);
-    };
-    timer = window.setTimeout(tick, 500);
-    return () => clearTimeout(timer);
-  }, [h.name, Boolean(h.app.installed)]);
-  const install = `https://github.com/apps/${slug}/installations/new`;
+  const watch = useInstall<InstallView>(h.app.held ? `/api/hub/installation?hub=${encodeURIComponent(h.name)}` : null, (v) => v.id !== null && !v.onHub);
+  const view = watch.view;
+  const step = h.app.held ? installStep(view && { id: view.id, wide: view.onHub }, watch.asked) : "ask";
+  const owner = h.name.split("/")[0]!.toLowerCase();
+  const picked = h.app.install?.includes("repository_ids") ? h.packages.filter((p) => p.repo.split("/")[0]!.toLowerCase() === owner).map((p) => p.name) : [];
   return (
     <div class="stack tight">
       <h3 class="section-title">Install it on your projects</h3>
-      <p class="muted">
-        On GitHub, choose <strong>Only select repositories</strong> and pick the projects the hub should publish. Never pick {h.name}: the App can write to every repository it is installed on. The hub holds your signing keys. You can also install it per project later, from Projects.
-      </p>
-      {view?.checked && view.onHub && (
+      {picked.length ? (
+        <p class="muted">
+          Click <strong>Install the App</strong>. GitHub opens with <strong>Only select repositories</strong> and the hub's projects picked: {picked.join(", ")}. Click <strong>Install</strong> there. Keep {h.name} out of the list: the App can write to every repository it is installed on. The hub holds your signing keys.
+        </p>
+      ) : (
+        <p class="muted">
+          Click <strong>Install the App</strong>, choose <strong>Only select repositories</strong> and pick the projects the hub should publish. Never pick {h.name}: the App can write to every repository it is installed on. The hub holds your signing keys. You can also install it per project later, from Projects.
+        </p>
+      )}
+      {step === "wide" && view && (
         <Note tone="error" title={`The App is installed on ${h.name}`}>
           <span>Remove {h.name} from it; the hub refuses to run until you do.</span>
           <Out href={`https://github.com/settings/installations/${view.id}`} class="btn secondary small">Open the installation</Out>
         </Note>
       )}
-      {view?.checked && !view.onHub && view.id !== null && (
+      {step === "done" && view && (
         <Note tone="ok" title="The App is installed">
           <span>{view.repos.length ? `It reaches ${view.repos.join(", ")}.` : "It reaches no repository yet."}</span>
         </Note>
       )}
-      {view?.checked && view.id === null && (
-        <p class="row muted small">
-          <Spinner /> Not installed yet. This updates by itself once you click Install on GitHub.
-        </p>
-      )}
-      {!view && <p class="muted small">GitHub shows an App's repositories only to the App itself. Each hub run reports a project the App cannot reach.</p>}
+      {!h.app.held && <p class="muted small">GitHub shows an App's repositories only to the App itself. Each hub run reports a project the App cannot reach.</p>}
       <div class="row">
-        <Out href={install} class={view?.id ? "btn secondary" : "btn primary"}>
+        <Out href={h.app.install ?? `https://github.com/apps/${slug}/installations/new`} class={view?.id ? "btn secondary" : "btn primary"} onClick={watch.ask}>
           {view?.id ? "Change its repositories" : "Install the App"}
         </Out>
         <Out href={`https://github.com/settings/apps/${slug}`} class="btn quiet">
           App settings
         </Out>
       </div>
+      {step === "waiting" && (
+        <p class="row muted small" role="status">
+          <Spinner label="Waiting for GitHub" /> Waiting for your click on GitHub. This step updates by itself once you click Install there.
+        </p>
+      )}
     </div>
   );
 }
@@ -239,18 +229,7 @@ function App({ h }: { h: HubView }) {
       </Note>
       <Problem problem={problem} />
       {start ? (
-        <form method="post" action={start.action} class="stack tight">
-          <input type="hidden" name="manifest" value={start.manifest} />
-          <div class="row">
-            <button class="btn primary" type="submit">
-              Continue to GitHub
-              <Icon name="arrow" />
-            </button>
-          </div>
-          <p class="muted small">
-            GitHub shows the App <code>{start.name}</code>. Click <strong>Create GitHub App</strong> there and GitHub brings you back here.
-          </p>
-        </form>
+        <ManifestForm start={start} />
       ) : (
         !problem && (
           <p class="row muted">
@@ -674,6 +653,15 @@ function Ready({ h }: { h: HubView }) {
   );
 }
 
+export function Back({ title }: { title: string }) {
+  return (
+    <p class="row" role="status">
+      <Spinner label="Working" />
+      <strong>{title}</strong>
+    </p>
+  );
+}
+
 export function Setup() {
   const h = hub.value;
   const [open, setOpen] = useState<StopId | "extras" | null>(() => {
@@ -683,10 +671,17 @@ export function Setup() {
   });
   const panelRef = useRef<HTMLDivElement>(null);
   void macChoice.value;
-  const listing = Boolean(h && h.name === hubName.value && h.files.config);
+  const ready = Boolean(h && h.name === hubName.value);
+  const listing = ready && Boolean(h!.files.config);
   useEffect(() => {
     if (listing && statuses.value?.hub !== h!.name) void loadStatuses();
   }, [h?.name, listing]);
+  useEffect(() => {
+    const l = back.value;
+    if (!ready || !l) return;
+    back.value = null;
+    if (l.open === "extras") requestAnimationFrame(() => document.getElementById("doorbell")?.scrollIntoView({ block: "start" }));
+  }, [ready]);
   if (hubError.value) {
     return (
       <div class="stack" style="max-width: 640px">
@@ -701,6 +696,7 @@ export function Setup() {
     );
   }
   if (!h || h.name !== hubName.value) {
+    if (back.value) return <Back title={back.value.title} />;
     return (
       <p class="row muted" role="status">
         <Spinner /> Reading {hubName.value} from GitHub
@@ -750,11 +746,15 @@ export function Setup() {
         <ol class="route" aria-label="Setup steps">
           {list.map((s, i) => (
             <li key={s.id} class={`${s.state}${s.id === current ? " open" : ""}`}>
-              <button type="button" onClick={() => pick(s.id)} aria-current={s.id === current ? "step" : undefined} aria-label={`${s.name}: ${s.status}${s.state === "now" ? ", next" : s.state === "attention" ? ", needs you" : ""}`}>
+              <button type="button" onClick={() => pick(s.id)} aria-current={s.id === current ? "step" : undefined} aria-label={`${s.name}: ${s.status.join(". ")}${s.state === "now" ? ". Next" : s.state === "attention" ? ". Needs you" : ""}`}>
                 <Dot stop={s} index={i} />
                 <span>
                   <span class="stop-name">{s.name}</span>
-                  <span class="stop-state">{s.status}</span>
+                  {s.status.map((line) => (
+                    <span class="stop-state" key={line}>
+                      {line}
+                    </span>
+                  ))}
                 </span>
               </button>
             </li>

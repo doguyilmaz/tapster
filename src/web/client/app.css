@@ -1,3 +1,8 @@
+/* Status colors, one meaning each, in light and dark:
+   success and done: --green for small checks, dots, badges and notes; the large Done seal is the brand --orange.
+   waiting or in progress: neutral (--muted, --faint) or --navy.
+   attention or warning: --amber.
+   error or refused: --wax and nothing else. The airmail stripe is decoration; diffs keep green and red for added and removed lines. */
 :root {
   --page: #f3f4f6;
   --paper: #ffffff;
@@ -9,6 +14,7 @@
   --line-strong: #cdd0d7;
   --orange: #f2891f;
   --orange-hover: #f79a3c;
+  --orange-edge: #b45f0c;
   --orange-ink: #1c1206;
   --orange-soft: #fdf0e1;
   --link: #a84d06;
@@ -167,6 +173,8 @@ form.secret { display: grid; gap: 1rem; }
 .switch input { margin-top: 0.25rem; accent-color: var(--orange); width: 1.05rem; height: 1.05rem; flex: none; }
 .switch strong { display: block; font-weight: 600; }
 .switch span { color: var(--muted); font-size: 0.88rem; }
+.switch .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.switch .badge { font-size: 0.78rem; align-self: center; }
 select.input { appearance: auto; }
 
 /* setup route */
@@ -183,12 +191,12 @@ select.input { appearance: auto; }
 .done .dot { background: var(--green); border-color: var(--green); color: #fff; }
 .now .dot { border-color: var(--orange); color: var(--link); box-shadow: 0 0 0 4px var(--orange-soft); }
 .skipped .dot { border-style: dashed; }
-.attention .dot { border-color: var(--wax); color: var(--wax); }
+.attention .dot { border-color: var(--amber); color: var(--amber); }
 .stop-name { display: block; font-weight: 600; line-height: 1.3; padding-top: 0.25rem; }
 .stop-state { display: block; color: var(--muted); font-size: 0.84rem; }
 .route li.open .stop-name { color: var(--ink); }
 .now .stop-state { color: var(--link); font-weight: 550; }
-.attention .stop-state { color: var(--wax); font-weight: 550; }
+.attention .stop-state { color: var(--amber); font-weight: 550; }
 .eyebrow .icon { margin-left: 0.4rem; vertical-align: -0.15em; }
 .route li.open button { background: var(--paper); box-shadow: inset 0 0 0 1px var(--line); padding-left: 0; }
 .panel { display: grid; gap: 1.4rem; }
@@ -212,7 +220,7 @@ select.input { appearance: auto; }
 textarea.entry-edit { font: 0.82rem/1.55 var(--mono); resize: vertical; min-height: 8rem; white-space: pre; overflow-wrap: normal; overflow-x: auto; tab-size: 2; }
 details.more summary { cursor: pointer; color: var(--link); font-size: 0.88rem; width: fit-content; }
 details.more[open] summary { margin-bottom: 0.5rem; }
-.seal { display: inline-grid; place-items: center; width: 54px; height: 54px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ee6b56, #c8392f 60%, #8f2019); color: #ffe0d8; box-shadow: 0 6px 14px -6px rgb(143 32 25 / 0.6); }
+.seal { display: inline-grid; place-items: center; width: 54px; height: 54px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, var(--orange-hover), var(--orange) 60%, var(--orange-edge)); color: var(--orange-ink); box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--orange-edge) 75%, transparent); }
 .seal .icon { width: 26px; height: 26px; stroke-width: 3; }
 .progress { height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
 .progress span { display: block; height: 100%; background: var(--green); border-radius: inherit; transition: width 0.3s; }
@@ -257,6 +265,10 @@ details.more[open] summary { margin-bottom: 0.5rem; }
 .choices { display: grid; gap: 0.6rem; }
 .choice { display: flex; align-items: center; gap: 0.9rem; padding: 0.95rem 1.1rem; border: 1px solid var(--line); border-radius: 11px; background: var(--paper); cursor: pointer; text-align: left; width: 100%; }
 .choice:hover { border-color: var(--orange); }
+.choice[aria-pressed="true"] { border-color: var(--orange); box-shadow: inset 0 0 0 1px var(--orange); }
+.choice:disabled { cursor: progress; }
+.choice:disabled:not([aria-pressed="true"]) { opacity: 0.6; }
+.anchor { scroll-margin-top: 6rem; }
 .choice .grow { flex: 1; min-width: 0; display: grid; gap: 0.1rem; }
 .toast { cursor: pointer; position: fixed; left: 50%; bottom: 1.5rem; transform: translateX(-50%); z-index: 50; max-width: min(560px, calc(100vw - 2rem)); animation: rise 0.2s ease-out; }
 @keyframes rise { from { transform: translate(-50%, 10px); opacity: 0; } }

@@ -8,6 +8,7 @@ import ringYaml from "../../templates/project/ring.yml" with { type: "text" };
 import { appFromManifest, openUrl } from "./appflow";
 import { Cloudflare, type CloudflareAccount, type CloudflareTarget, TOKEN_PAGE, accountTarget, deployWorker, pickAccount, tokenAccounts } from "./cloudflare";
 import { hubEnv, setEnvVariable, setRepoVariable } from "./gh";
+import { appInstallUrl } from "./hubpr";
 import { cleanPath, readInput } from "./paths";
 import { waitFor } from "./poll";
 import { ask } from "./prompt";
@@ -216,7 +217,7 @@ export async function setupDoorbell(gh: GitHub, hub: string, repos: string[], ev
       done: "The doorbell App is created",
       next: [
         "tapster opens the App's install page in a new tab.",
-        `There, choose "Only select repositories" and pick ${hub}, only that one.`,
+        `It opens with "Only select repositories" and ${hub} picked. Keep only ${hub}.`,
         'Click "Install". tapster notices within seconds and deploys the Worker.',
       ],
       again: "tapster init --doorbell",
@@ -224,9 +225,8 @@ export async function setupDoorbell(gh: GitHub, hub: string, repos: string[], ev
     appId = String(app.id);
     pem = app.pem;
     register(pem);
-    await setEnvVariable(hub, "TAPSTER_DOORBELL_APP_ID", appId);
-    await setEnvVariable(hub, "TAPSTER_DOORBELL_APP_SLUG", app.slug);
-    io.open(`https://github.com/apps/${app.slug}/installations/new`);
+    await Promise.all([setEnvVariable(hub, "TAPSTER_DOORBELL_APP_ID", appId), setEnvVariable(hub, "TAPSTER_DOORBELL_APP_SLUG", app.slug)]);
+    io.open(await appInstallUrl(gh, app.slug, hub));
   }
   const installation = await waitForInstall(appId, pem, hub, io);
   const origin = await deployDoorbell(gh, cf, target, { hub, appId, pem, installation, every });

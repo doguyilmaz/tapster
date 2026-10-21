@@ -9,7 +9,8 @@ import { checkDoorbellKey, deployDoorbell, doorbellManifest, doorbellRepos, door
 import { hubEnv, setEnvVariable } from "../../cli/gh";
 import { FLOW } from "../../cli/hubfiles";
 import { everyFromFlow } from "../../cli/schedule";
-import type { AppStart, BellInstallView, DoorbellDone, DoorbellView } from "../contract";
+import { installLink } from "../../cli/hubpr";
+import type { AppStart, BellCloud, BellInstallView, DoorbellDone, DoorbellView } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
 import { hubFrom, lockedEnvironment } from "./access";
 
@@ -25,26 +26,31 @@ function heldCloudflare(s: Session, hub: string) {
   return s.cloudflare.get(hub) ?? null;
 }
 
-export function doorbellView(s: Session, hub: string, v: (name: string) => string | null): DoorbellView {
+export function cloudView(s: Session, hub: string): BellCloud {
+  const cloud = heldCloudflare(s, hub);
+  return {
+    cloudflare: cloud?.target ? { account: cloud.target.account.name, subdomain: cloud.target.subdomain } : null,
+    accounts: cloud && !cloud.target ? cloud.accounts : null,
+  };
+}
+
+export function doorbellView(s: Session, hub: string, v: (name: string) => string | null, ids: { owner: number; hub: number }): DoorbellView {
   const bell = s.bells.get(hub);
   const id = v("TAPSTER_DOORBELL_APP_ID");
   const slug = v("TAPSTER_DOORBELL_APP_SLUG");
-  const cloud = heldCloudflare(s, hub);
+  const app = id && slug ? { id, slug } : bell ? { id: bell.id, slug: bell.slug } : null;
   return {
     on: v("TAPSTER_DOORBELL") !== null,
     origin: v("TAPSTER_DOORBELL"),
-    app: id && slug ? { id, slug } : bell ? { id: bell.id, slug: bell.slug } : null,
+    app,
+    install: app ? installLink(app.slug, ids.owner, ids.hub) : null,
     key: Boolean(bell),
-    cloudflare: cloud?.target ? { account: cloud.target.account.name, subdomain: cloud.target.subdomain } : null,
-    accounts: cloud && !cloud.target ? cloud.accounts : null,
+    ...cloudView(s, hub),
     tokenPage: TOKEN_PAGE,
   };
 }
 
-const storeBell = async (hub: string, app: { id: string; slug: string }) => {
-  await setEnvVariable(hub, "TAPSTER_DOORBELL_APP_ID", app.id);
-  await setEnvVariable(hub, "TAPSTER_DOORBELL_APP_SLUG", app.slug);
-};
+const storeBell = (hub: string, app: { id: string; slug: string }) => Promise.all([setEnvVariable(hub, "TAPSTER_DOORBELL_APP_ID", app.id), setEnvVariable(hub, "TAPSTER_DOORBELL_APP_SLUG", app.slug)]);
 
 export async function bellCallback(c: Ctx, pending: { hub: string; owner: string }, code: string, back: (q: Record<string, string>) => Response): Promise<Response> {
   let created: CreatedApp;
@@ -67,39 +73,37 @@ export async function bellCallback(c: Ctx, pending: { hub: string; owner: string
 
 const vars = async (gh: Parameters<typeof hubEnv>[0], hub: string) => ({ variables: (await hubEnv(gh, hub, "variables")).map((x) => ({ name: x.name, value: x.value ?? "" })) });
 
-async function cloudflare(c: Ctx) {
+// A token that reaches several accounts never picks one by itself: the person picks it in setup.
+async function cloudflare(c: Ctx): Promise<BellCloud> {
   const body = await readJson(c.req, z.object({ hub: z.string(), token: z.string().max(400) }).strict());
   const { hub } = await hubFrom(c, body.hub);
   const token = body.token.trim();
   if (!/^[A-Za-z0-9._-]{20,400}$/.test(token)) throw new TapsterError("that is not a Cloudflare API token", "Paste the token Cloudflare showed after Create Token. Cloudflare shows it once; create a new one if it is gone.");
   const cf = new Cloudflare(token, c.s.deps.fetch);
   const accounts = await tokenAccounts(cf);
-  if (accounts.length > 1) {
-    c.s.cloudflare.set(hub, { token, accounts, target: null, at: Date.now() });
-    return { accounts };
-  }
-  const target = await accountTarget(cf, accounts[0]!, hub);
+  const target = accounts.length > 1 ? null : await accountTarget(cf, accounts[0]!, hub);
   c.s.cloudflare.set(hub, { token, accounts, target, at: Date.now() });
-  return { account: target.account.name, subdomain: target.subdomain };
+  return cloudView(c.s, hub);
 }
 
 const NO_TOKEN = () => new TapsterError("this setup holds no Cloudflare token", "Paste the token again: tapster keeps it in memory for an hour at most.");
 
-async function account(c: Ctx) {
+async function account(c: Ctx): Promise<BellCloud> {
   const body = await readJson(c.req, z.object({ hub: z.string(), account: z.string().regex(/^[0-9a-f]{32}$/) }).strict());
   const { hub } = await hubFrom(c, body.hub);
   const held = heldCloudflare(c.s, hub);
   if (!held) throw NO_TOKEN();
-  const target = await accountTarget(new Cloudflare(held.token, c.s.deps.fetch), pickAccount(held.accounts, body.account), hub);
-  held.target = target;
-  return { account: target.account.name, subdomain: target.subdomain };
+  held.target = await accountTarget(new Cloudflare(held.token, c.s.deps.fetch), pickAccount(held.accounts, body.account), hub);
+  return cloudView(c.s, hub);
 }
 
 async function appStart(c: Ctx): Promise<AppStart> {
   const { hub } = await readJson(c.req, hubBody);
   const { gh, login } = await hubFrom(c, hub);
+  const now = vars(gh, hub);
+  now.catch(() => undefined);
   await lockedEnvironment(gh, hub);
-  if (doorbellStage(await vars(gh, hub)) !== "new") throw new TapsterError("the hub already has a doorbell App", "Reload the page; it continues with that App.");
+  if (doorbellStage(await now) !== "new") throw new TapsterError("the hub already has a doorbell App", "Reload the page; it continues with that App.");
   const state = randomBytes(16).toString("hex");
   for (const [k, p] of c.s.pending) if (Date.now() - p.at > HOLD) c.s.pending.delete(k);
   c.s.pending.set(state, { hub, owner: login, at: Date.now(), kind: "doorbell" });

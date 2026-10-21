@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { Scalar, YAMLMap, isMap, isScalar, isSeq, parseDocument } from "yaml";
-import { type HubConfig, MAINTAINER, isApp, parseHub } from "../config";
+import { type CliPackage, type HubConfig, MAINTAINER, type PackageConfig, isApp, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { runPath } from "../run";
@@ -75,7 +75,12 @@ export async function finishLinuxRotation(gh: GitHub, hub: string, store: Store 
   return true;
 }
 
-export const linuxTools = (config: HubConfig) => config.packages.filter((p) => !isApp(p) && Object.keys(p.assets).some((k) => k.startsWith("linux-")));
+const linuxArchives = (p: PackageConfig) => Object.keys(p.assets).filter((k) => k.startsWith("linux-")).sort();
+
+export const linuxTools = (config: HubConfig) => config.packages.filter((p): p is CliPackage => !isApp(p) && linuxArchives(p).length > 0);
+
+const linuxLeftOut = (config: HubConfig) =>
+  config.packages.filter((p) => isApp(p) || !linuxArchives(p).length).map((p) => ({ name: p.name, why: isApp(p) ? "is a Mac app; apt and dnf carry command line tools only" : "has no Linux archive" }));
 
 type Doc = ReturnType<typeof parseDocument>;
 
@@ -96,12 +101,20 @@ function setMaintainer(doc: Doc, maintainer: string): void {
   top.items.splice(at < 0 ? top.items.length : at, 0, doc.createPair("linux", node) as never);
 }
 
-// A tool asking for Linux packages is invalid until tapster.yml names a valid maintainer, so the choices are read as if it did.
-export function linuxChoices(text: string, owner: string): { name: string; on: boolean }[] {
+export type LinuxChoice = { name: string; repo: string; kind: CliPackage["kind"]; archives: string[]; on: boolean };
+
+// A tool asking for Linux packages is invalid until tapster.yml names a valid maintainer, so tapster.yml is read as if it did.
+function asNamed(text: string, owner: string): HubConfig {
   const doc = parseDocument(text);
   if (!MAINTAINER.test(String(doc.getIn(["linux", "maintainer"]) ?? ""))) setMaintainer(doc, "Maintainer <maintainer@example.com>");
-  return linuxTools(parseHub(doc.toString(YAML_OUT), owner).config).map((p) => ({ name: p.name, on: !isApp(p) && p.linux }));
+  return parseHub(doc.toString(YAML_OUT), owner).config;
 }
+
+export function linuxChoices(text: string, owner: string): LinuxChoice[] {
+  return linuxTools(asNamed(text, owner)).map((p) => ({ name: p.name, repo: p.repo, kind: p.kind, archives: linuxArchives(p), on: p.linux }));
+}
+
+export const linuxLeft = (text: string, owner: string) => linuxLeftOut(asNamed(text, owner));
 
 export type ShownTool = { name: string; was: boolean; on: boolean };
 

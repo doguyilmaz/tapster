@@ -1,5 +1,6 @@
 import { signal } from "@preact/signals";
-import type { AccountView, HubChoice, HubView, Problem, ProjectStatus, ScanView, SessionView, StatusView } from "../contract";
+import type { AccountView, BellCloud, HubChoice, HubView, Problem, ProjectStatus, ScanView, SessionView, StatusView } from "../contract";
+import type { Answer, Landing } from "../steps";
 import { ApiError, get, post } from "./api";
 
 const HUB_KEY = "tapster.hub";
@@ -68,7 +69,7 @@ export async function loadHubs(): Promise<void> {
   hubs.value = list.hubs;
 }
 
-export function chooseHub(name: string | null): void {
+export function chooseHub(name: string | null, load = true): void {
   if (name !== hubName.value) {
     appResult.value = null;
     doorbellResult.value = null;
@@ -80,7 +81,7 @@ export function chooseHub(name: string | null): void {
   statuses.value = null;
   statusError.value = null;
   clones.value = null;
-  if (name) void loadHub();
+  if (name && load) void loadHub();
 }
 
 export const statuses = signal<{ hub: string; list: ProjectStatus[] } | null>(null);
@@ -173,9 +174,16 @@ export function setMac(name: string, choice: "yes" | "no"): void {
 
 export const openStop = signal<string | null>(null);
 
-export const appResult = signal<{ kind: "created" } | { kind: "failed" | "unstored"; problem: Problem } | { kind: "unknown" } | null>(null);
+export const appResult = signal<Answer | null>(null);
 
-export const doorbellResult = signal<{ kind: "created" } | { kind: "failed" | "unstored"; problem: Problem } | null>(null);
+export const doorbellResult = signal<Landing["doorbell"]>(null);
+
+export const back = signal<Landing | null>(null);
+
+export function setCloud(name: string, cloud: BellCloud): void {
+  const h = hub.value;
+  if (h?.name === name) hub.value = { ...h, extras: { ...h.extras, doorbell: { ...h.extras.doorbell, ...cloud } } };
+}
 
 export function tilde(path: string): string {
   const home = session.value?.home;

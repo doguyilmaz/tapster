@@ -1,7 +1,8 @@
 import type { ComponentChildren, JSX } from "preact";
-import { useState } from "preact/hooks";
-import type { Problem as ProblemView } from "../contract";
+import { useEffect, useState } from "preact/hooks";
+import type { AppStart, Problem as ProblemView } from "../contract";
 import { DIFF_MARK, capFirst, changedOnly, lineDiff } from "../steps";
+import { get } from "./api";
 import { problemOf } from "./state";
 
 export function DiffBlock({ before, after, label }: { before: string; after: string; label?: string }) {
@@ -287,6 +288,93 @@ export function useAction(): [boolean, ProblemView | null, (f: () => Promise<voi
     }
   };
   return [busy, problem, run];
+}
+
+// Polls an App's installation. A click on the install link means the person went to GitHub, as does coming back to
+// this tab after leaving it: from then on the step waits for GitHub and checks right away on each return.
+export function useInstall<T>(path: string | null, settled: (v: T) => boolean): { view: T | null; asked: boolean; ask: () => void } {
+  const [view, setView] = useState<T | null>(null);
+  const [asked, setAsked] = useState(false);
+  useEffect(() => {
+    if (!path) return;
+    let timer = 0;
+    let wait = 4000;
+    let busy = false;
+    let away = false;
+    let stopped = false;
+    const tick = async () => {
+      if (busy) return;
+      busy = true;
+      clearTimeout(timer);
+      if (!document.hidden) {
+        try {
+          const next = await get<T>(path);
+          if (stopped) return;
+          setView(next);
+          wait = settled(next) ? 30000 : 4000;
+        } catch {
+          wait = Math.min(wait * 2, 30000);
+        }
+      }
+      busy = false;
+      if (!stopped) timer = window.setTimeout(tick, wait);
+    };
+    const leave = () => {
+      away = true;
+    };
+    const comeBack = () => {
+      if (!away || document.hidden) return;
+      away = false;
+      setAsked(true);
+      void tick();
+    };
+    const seen = () => (document.hidden ? leave() : comeBack());
+    addEventListener("blur", leave);
+    addEventListener("focus", comeBack);
+    document.addEventListener("visibilitychange", seen);
+    timer = window.setTimeout(tick, 300);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      removeEventListener("blur", leave);
+      removeEventListener("focus", comeBack);
+      document.removeEventListener("visibilitychange", seen);
+    };
+  }, [path]);
+  return { view: path ? view : null, asked, ask: () => setAsked(true) };
+}
+
+export function ManifestForm({ start }: { start: AppStart }) {
+  const [leaving, setLeaving] = useState(false);
+  useEffect(() => {
+    const restored = (e: PageTransitionEvent) => {
+      if (e.persisted) setLeaving(false);
+    };
+    addEventListener("pageshow", restored);
+    return () => removeEventListener("pageshow", restored);
+  }, []);
+  return (
+    <form method="post" action={start.action} class="stack tight" onSubmit={() => setLeaving(true)}>
+      <input type="hidden" name="manifest" value={start.manifest} />
+      <div class="row">
+        <Busy busy={leaving} class="btn primary" type="submit">
+          {leaving ? "Opening GitHub" : "Continue to GitHub"}
+          {!leaving && <Icon name="arrow" />}
+        </Busy>
+      </div>
+      <p class="muted small" role={leaving ? "status" : undefined}>
+        {leaving ? (
+          <>
+            GitHub opens in this tab. There, click <strong>Create GitHub App</strong>; GitHub brings you back here.
+          </>
+        ) : (
+          <>
+            GitHub shows the App <code>{start.name}</code>. Click <strong>Create GitHub App</strong> there and GitHub brings you back here.
+          </>
+        )}
+      </p>
+    </form>
+  );
 }
 
 export function savedFor(text: string): void {
