@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { upgradeAdvice } from "../src/cli/upgrade";
+import { upgrade, upgradeAdvice } from "../src/cli/upgrade";
 
 test.each([
   ["Homebrew", { exec: "/opt/homebrew/Caskroom/tapster/1.5.0/tapster", script: "", sha: "a" }, "brew update && brew upgrade --cask tapster"],
@@ -33,4 +33,30 @@ test("tapster upgrade from a checkout says to pull", () => {
   const res = cli(["upgrade"]);
   expect(res.exitCode).toBe(0);
   expect(res.stdout.toString()).toContain("pull");
+});
+
+const brew = { exec: "/opt/homebrew/Caskroom/tapster/1.6.0/tapster", script: "", sha: "a" };
+
+test("tapster upgrade runs Homebrew's commands in order and points to the hub's update", async () => {
+  const ran: string[] = [];
+  const said: string[] = [];
+  await upgrade([], { where: brew, run: async (argv) => (ran.push(argv.join(" ")), 0), say: (l) => said.push(l) });
+  expect(ran).toEqual(["brew update", "brew upgrade --cask tapster"]);
+  expect(said.join("\n")).toContain("Hub files");
+});
+
+test("tapster upgrade stops at the first failing command", async () => {
+  const ran: string[] = [];
+  await expect(upgrade([], { where: brew, run: async (argv) => (ran.push(argv.join(" ")), 1), say: () => {} })).rejects.toThrow(/brew update/);
+  expect(ran).toEqual(["brew update"]);
+});
+
+test.each([
+  ["bunx", { exec: "/b/bun", script: "/T/bunx-501-@doguyilmaz/tapster@latest/node_modules/@doguyilmaz/tapster/dist/cli.js", sha: "a" }],
+  ["a checkout", { exec: "/b/bun", script: "/me/tapster/src/cli/main.ts", sha: null }],
+  ["an unknown install", { exec: "/usr/local/bin/tapster", script: "", sha: "a" }],
+])("tapster upgrade from %s only says what to run", async (_, where) => {
+  const ran: string[] = [];
+  await upgrade([], { where, run: async (argv) => (ran.push(argv.join(" ")), 0), say: () => {} });
+  expect(ran).toEqual([]);
 });
