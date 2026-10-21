@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { FollowView, Problem as ProblemView, ProjectStatus, ReachView } from "../contract";
-import { type ProjectStep, type ProjectStepId, canRelease, projectNext, projectSteps, releasableParent, tagCommand, tagProblem } from "../status";
+import { type ProjectStep, type ProjectStepId, bumps, canRelease, followStates, projectNext, projectSteps, releasableParent, tagCommand, tagProblem } from "../status";
 import { get, post } from "./api";
 import { hub, hubName, problemOf, say, statusOf, tilde } from "./state";
 import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner } from "./ui";
@@ -300,6 +300,11 @@ function Follow({ s, tag, onStatus }: { s: ProjectStatus; tag: string; onStatus:
         : kick?.doorbell
           ? "The doorbell starts the hub"
           : "The hub signs and publishes it on its next run";
+  const states = followStates<ProjectStep["state"]>([
+    !run || !ran ? "wait" : runOk || draftOpen ? "done" : "attention",
+    view?.draft?.note ? "attention" : draftOpen ? "done" : "wait",
+    view?.published ? "done" : view?.draft?.note ? "open" : "wait",
+  ]);
   const item = (state: ProjectStep["state"], text: ComponentChildren, link?: { href: string; label: string }) => (
     <li>
       <Mark state={state} />
@@ -319,9 +324,9 @@ function Follow({ s, tag, onStatus }: { s: ProjectStatus; tag: string; onStatus:
         <strong>Tagged {tag}</strong> <span class="muted">on {s.defaultBranch}.</span>
       </p>
       <ol class="checks" aria-live="polite">
-        {item(!run ? "wait" : !ran ? "wait" : runOk || draftOpen ? "done" : "attention", !run ? "The release workflow starts" : !ran ? "The release workflow runs" : runOk || draftOpen ? "The release workflow finished" : `The release workflow ended: ${run.conclusion ?? "unknown"}`, run ? { href: run.url, label: "Open the run" } : undefined)}
-        {item(view?.draft?.note ? "attention" : draftOpen ? "done" : "wait", view?.draft?.note ? view.draft.note : draftOpen ? "The workflow opened the draft" : "The workflow opens a draft", view?.draft ? { href: view.draft.url, label: "Open the draft" } : undefined)}
-        {item(view?.published ? "done" : view?.draft?.note ? "open" : "wait", publishing, view?.published ? { href: view.published.url, label: "Open the release" } : hubBusy && hubRun ? { href: hubRun.url, label: "Open the hub's run" } : { href: view?.hub ?? "#", label: "Hub runs" })}
+        {item(states[0]!, !run ? "The release workflow starts" : !ran ? "The release workflow runs" : runOk || draftOpen ? "The release workflow finished" : `The release workflow ended: ${run.conclusion ?? "unknown"}`, run ? { href: run.url, label: "Open the run" } : undefined)}
+        {item(states[1]!, view?.draft?.note ? view.draft.note : draftOpen ? "The workflow opened the draft" : "The workflow opens a draft", view?.draft ? { href: view.draft.url, label: "Open the draft" } : undefined)}
+        {item(states[2]!, publishing, view?.published ? { href: view.published.url, label: "Open the release" } : hubBusy && hubRun ? { href: hubRun.url, label: "Open the hub's run" } : { href: view?.hub ?? "#", label: "Hub runs" })}
       </ol>
       {!view?.published && <p class="muted small">Without this page open, the hub publishes it on its next scheduled run. GitHub can start those hours late; the doorbell starts the hub right away.</p>}
     </div>
@@ -348,6 +353,7 @@ function ReleaseBox({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSt
   }
   const head = s.release.head!;
   const tag = version.trim();
+  const next = bumps(s.release.highest);
   const bad = tagProblem(tag, s.release.highest);
   const id = `version-${s.name}`;
   const release = async () => {
@@ -381,9 +387,16 @@ function ReleaseBox({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSt
       </dl>
       <div class="field">
         <label for={id}>Version</label>
+        <div class="bumps" role="group" aria-label="Pick the next version">
+          {(["patch", "minor", "major"] as const).map((kind) => (
+            <button type="button" class="choice" key={kind} aria-pressed={tag === next[kind]} onClick={() => setVersion(next[kind])}>
+              {kind === "patch" ? "Patch" : kind === "minor" ? "Minor" : "Major"} <span class="mono">{next[kind]}</span>
+            </button>
+          ))}
+        </div>
         <input id={id} class="input mono" value={version} onInput={(e) => setVersion((e.currentTarget as HTMLInputElement).value)} spellcheck={false} autoComplete="off" aria-invalid={bad ? "true" : undefined} aria-describedby={`${id}-hint`} />
         <span class={bad ? "hint bad" : "hint"} id={`${id}-hint`}>
-          {bad ? `${bad}.` : s.release.highest ? `The next patch after ${s.release.highest}, the highest tag on GitHub.` : "GitHub has no version tag for this project yet."}
+          {bad ? `${bad}.` : !s.release.highest ? "GitHub has no version tag for this project yet." : `${tag === next.major ? "The next major" : tag === next.minor ? "The next minor" : tag === next.patch ? "The next patch" : "A version"} after ${s.release.highest}, the highest tag on GitHub.`}
         </span>
       </div>
       {s.entry.state !== "merged" && <Note tone="info">The hub publishes it once you merge the hub entry.</Note>}
