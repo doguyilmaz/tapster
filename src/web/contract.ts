@@ -95,7 +95,17 @@ export type AddView = { lines: string[]; pr: string | null; head: string | null;
 
 export type DiffView = { files: { path: string; before: string | null; after: string | null; change: "create" | "update" | "same" | "remove" }[] };
 
-export type CommitView = { sha: string; subject: string; date: string; url: string; skip?: string; parent?: { sha: string; subject: string; url: string; skip: string | null; tag?: string } | null };
+// skip, parent and changesRelease are set only when the commit's message carries a skip marker. parent.tag stays
+// undefined until tapster has read the tags.
+export type CommitView = {
+  sha: string;
+  subject: string;
+  date: string;
+  url: string;
+  skip?: string;
+  parent?: { sha: string; subject: string; url: string; skip: string | null; tag?: string | null } | null;
+  changesRelease?: boolean;
+};
 
 export type ReachView = {
   reaches: boolean | null;

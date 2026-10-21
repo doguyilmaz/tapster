@@ -10,7 +10,7 @@ import type { State } from "../../state";
 import { type HubEntry, type TagRef, hubEntries, hubFacts, installLink, releaseSecrets, tagAt, tagCommit, tagRefs } from "../../cli/hubpr";
 import type { CommitView, FollowView, ProjectStatus, StatusView } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
-import { highestTag, nextTag, skipFix, skipMarker, tagProblem } from "../status";
+import { changesRelease, highestTag, nextTag, skipFix, skipMarker, tagProblem } from "../status";
 import { configOf } from "./config";
 import { proposal } from "./entry";
 import { checkHub, hubRunList, me, startHubRun } from "./hub";
@@ -62,15 +62,14 @@ type Release = GitHubRelease & { html_url: string };
 
 const newest = (list: Release[]) => list.filter((r) => TAG.test(r.tag_name)).sort((a, b) => compareSemver(parseTag(b.tag_name)!, parseTag(a.tag_name)!))[0] ?? null;
 
-type Commit = { sha: string; html_url: string; commit: { message: string; committer: { date: string } | null }; parents?: { sha: string }[] };
+type Commit = { sha: string; html_url: string; commit: { message: string; committer: { date: string } | null }; parents?: { sha: string }[]; files?: { filename: string }[] };
 
 const subjectOf = (c: Commit) => clean(c.commit.message.split("\n")[0] ?? "").slice(0, 120);
 
-// The commit before a marked tip is worth tagging only when no version tag sits on it yet.
-export async function withParentTag(gh: GitHub, repo: string, head: CommitView | null, refs: TagRef[]): Promise<CommitView | null> {
-  if (!head?.parent || head.parent.skip) return head;
-  const tag = await tagAt(gh, repo, refs, head.parent.sha);
-  return tag ? { ...head, parent: { ...head.parent, tag } } : head;
+// Pass refs only when GitHub listed them: without them parent.tag stays unknown and nothing is offered.
+export async function withParentTag(gh: GitHub, repo: string, head: CommitView | null, refs: TagRef[] | null): Promise<CommitView | null> {
+  if (!refs || !head?.parent || head.parent.skip) return head;
+  return { ...head, parent: { ...head.parent, tag: await tagAt(gh, repo, refs, head.parent.sha) } };
 }
 
 export async function headOf(gh: GitHub, repo: string, branch: string): Promise<CommitView | null> {
@@ -80,8 +79,15 @@ export async function headOf(gh: GitHub, repo: string, branch: string): Promise<
     const head: CommitView = { sha: c.sha, subject: subjectOf(c), date: c.commit.committer?.date ?? "", url: c.html_url };
     const skip = skipMarker(c.commit.message);
     if (!skip) return head;
-    const before = c.parents?.length === 1 ? await gh.json<Commit>("GET", `/repos/${repo}/commits/${c.parents[0]!.sha}`).catch(() => null) : null;
-    return { ...head, skip, parent: before && { sha: before.sha, subject: subjectOf(before), url: before.html_url, skip: skipMarker(before.commit.message) } };
+    const first = c.parents?.[0]?.sha;
+    const before = first ? await gh.json<Commit>("GET", `/repos/${repo}/commits/${first}`).catch(() => null) : null;
+    const files = c.files?.map((f) => f.filename);
+    return {
+      ...head,
+      skip,
+      parent: before && { sha: before.sha, subject: subjectOf(before), url: before.html_url, skip: skipMarker(before.commit.message) },
+      changesRelease: !files || files.length >= 300 || changesRelease(files),
+    };
   } catch (e) {
     if (e instanceof GitHubError) return null;
     throw e;
@@ -93,13 +99,13 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
   const project = await gh.getRepo(e.repo);
   const branch = project.default_branch;
   const read = (path: string) => readHubFile(gh, e.repo, path, encodeURIComponent(branch));
-  const [goreleaser, workflow, problems, keys, releases, refs, tip, secrets, proposed] = await Promise.all([
+  const [goreleaser, workflow, problems, keys, releases, listed, tip, secrets, proposed] = await Promise.all([
     e.kind === "go" ? read(".goreleaser.yaml").then((t) => t ?? read(".goreleaser.yml")) : Promise.resolve(null),
     read(`.github/workflows/${e.workflow}`),
     e.protection === "off" ? Promise.resolve([]) : protectionProblems(gh, e.repo, branch, "admin", e.protection === "dependabot").catch(() => ["GitHub did not show the repository's rulesets"]),
     gh.json<{ title: string }[]>("GET", `/repos/${e.repo}/keys`).catch(() => []),
     gh.json<Release[]>("GET", `/repos/${e.repo}/releases?per_page=30`).catch(() => []),
-    tagRefs(gh, e.repo).catch(() => [] as TagRef[]),
+    tagRefs(gh, e.repo).catch(() => null),
     headOf(gh, e.repo, branch),
     gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${e.repo}/actions/secrets?per_page=100`).then((r) => releaseSecrets(r.secrets.map((x) => x.name)), () => []),
     e.state === "proposed"
@@ -109,7 +115,8 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
         )
       : Promise.resolve({ proposal: null, blocked: null }),
   ]);
-  const head = await withParentTag(gh, e.repo, tip, refs);
+  const head = await withParentTag(gh, e.repo, tip, listed);
+  const refs = listed ?? [];
   const published = sh.state.packages[e.name] ?? [];
   const latest = newest(releases.filter((r) => !r.draft));
   const draft = newest(releases.filter((r) => r.draft && TAG.test(r.tag_name) && (!latest || compareSemver(parseTag(r.tag_name)!, parseTag(latest.tag_name)!) > 0)));

@@ -433,7 +433,7 @@ function localSources(gh: GitHub, dir: string, repo: string, prepared: Prepared,
     },
     workflow: text === null ? null : { name: flow, text },
     file: (path) => committedFile(dir, path),
-    draft: async (assets) => refusedDraftApp(gh, repo, assets, await gh.listReleases(repo).catch(() => [])),
+    draft: async (assets, commands) => refusedDraftApp(gh, repo, assets, await gh.listReleases(repo).catch(() => []), commands),
   };
 }
 
@@ -499,7 +499,7 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
   let head: string | null = null;
   if (entry) {
     entry = entryExtras(entry, { kind: prepared.kind, workflow: opts.workflow, dependabot: opts.dependabot });
-    const cask = goreleaserCask(prepared.original ?? null, { mac: apple, bundleId: (app) => bundleIdIn(dir, app) });
+    const cask = goreleaserCask(prepared.original ?? null, { mac: apple, bundleId: (app) => bundleIdIn(dir, app), commands: ((parse(entry) as { binaries?: string[] }[])[0]?.binaries ?? []).map((b) => b.split("/").pop()!) });
     if (cask.lines.length) entry = `${entry}\n${cask.lines.join("\n")}`;
     const own = cask.description && descProblems(cask.description, name).length === 0 ? cask.description : null;
     if (own) {
@@ -562,8 +562,8 @@ export async function releaseHint(gh: GitHub, repo: string): Promise<string> {
   if (!cmd) return `Once they are on ${branch} and the hub entry is merged, release ${tag} from tapster setup, under Projects.`;
   const tip = await headOf(gh, repo, branch);
   if (tip?.skip) {
-    const refs = await tagRefs(gh, repo).catch(() => null);
-    const parent = refs && releasableParent((await withParentTag(gh, repo, tip, refs))!);
+    const known = await withParentTag(gh, repo, tip, await tagRefs(gh, repo).catch(() => null));
+    const parent = known && releasableParent(known);
     const before = parent ? `\nOr tag the commit before it, which has no skip marker:\n  ${tagCommand(repo, tag, { sha: parent.sha })}` : "";
     return `The latest commit of ${branch} says ${tip.skip}, so GitHub may not start the release workflow for a tag on it. Push a commit without it, then release ${tag} by tagging that one:\n  ${cmd}${before}`;
   }

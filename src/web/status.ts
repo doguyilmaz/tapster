@@ -47,7 +47,15 @@ export function tagCommand(repo: string, tag: string, at: { sha: string } | { br
   return `${head}"$(gh api repos/${repo}/commits/${at.branch} --jq '${guard}')"`;
 }
 
-export const releasableParent = (head: CommitView) => (head.parent && !head.parent.skip && !head.parent.tag ? head.parent : null);
+const RELEASE_FILES = /^(\.github\/workflows\/|\.goreleaser\.[^/]+$|package\.json$|project\.yml$|Makefile$)/;
+
+// Files of the project root that decide how a release is built: tagging the commit before a change to them releases the
+// old setup.
+export const changesRelease = (files: string[]) => files.some((f) => RELEASE_FILES.test(f));
+
+// The commit before a marked tip, when tagging it is safe: no marker of its own, no version tag on it (tapster read the
+// tags) and a tip that leaves the release setup alone.
+export const releasableParent = (head: CommitView) => (head.parent && !head.parent.skip && head.parent.tag === null && head.changesRelease === false ? head.parent : null);
 
 const cleanParent = (head: CommitView) => (releasableParent(head) ? ` Or tag the commit before it, ${head.parent!.sha.slice(0, 7)}, which has no skip marker.` : "");
 

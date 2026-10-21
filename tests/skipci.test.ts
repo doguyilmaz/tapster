@@ -8,7 +8,7 @@ import { GitHub } from "../src/github";
 import type { ProjectStatus, StatusView } from "../src/web/contract";
 import { FakeHub } from "./helpers/fakehub";
 import { webApp } from "./helpers/web";
-import { canRelease, projectSteps, skipMarker, skipNote, tagCommand } from "../src/web/status";
+import { canRelease, changesRelease, projectSteps, releasableParent, skipMarker, skipNote, tagCommand } from "../src/web/status";
 
 test.each([
   ["Merge pull request #3 [skip ci]", "[skip ci]"],
@@ -44,23 +44,22 @@ const s = (over: Partial<ProjectStatus["release"]> = {}): ProjectStatus => ({
 });
 
 test("a tip with a skip marker is not released: the card says why and names the commit before it when that one is clean", () => {
-  const clean = { sha: "b".repeat(40), subject: "Fix the parser", url: "https://github.com/octo/aims/commit/b", skip: null };
-  const marked = s({ head: { ...head, skip: "[skip ci]", parent: clean } });
+  const clean = { sha: "b".repeat(40), subject: "Fix the parser", url: "https://github.com/octo/aims/commit/b", skip: null, tag: null };
+  const marked = s({ head: { ...head, skip: "[skip ci]", parent: clean, changesRelease: false } });
   expect(canRelease(marked)).toEqual({
     ok: false,
     why: "The latest commit on main says [skip ci], so GitHub may not start the release workflow for a tag on it. Push a commit without it to main and click Refresh. Or tag the commit before it, bbbbbbb, which has no skip marker.",
   });
   expect(projectSteps(marked).find((x) => x.id === "release")).toEqual({ id: "release", state: "open", label: "Push a commit without [skip ci]" });
-  const both = s({ head: { ...head, skip: "[skip ci]", parent: { ...clean, skip: "[ci skip]" } } });
+  const both = s({ head: { ...head, skip: "[skip ci]", parent: { ...clean, skip: "[ci skip]" }, changesRelease: false } });
   expect(canRelease(both).why).toBe("The latest commit on main says [skip ci], so GitHub may not start the release workflow for a tag on it. Push a commit without it to main and click Refresh.");
   expect(canRelease(s())).toEqual({ ok: true, why: null });
 });
 
 test("the printed tag command reads the tip's message first and stops on a skip marker", () => {
   const cmd = tagCommand("octo/aims", "v0.2.2", { branch: "main" })!;
-  expect(cmd).toStartWith(`gh api --method POST repos/octo/aims/git/refs -f ref=refs/tags/v0.2.2 -f sha="$(gh api repos/octo/aims/commits/main --jq 'if (.commit.message | test("(?i)\\\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\\\]")) or `);
-  expect(cmd).toContain('(last | test("(?im)^skip-checks:\\\\s*true\\\\s*$"))) then error("the latest commit of main carries a skip marker, so a tag on it may not start the release workflow")');
-  expect(cmd).toEndWith(` else .sha end')"`);
+  expect(cmd).toStartWith(`gh api --method POST repos/octo/aims/git/refs -f ref=refs/tags/v0.2.2 -f sha="$(gh api repos/octo/aims/commits/main --jq 'if `);
+  expect(cmd).toEndWith(` then error("the latest commit of main carries a skip marker, so a tag on it may not start the release workflow") else .sha end')"`);
 });
 
 test("the Release button and tapster add's printed command read the tip first and refuse a commit with a skip marker", async () => {
@@ -91,5 +90,55 @@ test("the Release button and tapster add's printed command read the tip first an
   expect(await releaseHint(gh, "octo/aims")).not.toContain("Or tag the commit before it");
   aims.commit = { message: "Fix the parser", date: "2026-10-19T16:20:00Z" };
   expect((await call("POST", "/api/projects/release", { hub: "octo/homebrew-tap", repo: "octo/aims", tag: "v0.2.2", sha: aims.head })).data).toEqual({ tag: "v0.2.2", sha: aims.head });
+  rmSync(home, { recursive: true, force: true });
+});
+
+const MARKED = ["x [skip ci]", "x [ci skip]", "x [NO CI]", "x [skip actions]", "x [actions skip]", "Tidy\n\nskip-checks: true", "Tidy\n\n\nSigned-off-by: O <o@x.yz>\nskip-checks:true\n", "Tidy\r\n\r\nskip-checks: true\r\n"];
+const CLEAN = ["Release v1.2.0", "skip-checks: true", "Tidy\n\nskip-checks: true\n\nMore words after it", "Mention skip-checks: true in a sentence\n\nok", "[skip-ci] no"];
+const jq = Bun.which("jq");
+
+test.skipIf(!jq)("jq runs the printed guard and stops exactly where skipMarker does", () => {
+  const guard = /--jq '(.*)'\)"$/.exec(tagCommand("o/t", "v1.0.0", { branch: "main" })!)![1]!;
+  for (const message of [...MARKED, ...CLEAN]) {
+    const r = Bun.spawnSync([jq!, guard], { stdin: Buffer.from(JSON.stringify({ sha: "abc", commit: { message } })), stderr: "pipe" });
+    expect([message, r.exitCode !== 0]).toEqual([message, skipMarker(message) !== null]);
+  }
+});
+
+test.each([".github/workflows/release.yml", ".github/workflows/ci.yaml", ".goreleaser.yaml", ".goreleaser.yml", "package.json", "project.yml", "Makefile"])("a tip that changes %s changes the release setup", (f) => {
+  expect(changesRelease(["README.md", f])).toBe(true);
+});
+
+test.each(["README.md", "src/main.go", "docs/package.json", "Makefile.md", ".github/dependabot.yml"])("a tip that changes only %s leaves the release setup", (f) => {
+  expect(changesRelease([f])).toBe(false);
+});
+
+test("the commit before a marked tip is offered only when the tip leaves the release setup, the commit has no version tag and the tags were read", async () => {
+  const fake = new FakeHub("octo");
+  const env = { policies: ["main"], custom: true, vars: new Map([["TAPSTER_APP_SLUG", "tapster-octo-tap"]]), secrets: new Set<string>() };
+  fake.repo("homebrew-tap", { env, files: new Map([["tapster.yml", "version: 1\ntap: octo/tap\npackages: []\n"], [".tapster/state.json", '{"version":1,"packages":{}}\n']]) });
+  listAims(fake);
+  const parent = { sha: "c".repeat(40), message: "Fix the parser" };
+  const aims = fake.repo("aims", { tags: new Map([["v0.2.1", "2".repeat(40)]]), commit: { message: "Docs [skip ci]", date: "2026-10-19T16:20:00Z", parent, files: [".github/workflows/release.yml", "README.md"] } });
+  const home = mkdtempSync(join(tmpdir(), "skipci-"));
+  const { call } = webApp(fake, home);
+  const head = async () => ((await call("GET", "/api/projects/status?hub=octo/homebrew-tap&repo=octo/aims")).data as unknown as StatusView).projects[0]!.release.head!;
+  const offered = async () => [releasableParent(await head())?.sha ?? null, (await releaseHint(new GitHub("t", fake.fetch, async () => {}, "user"), "octo/aims")).includes("Or tag the commit before it")];
+  expect(await head()).toMatchObject({ skip: "[skip ci]", changesRelease: true });
+  expect(await offered()).toEqual([null, false]);
+  const refused = await call("POST", "/api/projects/release", { hub: "octo/homebrew-tap", repo: "octo/aims", tag: "v0.2.2", sha: aims.head });
+  expect((refused.data.error as { fix: string }).fix).not.toContain("Or tag");
+  aims.commit = { ...aims.commit, files: ["README.md"] };
+  expect(await offered()).toEqual(["c".repeat(40), true]);
+  aims.commit = { ...aims.commit, message: "Merge pull request #5 from octo/docs\n\n[skip ci]", merge: "d".repeat(40), files: ["docs/a.md"] };
+  expect(await offered()).toEqual(["c".repeat(40), true]);
+  aims.commit = { ...aims.commit, files: ["docs/a.md", "package.json"] };
+  expect(await offered()).toEqual([null, false]);
+  aims.commit = { ...aims.commit, files: ["docs/a.md"] };
+  const real = fake.fetch;
+  fake.fetch = async (input, init) => (String(input).includes("/matching-refs/") ? new Response("{}", { status: 403 }) : real(input, init));
+  const blind = await offered();
+  fake.fetch = real;
+  expect(blind).toEqual([null, false]);
   rmSync(home, { recursive: true, force: true });
 });
