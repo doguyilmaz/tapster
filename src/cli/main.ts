@@ -6,6 +6,7 @@ import { init } from "./init";
 import { TAPSTER } from "../version";
 import { PORT, setup } from "../web/start";
 import { mcp } from "../mcp/server";
+import { upgrade } from "./upgrade";
 
 const usage = `tapster: publish your projects' releases from one Homebrew tap
 
@@ -14,6 +15,7 @@ const usage = `tapster: publish your projects' releases from one Homebrew tap
   tapster add         prepare this project clone and propose it to the hub
   tapster doctor      check the hub's setup and name the fix for each finding
   tapster mcp         serve tapster's tools to an AI assistant over MCP (stdio)
+  tapster upgrade     say how to upgrade this tapster
   tapster --version   show this tapster and the commit it pins hubs to
 
 Run tapster <command> --help for the options: Sparkle and Linux keys, the doorbell, rotations and more.`;
@@ -60,6 +62,10 @@ const help: Record<string, string> = {
 
   The tools read the hub, its runs, a project's releases and the projects on this computer. One of them starts a hub run.
   They use your GitHub CLI sign-in and never touch your keys.`,
+  upgrade: `tapster upgrade: say how to upgrade this tapster
+
+  It tells how this tapster was installed (Homebrew, bunx, a global Bun or npm install, or a checkout)
+  and prints the command that upgrades it. It changes nothing itself.`,
 };
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -74,9 +80,12 @@ try {
   else if (cmd === "doctor") {
     if (args.length) throw new TapsterError(`unknown option ${args.join(" ")}`, "tapster doctor takes no options.");
     process.exitCode = await doctor(args);
-  } else {
+  } else if (cmd === "upgrade") upgrade(args);
+  else {
+    const unknown = cmd && cmd !== "help" && cmd !== "--help";
+    if (unknown) console.error(`tapster: unknown command "${cmd}"`);
     console.log(usage);
-    process.exitCode = cmd && cmd !== "help" && cmd !== "--help" ? 1 : 0;
+    process.exitCode = unknown ? 1 : 0;
   }
 } catch (e) {
   console.error(e instanceof TapsterError ? `tapster: ${e.reason}\n  ${e.fix}` : "tapster: unexpected error");

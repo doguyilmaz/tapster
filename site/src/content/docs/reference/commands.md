@@ -70,6 +70,12 @@ depends on. Each finding names the command that fixes it. It takes no options.
 Serves tapster's tools to an AI assistant over MCP, on stdin and stdout. See
 [Use tapster with an AI assistant](/guides/ai/). It takes no options.
 
+## tapster upgrade
+
+Tells how this tapster was installed and prints the command that upgrades it. That is `brew upgrade --cask tapster`
+for Homebrew, `bunx @doguyilmaz/tapster@latest` for bunx, the global Bun or npm command for those installs and
+`git pull` in a checkout. It changes nothing itself and takes no options.
+
 ## tapster --version
 
 Shows the version of tapster and the commit it pins hubs to.
