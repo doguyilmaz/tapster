@@ -55,7 +55,8 @@ export function helpersOf(yml: string): Helper[] {
     const product = literal(base.PRODUCT_NAME) ?? String(d.target);
     if (!/^[A-Za-z0-9._-]+$/.test(product)) return [];
     const id = literal(base.PRODUCT_BUNDLE_IDENTIFIER);
-    return [{ path: `Contents/MacOS/${product}`, identifier: id && BUNDLE_ID.test(id) ? id : null, entitlements: literal(base.CODE_SIGN_ENTITLEMENTS) ?? literal(t.entitlements?.path) }];
+    const file = literal(base.CODE_SIGN_ENTITLEMENTS) ?? literal(t.entitlements?.path);
+    return [{ path: `Contents/MacOS/${product}`, identifier: id && BUNDLE_ID.test(id) ? id : null, entitlements: file && /^[A-Za-z0-9 ._\/-]{1,200}$/.test(file) ? file : null }];
   });
 }
 

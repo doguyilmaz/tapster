@@ -54,13 +54,14 @@ export type ConfigInput = {
 };
 
 export function remoteSources(gh: GitHub, o: ConfigInput): EntrySources {
+  const memo = /^[0-9a-f]{40,64}$/.test(o.ref) ? o.memo : undefined;
   const once = <T>(key: string, f: () => Promise<T>): (() => Promise<T>) => {
     const k = `${key}:${o.repo}@${o.ref}`;
     return () => {
-      const known = o.memo?.get(k) as Promise<T> | undefined;
+      const known = memo?.get(k) as Promise<T> | undefined;
       if (known) return known;
       const p = f();
-      o.memo?.set(k, p);
+      memo?.set(k, p);
       return p;
     };
   };
