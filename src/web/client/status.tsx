@@ -6,6 +6,7 @@ import { get, post } from "./api";
 import { hub, hubName, problemOf, say, statusOf, tilde } from "./state";
 import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner } from "./ui";
 import { capFirst } from "../steps";
+import { Configuration } from "./config";
 
 export const KIND: Record<string, string> = { go: "Go with GoReleaser", bun: "Bun", app: "Mac app with Sparkle" };
 
@@ -335,7 +336,15 @@ function ReleaseBox({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSt
   useEffect(() => setVersion(s.release.next), [s.release.next]);
   if (started) return <Follow s={s} tag={started} onStatus={onStatus} />;
   const gate = canRelease(s);
-  if (!gate.ok) return <p class="muted">{gate.why}</p>;
+  const before = s.release.head?.skip && s.release.head.parent && !s.release.head.parent.skip ? tagCommand(s.repo, s.release.next, { sha: s.release.head.parent.sha }) : null;
+  if (!gate.ok) {
+    return (
+      <>
+        <p class="muted">{gate.why}</p>
+        {before && <Cmd text={before} />}
+      </>
+    );
+  }
   const head = s.release.head!;
   const tag = version.trim();
   const bad = tagProblem(tag, s.release.highest);
@@ -474,6 +483,7 @@ export function StatusCard({ s, onStatus, fix }: { s: ProjectStatus; onStatus: (
             r.draft.note ? (
               <Note tone="error" title={`The hub will not publish the draft ${r.draft.tag}`}>
                 <span>{r.draft.note}</span>
+                {(s.config?.update || s.config?.pending) && <span>Configuration below has an update for the hub entry.</span>}
                 <a href={r.draft.url} target="_blank" rel="noopener noreferrer">
                   Open the draft
                 </a>
@@ -509,6 +519,7 @@ export function StatusCard({ s, onStatus, fix }: { s: ProjectStatus; onStatus: (
         )}
       </ol>
       )}
+      {!s.unreadable && <Configuration s={s} onStatus={onStatus} />}
       {s.secrets.names.length > 0 && !s.secrets.published && (
         <Note tone="info" title="Old release secrets">
           <span>

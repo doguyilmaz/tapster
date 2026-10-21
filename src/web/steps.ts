@@ -142,9 +142,9 @@ export function changedOnly(lines: { kind: "ctx" | "add" | "del"; text: string }
   return out;
 }
 
-const MARK = { add: "+ ", del: "- ", gap: "@ ", ctx: "  " } as const;
+export const DIFF_MARK = { add: "+ ", del: "- ", gap: "@ ", ctx: "  " } as const;
 
-export const changeText = (before: string, after: string) => changedOnly(lineDiff(before, after)).map((l) => `${MARK[l.kind]}${l.text}`).join("\n");
+export const changeText = (before: string, after: string) => changedOnly(lineDiff(before, after)).map((l) => `${DIFF_MARK[l.kind]}${l.text}`).join("\n");
 
 export type NoteItem = { text: string; block: string | null };
 
