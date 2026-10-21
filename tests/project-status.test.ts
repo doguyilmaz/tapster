@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { HubView, ProjectStatus } from "../src/web/contract";
-import { bumps, canRelease, followStates, highestTag, nextTag, projectNext, projectStop, projectSteps, tagCommand, tagProblem } from "../src/web/status";
+import { bumps, canRelease, followSteps, highestTag, nextTag, projectNext, projectStop, projectSteps, tagCommand, tagProblem } from "../src/web/status";
 import { stops } from "../src/web/steps";
 
 const reach = (reaches: boolean | null): ProjectStatus["app"] => ({
@@ -158,9 +158,12 @@ test("Release offers the next patch, minor and major after the highest tag", () 
   expect(bumps(null)).toEqual({ patch: "v0.1.0", minor: "v0.1.0", major: "v1.0.0" });
 });
 
-test("only the first unfinished step of a release waits; the ones after it are still to do", () => {
-  expect(followStates(["wait", "wait", "wait"])).toEqual(["wait", "open", "open"]);
-  expect(followStates(["done", "wait", "wait"])).toEqual(["done", "wait", "open"]);
-  expect(followStates(["done", "attention", "wait"])).toEqual(["done", "attention", "open"]);
-  expect(followStates(["done", "done", "done"])).toEqual(["done", "done", "done"]);
+test("each release step waits while it is really in progress, so steps can overlap", () => {
+  const f = (o: Partial<Parameters<typeof followSteps>[0]>) => followSteps({ run: "none", draft: "none", published: false, hubBusy: false, ...o });
+  expect(f({})).toEqual(["wait", "wait", "open"]);
+  expect(f({ run: "running", draft: "open", hubBusy: true })).toEqual(["wait", "done", "wait"]);
+  expect(f({ run: "ok", draft: "open" })).toEqual(["done", "done", "wait"]);
+  expect(f({ run: "failed" })).toEqual(["attention", "open", "open"]);
+  expect(f({ run: "ok", draft: "note" })).toEqual(["done", "attention", "open"]);
+  expect(f({ run: "ok", draft: "open", published: true })).toEqual(["done", "done", "done"]);
 });

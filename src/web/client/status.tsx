@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { FollowView, Problem as ProblemView, ProjectStatus, ReachView } from "../contract";
-import { type ProjectStep, type ProjectStepId, bumps, canRelease, followStates, projectNext, projectSteps, releasableParent, tagCommand, tagProblem } from "../status";
+import { type ProjectStep, type ProjectStepId, bumps, canRelease, followSteps, projectNext, projectSteps, releasableParent, tagCommand, tagProblem } from "../status";
 import { get, post } from "./api";
 import { hub, hubName, problemOf, say, statusOf, tilde } from "./state";
 import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner } from "./ui";
@@ -300,11 +300,12 @@ function Follow({ s, tag, onStatus }: { s: ProjectStatus; tag: string; onStatus:
         : kick?.doorbell
           ? "The doorbell starts the hub"
           : "The hub signs and publishes it on its next run";
-  const states = followStates<ProjectStep["state"]>([
-    !run || !ran ? "wait" : runOk || draftOpen ? "done" : "attention",
-    view?.draft?.note ? "attention" : draftOpen ? "done" : "wait",
-    view?.published ? "done" : view?.draft?.note ? "open" : "wait",
-  ]);
+  const states = followSteps({
+    run: !run ? "none" : !ran ? "running" : runOk ? "ok" : "failed",
+    draft: view?.draft?.note ? "note" : view?.draft ? "open" : "none",
+    published: Boolean(view?.published),
+    hubBusy,
+  });
   const item = (state: ProjectStep["state"], text: ComponentChildren, link?: { href: string; label: string }) => (
     <li>
       <Mark state={state} />

@@ -27,9 +27,16 @@ export function bumps(highest: string | null): { patch: string; minor: string; m
   return { patch: at(v.major, v.minor, v.patch + 1), minor: at(v.major, v.minor + 1, 0), major: at(v.major + 1, 0, 0) };
 }
 
-export function followStates<S extends string>(states: S[]): (S | "open")[] {
-  const first = states.findIndex((st) => st !== "done");
-  return states.map((st, i) => (first !== -1 && i > first && st === "wait" ? "open" : st));
+export type Follow = { run: "none" | "running" | "ok" | "failed"; draft: "none" | "open" | "note"; published: boolean; hubBusy: boolean };
+
+// Each step waits while it is really in progress; GitHub opens the draft before the run ends and the doorbell starts the hub during it.
+export function followSteps(f: Follow): ("done" | "open" | "wait" | "attention")[] {
+  const draftOpen = f.draft === "open" || f.published;
+  return [
+    f.run === "ok" || (f.run === "failed" && draftOpen) ? "done" : f.run === "failed" ? "attention" : "wait",
+    f.draft === "note" ? "attention" : draftOpen ? "done" : f.run === "failed" ? "open" : "wait",
+    f.published ? "done" : f.draft === "note" ? "open" : f.hubBusy || draftOpen ? "wait" : "open",
+  ];
 }
 
 export function tagProblem(tag: string, highest: string | null): string | null {
