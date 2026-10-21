@@ -10,13 +10,46 @@ import type { State } from "../../state";
 import { type HubEntry, type TagRef, hubEntries, hubFacts, installLink, releaseSecrets, tagAt, tagCommit, tagRefs } from "../../cli/hubpr";
 import type { CommitView, FollowView, ProjectStatus, StatusView } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
-import { changesRelease, highestTag, nextTag, skipFix, skipMarker, tagProblem } from "../status";
+import { changesRelease, highestTag, nextTag, skipFix, skipMarker, suggestBump, tagProblem } from "../status";
 import { configOf } from "./config";
 import { proposal } from "./entry";
 import { checkHub, hubRunList, me, startHubRun } from "./hub";
 import { type HubChecks, hubChecks, reachOf, reachRoutes, stateOf } from "./reach";
 
 const HOMEBREW_KEYS = ["notarize", "homebrew_casks", "brews", "scoops"];
+
+const or = (items: string[]) => (items.length < 2 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`);
+const list = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : typeof v === "string" ? [v] : []);
+
+// What starts the release workflow besides a version tag or a manual run; a merge that matches one starts a release.
+async function sinceTag(gh: GitHub, repo: string, tag: string, sha: string): Promise<string[]> {
+  const cmp = await gh.json<{ commits?: { commit: { message: string } }[] }>("GET", `/repos/${repo}/compare/${encodeURIComponent(tag)}...${sha}`);
+  return (cmp.commits ?? []).map((c) => c.commit.message);
+}
+
+export function releaseTriggers(workflow: string): string[] {
+  let on: unknown;
+  try {
+    on = (parse(workflow) as { on?: unknown } | null)?.on;
+  } catch {
+    return [];
+  }
+  const named = typeof on === "string" || Array.isArray(on) ? Object.fromEntries(list(on).map((e) => [e, null])) : on && typeof on === "object" ? (on as Record<string, unknown>) : {};
+  const out: string[] = [];
+  if ("push" in named) {
+    const push = (named.push ?? {}) as Record<string, unknown>;
+    const branches = list(push.branches);
+    const paths = list(push.paths);
+    const onlyTags = "tags" in push && !("branches" in push) && !("branches-ignore" in push) && !("paths" in push) && !("paths-ignore" in push);
+    if (!onlyTags) {
+      const where = branches.length ? `pushes to ${or(branches)}` : Object.keys(push).length ? "pushes to any branch" : "every push";
+      out.push(paths.length ? `${where} that change ${or(paths)}` : where);
+    }
+  }
+  if ("schedule" in named) out.push("a schedule");
+  if ("workflow_run" in named) out.push("another workflow finishing");
+  return out;
+}
 
 export function setupProblems(o: { kind: string; branch: string; workflowName: string; goreleaser: string | null; workflow: string | null }): string[] {
   const out: string[] = [];
@@ -122,6 +155,7 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
   const draft = newest(releases.filter((r) => r.draft && TAG.test(r.tag_name) && (!latest || compareSemver(parseTag(r.tag_name)!, parseTag(latest.tag_name)!) > 0)));
   const highest = highestTag([...refs.map((r) => r.name), ...releases.map((r) => r.tag_name)]);
   const atHead = head ? await tagAt(gh, e.repo, refs, head.sha) : null;
+  const suggest = head && highest && !atHead ? await sinceTag(gh, e.repo, highest, head.sha).then((m) => suggestBump(m, highest), () => null) : null;
   const setup = setupProblems({ kind: e.kind, branch, workflowName: e.workflow, goreleaser, workflow });
   const config =
     e.state === "merged"
@@ -135,7 +169,7 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
     url: project.html_url,
     kind: e.kind,
     defaultBranch: branch,
-    setup: { ok: setup.length === 0, problems: setup },
+    setup: { ok: setup.length === 0, problems: setup, triggers: workflow ? releaseTriggers(workflow) : [] },
     protection: { ok: problems.length === 0, off: e.protection === "off", problems },
     entry: { state: e.state, pr: e.pr, ...proposed },
     app: { ...reachOf(sh.checks, e.name, e.repo, sh.state), installUrl: sh.slug ? installLink(sh.slug, sh.ownerId, project.id) : "" },
@@ -146,6 +180,7 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
       next: nextTag(highest),
       autoTag: keys.some((k) => k.title === "tapster tags"),
       atHead,
+      suggest,
       head,
     },
     secrets: { names: secrets, published: published.some((p) => p.status === "published") },
@@ -167,11 +202,11 @@ async function statusOrReason(sh: Shared, e: Listed): Promise<ProjectStatus> {
       url: `https://github.com/${e.repo}`,
       kind: e.kind,
       defaultBranch: "main",
-      setup: { ok: false, problems: [] },
+      setup: { ok: false, problems: [], triggers: [] },
       protection: { ok: false, off: false, problems: [] },
       entry: { state: e.state, pr: e.pr, proposal: null, blocked: null },
       app: { reaches: null, how: null, at: null, since: null, reason: null, run: null, running: false, installUrl: "" },
-      release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, atHead: null, head: null },
+      release: { latest: null, draft: null, highest: null, next: "v0.1.0", autoTag: false, atHead: null, suggest: null, head: null },
       secrets: { names: [], published: false },
       unreadable: `${err.reason}. ${err.fix}`,
     };

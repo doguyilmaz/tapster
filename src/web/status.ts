@@ -39,6 +39,23 @@ export function followSteps(f: Follow): ("done" | "open" | "wait" | "attention")
   ];
 }
 
+export type Bump = { kind: "patch" | "minor" | "major"; reason: string };
+
+const commits = (n: number) => `${n} ${n === 1 ? "commit" : "commits"}`;
+
+// Conventional Commits since the highest tag: "type!:" or a BREAKING CHANGE footer is major, "feat" is minor, "fix" is patch.
+export function suggestBump(messages: string[], highest: string | null): Bump {
+  const subject = (m: string) => m.split("\n")[0]!.trim();
+  const breaking = messages.filter((m) => /^[a-z]+(\([^)]*\))?!:/i.test(subject(m)) || /^BREAKING[ -]CHANGE:/m.test(m)).length;
+  const feats = messages.filter((m) => /^feat(\([^)]*\))?:/i.test(subject(m))).length;
+  const fixes = messages.filter((m) => /^fix(\([^)]*\))?:/i.test(subject(m))).length;
+  const v = highest ? parseTag(highest) : null;
+  if (breaking) return v && v.major === 0 ? { kind: "minor", reason: `${commits(breaking)} marks a breaking change; before 1.0 that bumps the minor version` } : { kind: "major", reason: `${commits(breaking)} marks a breaking change` };
+  if (feats) return { kind: "minor", reason: `${commits(feats)} ${feats === 1 ? "adds a feature" : "add features"} (feat:)` };
+  if (fixes) return { kind: "patch", reason: `${commits(fixes)} ${fixes === 1 ? "fixes" : "fix"} something (fix:)` };
+  return { kind: "patch", reason: `no commit since ${highest ?? "the start"} uses Conventional Commits types, so pick the bump yourself` };
+}
+
 export function tagProblem(tag: string, highest: string | null): string | null {
   const v = parseTag(tag);
   if (!v) return "Use the shape v1.2.3, such as v1.2.3 or v1.2.3-rc.1";

@@ -34,11 +34,11 @@ const s = (over: Partial<ProjectStatus["release"]> = {}): ProjectStatus => ({
   url: "https://github.com/octo/aims",
   kind: "go",
   defaultBranch: "main",
-  setup: { ok: true, problems: [] },
+  setup: { ok: true, problems: [], triggers: [] },
   protection: { ok: true, off: false, problems: [] },
   entry: { state: "merged", pr: null, proposal: null, blocked: null },
   app: { reaches: true, how: "run", at: null, since: null, reason: null, run: null, running: false, installUrl: "" },
-  release: { latest: null, draft: null, highest: "v0.2.1", next: "v0.2.2", autoTag: false, atHead: null, head, ...over },
+  release: { latest: null, draft: null, highest: "v0.2.1", next: "v0.2.2", autoTag: false, atHead: null, suggest: null, head, ...over },
   secrets: { names: [], published: false },
   unreadable: null,
 });

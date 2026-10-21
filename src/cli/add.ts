@@ -24,7 +24,7 @@ import bunTemplate from "../../templates/project/bun-release.yml" with { type: "
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
 import { highestTag, nextTag, releasableParent, tagCommand } from "../web/status";
-import { headOf, withParentTag } from "../web/api/status";
+import { headOf, releaseTriggers, withParentTag } from "../web/api/status";
 import { YAML_OUT, appInstallUrl, autoTagSteps, goreleaserCask, hasHomebrew, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubEntries, hubFacts, hubName, installSentence, proposeEntry, proposeUpdate, releaseEntry, releaseSecrets, repoTags, tagRefs, withoutMac } from "./hubpr";
 import { ask } from "./prompt";
 import { mustRead, readRegular, readSmall, writeInside } from "./paths";
@@ -70,6 +70,8 @@ export function adaptReleaseWorkflow(text: string, attestSha: string, attestTag:
   const jobs = doc.get("jobs");
   if (!isMap(jobs)) throw new TapsterError("the release workflow has no jobs", "Add the GoReleaser job first.");
   notes.push(...branchMoves(jobs));
+  const triggers = releaseTriggers(text);
+  if (triggers.length) notes.push(`the release workflow also starts on ${triggers.join(" and ")}, so merging such a change starts a release; merge those only once the hub entry is merged and the App reaches the project`);
   for (const job of jobs.items) {
     const steps = (job.value as YAMLMap).get("steps");
     if (!isSeq(steps)) continue;
