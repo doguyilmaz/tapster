@@ -9,6 +9,18 @@ A project's release workflow builds the files and opens a **draft** release with
 workflow checks the draft, signs and notarizes macOS code, publishes the release and writes the cask, Scoop manifest
 and apt and dnf repositories. When the hub refuses a draft it writes the reason at the top of the draft's notes.
 
+## How a release starts
+
+- A release starts only from a version tag such as `v1.2.3` (or from the project's own tagging workflow when it was
+  added with `--auto-tag`). Merging or pushing alone publishes nothing.
+- GitHub runs no push workflow for a commit whose message holds `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`
+  or `[actions skip]`. The same goes for a message that ends with the trailer `skip-checks: true`. A tag on such a
+  commit may never start the release workflow. Never tag a commit whose message carries one of these markers.
+- When you merge several pull requests in a row, put `[skip ci]` in the merge commit message of all but the last. Then
+  tag the last one, which carries no marker.
+- tapster setup's Release button and the `gh` command `tapster add` prints read the tip's message first and refuse a
+  marked commit. MCP `release_status` reports it as `tipSkipsWorkflows`.
+
 ## Look in this order
 
 With the tapster MCP server connected, use its tools; otherwise use `gh`.
@@ -34,6 +46,10 @@ With the tapster MCP server connected, use its tools; otherwise use `gh`.
 - "the hub changed in ways only you may change it": someone else pushed to the hub's `main`; review and revert those
   commits.
 - "tapster vX is out": update the hub workflow in tapster setup (Hub files) or with `tapster init --workflow`.
+- "... holds X.app/Contents/MacOS/..., a Mach-O file not listed in binaries": the project now ships an app the hub entry
+  does not describe. MCP `release_status` shows the change as `entryUpdate`. The user proposes and merges it in tapster
+  setup (Projects, the project's Configuration) or runs `bunx @doguyilmaz/tapster add` in the project's clone. Do not
+  edit the hub's `tapster.yml` by hand for this: tapster's update changes only that entry's lines.
 
 The full list is at https://tapster.doguyilmaz.com/reference/troubleshooting/. Never ask the user for their keys; every
 fix that needs a key runs in tapster's own page or prompts.

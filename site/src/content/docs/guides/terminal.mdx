@@ -228,14 +228,17 @@ tapster commits nothing. When it ends with
   the next patch version after the highest tag there:
 
   ```sh
-  gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.2.2 -f sha="$(gh api repos/you/my-tool/commits/main --jq .sha)"
+  sha=$(gh api repos/you/my-tool/commits/main --jq 'if (.commit.message | test("(?im)\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\]|^skip-checks:\\s*true\\s*$")) then error("the latest commit of main carries a skip marker, so a tag on it may not start the release workflow") else .sha end') && gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.2.2 -f sha="$sha"
   ```
 
   It tags GitHub's copy, not your clone, so a clone that is behind or on another branch cannot put the tag on the
-  wrong commit. A project whose workflow tags by itself (`--auto-tag`) gets no command.
+  wrong commit. It stops when that commit's message carries a skip marker such as `[skip ci]`, because GitHub would
+  start no release workflow for its tag. A project whose workflow tags by itself (`--auto-tag`) gets no command.
 
-If you run `tapster add` again later, it keeps the hub entry the hub already has and changes no file that is already
-right.
+If you run `tapster add` again later, it changes no file that is already right. When the hub entry lacks what the
+project ships now, such as an app in its macOS archives, it prints the lines it would add and proposes them in a pull
+request on the hub that changes no other line. It never removes or rewrites what you wrote. What it cannot derive,
+such as entitlements, it lists for you to write by hand.
 
 :::note[Where your keys go]{icon="padlock"}
 The project holds no keys. If it still has old release secrets such as `MACOS_*` or `HOMEBREW_TAP_*`, tapster lists

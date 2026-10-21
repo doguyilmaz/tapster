@@ -20,6 +20,8 @@ most. Start with [`tapster doctor`](/reference/commands/#tapster-doctor) in your
 | `Allow gh to change workflows` | Run the command the page shows, `gh auth refresh -s workflow`. The page continues by itself. |
 | `main changed in ways only you may change it` | Someone else pushed to the hub. Review those commits on GitHub and revert what you did not make, then write the hub files again. |
 | `git could not push without asking for a password or passphrase` | Push from a terminal in the project's folder; the page shows the command. |
+| `The latest commit on main says [skip ci]` | GitHub starts no push workflow for that commit, so a tag on it may never start the release workflow. Push a commit without the marker. Or tag the commit before it with the command the sheet shows. |
+| `the pull request does more than change this entry in main's tapster.yml` | The update's pull request changes other lines or `main` changed since tapster opened it. Review it on GitHub. Or close it, delete its branch and propose the update again. |
 | `... is outside your home folder` | tapster reads clones inside your home folder only. Move the clone or link it into your home folder. |
 
 ## The doorbell and the Linux key
@@ -62,6 +64,8 @@ tapster setup and `tapster init` show the same messages for these.
 | `no GoReleaser step found in the release workflow` | Name the workflow that runs GoReleaser: `tapster add --workflow ci.yml`. |
 | `the hub would refuse this entry: ...` | Fix what the message names in the project, then run `tapster add` again. |
 | `the hub already has a branch tapster-add-<name>` | Merge or delete that pull request on the hub, then run `tapster add` again. |
+| `the hub already has a branch tapster-update-<name>` | An earlier update of that entry waits. Merge or close its pull request and delete the branch, then try again. |
+| `the latest commit of main carries a skip marker` | The printed `gh` command stopped because GitHub would start no release workflow for that commit. Push a commit without `[skip ci]` and run it again. |
 
 ## On the hub's run
 
@@ -109,7 +113,7 @@ and run the project's release workflow again.
 | `... does not match checksums.txt` | A file changed after `checksums.txt` was written. Build the release again. |
 | `... is attached but not listed in checksums.txt` | Every file in the draft must be in `checksums.txt`. |
 | `... has no valid build attestation from ...` | The file was not attested by the workflow the entry names. Check `workflow` in the entry and the attestation step of the project's release workflow. |
-| `... holds ..., a Mach-O file not listed in binaries` | List every macOS executable of the archive under `binaries`. |
+| `... holds ..., a Mach-O file not listed in binaries` | List every macOS executable of the archive under `binaries`. When it sits inside an app, the project's Configuration in tapster setup offers the `app` block read from the app's Info.plist. |
 | `tag ... is not like v1.2.3` | Use tags such as `v1.2.3` or `v1.2.3-rc.1`. |
 | `a release for this tag is already published; delete the draft` | Delete the extra draft. |
 | `the app's version is ..., but the tag says ...` | Stamp both version keys of the app with the tag's version. |
