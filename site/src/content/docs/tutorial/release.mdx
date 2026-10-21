@@ -42,6 +42,22 @@ marker:
 gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.1.0 -f sha="$(gh api repos/you/my-tool/commits/main --jq 'if (.commit.message | test("(?i)\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\]")) or ([.commit.message | splits("\\r?\\n[ \\t]*\\r?\\n") | select(test("\\S"))] | length > 1 and (last | test("(?im)^skip-checks:\\s*true\\s*$"))) then error("the latest commit of main carries a skip marker, so a tag on it may not start the release workflow") else .sha end')"
 ```
 
+### Docs and CI
+
+The release workflow starts only from a version tag (an app's workflow also runs when you start it by hand), so
+merging docs never releases. Do not add push or paths triggers on `main` to the release workflow.
+
+To keep pull requests that only change docs from running the full test matrix, give the project's own CI workflow
+`paths-ignore` for the docs folder and give the docs workflow `paths` for it. tapster does not edit those files,
+because each project's CI is its own.
+
+```yaml
+# in the project's CI workflow
+on:
+  pull_request:
+    paths-ignore: ["docs/**"]
+```
+
 ## 2. The project opens a draft
 
 The project's release workflow builds the archives, writes `checksums.txt`, attests the files and opens a **draft**

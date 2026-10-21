@@ -30,3 +30,10 @@ the first draft. To replace your workflow with tapster's, run `tapster add --for
 
 The hub needs the draft to hold `checksums.txt` and, for a public project, an attestation of each file made by that
 workflow. See [Troubleshooting](/reference/troubleshooting/) if the hub waits for either.
+
+## Docs changes
+
+The release workflow starts only from a version tag, so merging docs never releases. Keep it that way: add no push or
+paths triggers on `main` to it. To keep docs-only pull requests off the full CI, see
+[Docs and CI](/tutorial/release/#docs-and-ci). When you merge several pull requests in a row, put `[skip ci]` in every
+merge message but the last. Never tag a commit whose message carries a skip marker.

@@ -18,6 +18,9 @@ and apt and dnf repositories. When the hub refuses a draft it writes the reason 
   commit may never start the release workflow. Never tag a commit whose message carries one of these markers.
 - When you merge several pull requests in a row, put `[skip ci]` in the merge commit message of all but the last. Then
   tag the last one, which carries no marker.
+- Merging docs never releases. Do not add push or paths triggers on `main` to the release workflow. To keep docs-only
+  pull requests from running the full CI, give the project's own CI workflow `paths-ignore` for the docs folder and the
+  docs workflow `paths` for it. tapster does not edit those files: each project's CI is its own.
 - tapster setup's Release button and the `gh` command `tapster add` prints read the tip's message first and refuse a
   marked commit. MCP `release_status` reports it as `tipSkipsWorkflows`.
 
