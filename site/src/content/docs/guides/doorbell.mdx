@@ -35,7 +35,8 @@ In [tapster setup](/tutorial/hub/), open **Optional extras**. The doorbell takes
 1. **A Cloudflare token.** Click **Open Cloudflare's token page**. Cloudflare shows the permission
    **Workers Scripts: Edit**. Click **Continue to summary**, then **Create Token**. Copy the token it shows.
    Paste it into **The token** and click **Check the token**. Your password manager offers to save it under the name
-   above the field.
+   above the field. When the token reaches several Cloudflare accounts, the page lists them and you pick the one the
+   doorbell runs in. To keep a token to one account, pick it under **Account Resources** on Cloudflare's page.
 
    :::tip[You should see]{icon="approve-check-circle"}
    `Cloudflare account <your account>, Workers on <subdomain>.workers.dev.`
@@ -81,8 +82,8 @@ bunx @doguyilmaz/tapster init --doorbell
 <Steps>
 
 1. tapster opens Cloudflare's token page and asks for the token with a hidden prompt. To skip the prompt, set
-   `CLOUDFLARE_API_TOKEN` before you run the command. When the token reaches several accounts, set
-   `CLOUDFLARE_ACCOUNT_ID` to the one the doorbell should use.
+   `CLOUDFLARE_API_TOKEN` before you run the command. When the token reaches several accounts, tapster lists them and
+   asks for the number of the one the doorbell runs in. Set `CLOUDFLARE_ACCOUNT_ID` to skip that question.
 2. tapster opens a page that explains the doorbell App. Click **Continue to GitHub**, then **Create GitHub App**.
 3. On the install page, choose **Only select repositories** and pick the hub, only the hub. Click **Install**.
 
@@ -134,5 +135,5 @@ it changes anything when it does not. Delete every older key on that page afterw
 
 - The Worker is always named `tapster-doorbell`, so one Cloudflare account serves the doorbell of one hub. tapster stops
   before it would replace the doorbell of another hub.
-- The token must reach exactly one Cloudflare account. Pick it under **Account Resources** when you create the token.
-  In a terminal, `CLOUDFLARE_ACCOUNT_ID` picks one instead.
+- Each doorbell runs in one Cloudflare account. tapster checks again right before every upload that the account's
+  doorbell serves your hub.

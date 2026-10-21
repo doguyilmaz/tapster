@@ -9,7 +9,7 @@ export const COMPATIBILITY_DATE = "2026-10-01";
 export const TOKEN_PERMISSIONS = [{ key: "workers_scripts", type: "edit" }];
 export const TOKEN_PAGE = `https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=${encodeURIComponent(JSON.stringify(TOKEN_PERMISSIONS))}&name=tapster-doorbell&accountId=*&zoneId=all`;
 
-const NEW_TOKEN = "Create a new token from Cloudflare's token page that tapster opens. It asks for Workers Scripts: Edit; keep your account under Account Resources.";
+const NEW_TOKEN = "Create a new token from Cloudflare's token page that tapster opens. It asks for Workers Scripts: Edit. You can narrow it to one account under Account Resources.";
 
 export class CloudflareError extends TapsterError {
   constructor(reason: string, fix: string, readonly status: number, readonly codes: number[]) {
@@ -51,39 +51,58 @@ export class Cloudflare {
   }
 }
 
-export type CloudflareTarget = { account: { id: string; name: string }; subdomain: string; origin: string };
+export type CloudflareAccount = { id: string; name: string };
+export type CloudflareTarget = { account: CloudflareAccount; subdomain: string; origin: string };
 
 const missing = (e: unknown) => {
   if (e instanceof CloudflareError && e.codes.includes(10007)) return null;
   throw e;
 };
 
-export async function checkCloudflare(cf: Cloudflare, o: { hub: string; account?: string }): Promise<CloudflareTarget> {
+export async function tokenAccounts(cf: Cloudflare): Promise<CloudflareAccount[]> {
   let verified: { status?: string };
   try {
     verified = await cf.call<{ status?: string }>("GET", "/user/tokens/verify");
   } catch (e) {
-    if (e instanceof CloudflareError && e.status >= 400 && e.status < 500) throw new TapsterError("Cloudflare did not accept that token", `Copy the token again. Cloudflare shows it once, so create a new one if it is gone. Use a token from your profile's API Tokens page, which tapster opens; tokens owned by an account do not work here.`);
+    if (e instanceof CloudflareError && e.status >= 400 && e.status < 500) {
+      throw new TapsterError("Cloudflare did not accept that token", "It may be mistyped, expired or deleted. Copy it again; Cloudflare shows it once, so create a new one if it is gone. Use a token from your profile's API Tokens page, which tapster opens. Tokens owned by an account do not work here.");
+    }
     throw e;
   }
+  if (verified?.status === "expired") throw new TapsterError("that Cloudflare token has expired", NEW_TOKEN);
   if (verified?.status !== "active") throw new TapsterError(`that Cloudflare token is ${verified?.status ?? "not active"}`, NEW_TOKEN);
-  const accounts = (await cf.call<{ id: string; name: string }[]>("GET", "/accounts?per_page=50")) ?? [];
+  const accounts = ((await cf.call<CloudflareAccount[]>("GET", "/accounts?per_page=50")) ?? []).filter((a) => /^[0-9a-f]{32}$/.test(a.id));
   if (accounts.length === 0) throw new TapsterError("Cloudflare shows the token no account", NEW_TOKEN);
-  const chosen = o.account ? accounts.filter((a) => a.id === o.account) : accounts;
-  if (chosen.length === 0) throw new TapsterError(`the token does not reach the Cloudflare account ${o.account}`, "Check CLOUDFLARE_ACCOUNT_ID. Unset it to use the one account the token reaches.");
-  if (chosen.length > 1) throw new TapsterError(`the token reaches ${chosen.length} Cloudflare accounts`, "Create it again with only the account the doorbell should use under Account Resources.");
-  const account = chosen[0]!;
-  if (!/^[0-9a-f]{32}$/.test(account.id)) throw new TapsterError("Cloudflare named an account tapster cannot read", "Try again. If it repeats, report it at https://github.com/doguyilmaz/tapster/issues.");
+  return accounts.map((a) => ({ id: a.id, name: String(a.name).replace(/[^\x20-\x7e]/g, "").slice(0, 100) }));
+}
+
+async function servesHub(cf: Cloudflare, account: CloudflareAccount, hub: string): Promise<void> {
+  const running = await cf.call<{ bindings?: { name?: string; text?: string }[] }>("GET", `/accounts/${account.id}/workers/scripts/${SCRIPT}/settings`).catch(missing);
+  const other = running?.bindings?.find((b) => b.name === "HUB")?.text;
+  if (other && other.toLowerCase() !== hub.toLowerCase()) {
+    throw new TapsterError(`the Cloudflare account ${account.name} already runs the doorbell of ${other}`, "One Cloudflare account serves the doorbell of one hub. Use another Cloudflare account for this hub.");
+  }
+}
+
+export async function accountTarget(cf: Cloudflare, account: CloudflareAccount, hub: string): Promise<CloudflareTarget> {
   const subdomain = (await cf.call<{ subdomain?: string }>("GET", `/accounts/${account.id}/workers/subdomain`).catch(missing))?.subdomain ?? "";
   if (!/^[a-z0-9-]{1,63}$/.test(subdomain)) {
     throw new TapsterError(`the Cloudflare account ${account.name} has no workers.dev subdomain yet`, `Pick one at https://dash.cloudflare.com/${account.id}/workers/onboarding, then try again.`);
   }
-  const running = await cf.call<{ bindings?: { name?: string; text?: string }[] }>("GET", `/accounts/${account.id}/workers/scripts/${SCRIPT}/settings`).catch(missing);
-  const other = running?.bindings?.find((b) => b.name === "HUB")?.text;
-  if (other && other.toLowerCase() !== o.hub.toLowerCase()) {
-    throw new TapsterError(`the Cloudflare account ${account.name} already runs the doorbell of ${other}`, "One Cloudflare account serves the doorbell of one hub. Use a token of another Cloudflare account.");
+  await servesHub(cf, account, hub);
+  return { account, subdomain, origin: `https://${SCRIPT}.${subdomain}.workers.dev` };
+}
+
+export const SEVERAL = "In tapster setup, pick the account on the page. In a terminal, set CLOUDFLARE_ACCOUNT_ID or answer the prompt. On Cloudflare's token page you can also narrow the token to one account under Account Resources.";
+
+export function pickAccount(accounts: CloudflareAccount[], id?: string): CloudflareAccount {
+  if (id) {
+    const named = accounts.find((a) => a.id === id);
+    if (!named) throw new TapsterError("the token does not reach that Cloudflare account", "Pick one of the accounts the token reaches.");
+    return named;
   }
-  return { account: { id: account.id, name: account.name }, subdomain, origin: `https://${SCRIPT}.${subdomain}.workers.dev` };
+  if (accounts.length > 1) throw new TapsterError(`the token reaches ${accounts.length} Cloudflare accounts`, SEVERAL);
+  return accounts[0]!;
 }
 
 const text = (m: unknown) => (m as { default: string }).default;
@@ -101,6 +120,7 @@ export async function bundleWorker(): Promise<string> {
 
 export async function deployWorker(cf: Cloudflare, target: CloudflareTarget, vars: Record<string, string>, key: string, cron: string): Promise<string> {
   const base = `/accounts/${target.account.id}/workers/scripts/${SCRIPT}`;
+  await servesHub(cf, target.account, vars.HUB ?? "");
   const form = new FormData();
   const bindings = Object.entries(vars).map(([name, value]) => ({ type: "plain_text", name, text: value }));
   form.set("metadata", JSON.stringify({ main_module: "worker.js", compatibility_date: COMPATIBILITY_DATE, bindings, keep_bindings: ["secret_text"] }));

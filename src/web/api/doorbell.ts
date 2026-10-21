@@ -4,7 +4,7 @@ import { TapsterError } from "../../errors";
 import { readHubFile } from "../../hubcommit";
 import { register } from "../../mask";
 import { type CreatedApp, convertManifest, permissionLines } from "../../cli/appflow";
-import { Cloudflare, TOKEN_PAGE, checkCloudflare } from "../../cli/cloudflare";
+import { Cloudflare, TOKEN_PAGE, accountTarget, pickAccount, tokenAccounts } from "../../cli/cloudflare";
 import { checkDoorbellKey, deployDoorbell, doorbellManifest, doorbellRepos, doorbellStage, hubInstallation, onlyHub, ringProjects } from "../../cli/doorbell";
 import { hubEnv, setEnvVariable } from "../../cli/gh";
 import { FLOW } from "../../cli/hubfiles";
@@ -35,7 +35,8 @@ export function doorbellView(s: Session, hub: string, v: (name: string) => strin
     origin: v("TAPSTER_DOORBELL"),
     app: id && slug ? { id, slug } : bell ? { id: bell.id, slug: bell.slug } : null,
     key: Boolean(bell),
-    cloudflare: cloud ? { account: cloud.target.account.name, subdomain: cloud.target.subdomain } : null,
+    cloudflare: cloud?.target ? { account: cloud.target.account.name, subdomain: cloud.target.subdomain } : null,
+    accounts: cloud && !cloud.target ? cloud.accounts : null,
     tokenPage: TOKEN_PAGE,
   };
 }
@@ -71,8 +72,26 @@ async function cloudflare(c: Ctx) {
   const { hub } = await hubFrom(c, body.hub);
   const token = body.token.trim();
   if (!/^[A-Za-z0-9._-]{20,400}$/.test(token)) throw new TapsterError("that is not a Cloudflare API token", "Paste the token Cloudflare showed after Create Token. Cloudflare shows it once; create a new one if it is gone.");
-  const target = await checkCloudflare(new Cloudflare(token, c.s.deps.fetch), { hub });
-  c.s.cloudflare.set(hub, { token, target, at: Date.now() });
+  const cf = new Cloudflare(token, c.s.deps.fetch);
+  const accounts = await tokenAccounts(cf);
+  if (accounts.length > 1) {
+    c.s.cloudflare.set(hub, { token, accounts, target: null, at: Date.now() });
+    return { accounts };
+  }
+  const target = await accountTarget(cf, accounts[0]!, hub);
+  c.s.cloudflare.set(hub, { token, accounts, target, at: Date.now() });
+  return { account: target.account.name, subdomain: target.subdomain };
+}
+
+const NO_TOKEN = () => new TapsterError("this setup holds no Cloudflare token", "Paste the token again: tapster keeps it in memory for an hour at most.");
+
+async function account(c: Ctx) {
+  const body = await readJson(c.req, z.object({ hub: z.string(), account: z.string().regex(/^[0-9a-f]{32}$/) }).strict());
+  const { hub } = await hubFrom(c, body.hub);
+  const held = heldCloudflare(c.s, hub);
+  if (!held) throw NO_TOKEN();
+  const target = await accountTarget(new Cloudflare(held.token, c.s.deps.fetch), pickAccount(held.accounts, body.account), hub);
+  held.target = target;
   return { account: target.account.name, subdomain: target.subdomain };
 }
 
@@ -126,7 +145,8 @@ async function deploy(c: Ctx): Promise<DoorbellDone> {
   const { gh } = await hubFrom(c, hub);
   const bell = heldBell(c.s, hub);
   const cloud = heldCloudflare(c.s, hub);
-  if (!cloud) throw new TapsterError("this setup holds no Cloudflare token", "Paste the token again: tapster keeps it in memory for an hour at most.");
+  if (!cloud) throw NO_TOKEN();
+  if (!cloud.target) throw new TapsterError("no Cloudflare account is picked yet", "Pick the account for the doorbell in step 1.");
   if (doorbellStage(await vars(gh, hub)) === "done") throw new TapsterError("the hub already has a doorbell", "To give it a new key, run tapster init --rotate doorbell in a clone of the hub.");
   const installed = onlyHub(hub, await hubInstallation(bell.id, bell.pem, hub, c.s.deps.fetch));
   await storeBell(hub, bell);
@@ -142,6 +162,7 @@ async function deploy(c: Ctx): Promise<DoorbellDone> {
 
 export const doorbellRoutes: Routes = {
   "POST /api/hub/doorbell/cloudflare": cloudflare,
+  "POST /api/hub/doorbell/account": account,
   "POST /api/hub/doorbell/app": appStart,
   "POST /api/hub/doorbell/key": key,
   "GET /api/hub/doorbell/installation": installation,

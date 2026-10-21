@@ -51,7 +51,7 @@ const view = async () => ((await call("GET", `/api/hub?hub=${HUB}`)).data as unk
 const problem = (r: { data: Record<string, unknown> }) => (r.data.error as { reason: string; fix: string }).reason;
 
 test("the doorbell starts off and holds nothing", async () => {
-  expect(await view()).toEqual({ on: false, origin: null, app: null, key: false, cloudflare: null, tokenPage: TOKEN_PAGE });
+  expect(await view()).toEqual({ on: false, origin: null, app: null, key: false, cloudflare: null, accounts: null, tokenPage: TOKEN_PAGE });
 });
 
 test("a wrong token, a token without the permission and an account without workers.dev are refused plainly", async () => {
@@ -126,7 +126,7 @@ test("deploying uploads the Worker, rings every project and forgets the token an
   expect(fake.get("octo/aims")!.repoVars.get("TAPSTER_DOORBELL")).toBe(done.origin);
   expect(s.cloudflare.size).toBe(0);
   expect(s.bells.size).toBe(0);
-  expect(await view()).toEqual({ on: true, origin: done.origin, app: { id: "888", slug: "tapster-doorbell-octo-tap" }, key: false, cloudflare: null, tokenPage: TOKEN_PAGE });
+  expect(await view()).toEqual({ on: true, origin: done.origin, app: { id: "888", slug: "tapster-doorbell-octo-tap" }, key: false, cloudflare: null, accounts: null, tokenPage: TOKEN_PAGE });
   expect(problem(await call("POST", "/api/hub/doorbell/deploy", { hub: HUB }))).toBe("this setup holds no key of the doorbell App");
 });
 

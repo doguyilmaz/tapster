@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import type { NotaryKey } from "../cli/apple";
-import type { CloudflareTarget } from "../cli/cloudflare";
+import type { CloudflareAccount, CloudflareTarget } from "../cli/cloudflare";
 import type { Store } from "../cli/keystore";
 import { scrub } from "../mask";
 import { COURIER_URI, LOGO_URI } from "../ui/images";
@@ -34,7 +34,7 @@ export type Session = {
   pending: Map<string, { hub: string; owner: string; at: number; kind?: "doorbell" }>;
   apps: Map<string, { id: string; pem: string; slug: string }>;
   bells: Map<string, { id: string; pem: string; slug: string }>;
-  cloudflare: Map<string, { token: string; target: CloudflareTarget; at: number }>;
+  cloudflare: Map<string, { token: string; accounts: CloudflareAccount[]; target: CloudflareTarget | null; at: number }>;
   sparkle: Map<string, { seed: string; at: number }>;
   dispatched: Map<string, { at: number; known: number[] }>;
   touched: number;

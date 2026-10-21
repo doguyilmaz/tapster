@@ -1,11 +1,11 @@
 import { join } from "node:path";
-import { Scalar, YAMLMap, isMap, isSeq, parseDocument } from "yaml";
+import { Scalar, YAMLMap, isMap, isScalar, isSeq, parseDocument } from "yaml";
 import { type HubConfig, MAINTAINER, isApp, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { runPath } from "../run";
 import { deleteEnvSecret, hubEnv, setEnvSecret } from "./gh";
-import { YAML_OUT, keepStyle } from "./hubpr";
+import { YAML_OUT } from "./hubpr";
 import { type KeyRef, type Store, previousKey } from "./keystore";
 import { removeTemp, tempDir } from "./temp";
 
@@ -103,26 +103,80 @@ export function linuxChoices(text: string, owner: string): { name: string; on: b
   return linuxTools(parseHub(doc.toString(YAML_OUT), owner).config).map((p) => ({ name: p.name, on: !isApp(p) && p.linux }));
 }
 
-export function withLinux(text: string, owner: string, maintainer: string, tools: string[]): string {
-  if (!MAINTAINER.test(maintainer)) throw new TapsterError("the maintainer is not Name <address>", "Write it like Your Name <you@example.com>, with letters, digits, spaces, dots, apostrophes and hyphens in the name.");
-  const doc = parseDocument(text);
-  setMaintainer(doc, maintainer);
-  const named = parseHub(doc.toString(YAML_OUT), owner);
-  const eligible = linuxTools(named.config).map((p) => p.name);
-  const strange = tools.filter((t) => !eligible.includes(t));
-  if (strange.length) throw new TapsterError(`${strange.join(", ")} cannot ship to apt and dnf`, "Only command line tools whose hub entry maps a linux-amd64 or linux-arm64 archive can.");
-  const packages = doc.get("packages", true);
-  if (isSeq(packages)) {
-    for (const item of packages.items) {
-      if (!isMap(item)) continue;
-      const name = item.get("name");
-      if (typeof name !== "string" || !eligible.includes(name)) continue;
-      if (tools.includes(name)) item.set("linux", true);
-      else item.delete("linux");
-    }
+export type ShownTool = { name: string; was: boolean; on: boolean };
+
+type Edit = { at: number; end: number; text: string };
+
+const keyOf = (p: { key: unknown }) => (isScalar(p.key) ? p.key.value : undefined);
+
+function maintainerEdit(text: string, doc: Doc, maintainer: string): Edit | null {
+  const quoted = JSON.stringify(maintainer);
+  const top = doc.contents;
+  if (!isMap(top)) throw new TapsterError("tapster.yml is not a map", "Fix tapster.yml first.");
+  const pair = top.items.find((p) => keyOf(p) === "linux");
+  if (!pair) {
+    const packages = top.items.find((p) => keyOf(p) === "packages");
+    const key = isScalar(packages?.key) ? packages.key.range?.[0] : undefined;
+    const at = key === undefined ? text.length : text.lastIndexOf("\n", key - 1) + 1;
+    return { at, end: at, text: `${at === text.length && !text.endsWith("\n") ? "\n" : ""}linux: { maintainer: ${quoted} }\n` };
   }
-  const next = keepStyle(text, doc.toString(YAML_OUT));
-  const broken = parseHub(next, owner).invalid.filter((i) => !named.invalid.some((b) => b.name === i.name));
+  const linux = pair.value;
+  if (!isMap(linux) || !linux.range) throw new TapsterError("tapster.yml has a linux entry tapster cannot edit", 'Make it linux: { maintainer: "Name <address>" } by hand.');
+  const value = linux.items.find((p) => keyOf(p) === "maintainer")?.value;
+  if (isScalar(value) && value.range) return value.value === maintainer ? null : { at: value.range[0], end: value.range[1], text: quoted };
+  const url = linux.get("url");
+  return { at: linux.range[0], end: linux.range[1], text: `{ maintainer: ${quoted}${typeof url === "string" ? `, url: ${JSON.stringify(url)}` : ""} }` };
+}
+
+function flagEdit(text: string, item: YAMLMap, on: boolean): Edit | null {
+  const pair = item.items.find((p) => keyOf(p) === "linux");
+  if (pair && isScalar(pair.value) && pair.value.range) return { at: pair.value.range[0], end: pair.value.range[1], text: String(on) };
+  if (!on || !item.range) return null;
+  if (item.flow) {
+    const close = text.lastIndexOf("}", item.range[1] - 1);
+    const at = text[close - 1] === " " ? close - 1 : close;
+    return { at, end: at, text: ", linux: true" };
+  }
+  const first = item.items[0]?.key;
+  const last = item.items.at(-1);
+  const end = (last?.value as { range?: number[] } | null)?.range?.[1] ?? (last?.key as { range?: number[] } | null)?.range?.[1];
+  if (!isScalar(first) || !first.range || end === undefined) return null;
+  const column = first.range[0] - (text.lastIndexOf("\n", first.range[0] - 1) + 1);
+  let p = end;
+  while (p > 0 && /\s/.test(text[p - 1]!)) p--;
+  const eol = text.indexOf("\n", p);
+  const at = eol < 0 ? text.length : eol;
+  return { at, end: at, text: `\n${" ".repeat(column)}linux: true` };
+}
+
+const changed = () => new TapsterError("tapster.yml changed", "Reload the page, then pick the tools again.");
+
+// Edits only the maintainer and the flags of the tools the page showed, in place, so every other line stays byte for byte.
+export function withLinux(text: string, owner: string, maintainer: string, tools: ShownTool[]): string {
+  if (!MAINTAINER.test(maintainer)) throw new TapsterError("the maintainer is not Name <address>", "Write it like Your Name <you@example.com>, with letters, digits, spaces, dots, apostrophes and hyphens in the name.");
+  const now = linuxChoices(text, owner);
+  if (tools.some((t) => now.find((c) => c.name === t.name)?.on !== t.was)) throw changed();
+  const doc = parseDocument(text);
+  const named = parseDocument(text);
+  setMaintainer(named, maintainer);
+  const before = parseHub(named.toString(YAML_OUT), owner).invalid;
+  const packages = doc.get("packages", true);
+  const edits: Edit[] = [];
+  const own = maintainerEdit(text, doc, maintainer);
+  if (own) edits.push(own);
+  for (const t of tools.filter((x) => x.on !== x.was)) {
+    const item = isSeq(packages) ? packages.items.find((i) => isMap(i) && i.get("name") === t.name) : undefined;
+    if (!isMap(item)) throw changed();
+    const edit = flagEdit(text, item, t.on);
+    if (edit) edits.push(edit);
+  }
+  const next = edits.sort((a, b) => b.at - a.at).reduce((s, e) => s.slice(0, e.at) + e.text + s.slice(e.end), text);
+  const after = parseHub(next, owner);
+  const flags = linuxChoices(next, owner);
+  if (after.config.linux?.maintainer !== maintainer || tools.some((t) => flags.find((c) => c.name === t.name)?.on !== t.on)) {
+    throw new TapsterError("tapster could not edit tapster.yml in place", "Set linux and the tools' linux: true by hand, then commit and push.");
+  }
+  const broken = after.invalid.filter((i) => !before.some((b) => b.name === i.name));
   if (broken.length) throw new TapsterError(`the change would break ${broken.map((b) => b.name).join(", ")}: ${broken[0]!.reason}`, broken[0]!.fix);
   return next;
 }

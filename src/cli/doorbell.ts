@@ -6,7 +6,7 @@ import { register } from "../mask";
 import { appJwt } from "../token";
 import ringYaml from "../../templates/project/ring.yml" with { type: "text" };
 import { appFromManifest, openUrl } from "./appflow";
-import { Cloudflare, type CloudflareTarget, TOKEN_PAGE, checkCloudflare, deployWorker } from "./cloudflare";
+import { Cloudflare, type CloudflareAccount, type CloudflareTarget, TOKEN_PAGE, accountTarget, deployWorker, pickAccount, tokenAccounts } from "./cloudflare";
 import { hubEnv, setEnvVariable, setRepoVariable } from "./gh";
 import { cleanPath, readInput } from "./paths";
 import { waitFor } from "./poll";
@@ -140,6 +140,17 @@ const cli: DoorbellIO = { fetch, ask, log: (line) => console.log(line), open: op
 
 const AGAIN = "Run tapster init --doorbell again; it continues with the App it already created.";
 
+async function chooseAccount(accounts: CloudflareAccount[], io: DoorbellIO): Promise<CloudflareAccount> {
+  const named = io.env.CLOUDFLARE_ACCOUNT_ID?.trim();
+  if (named || accounts.length === 1) return pickAccount(accounts, named);
+  io.log("The token reaches several Cloudflare accounts. On Cloudflare's token page you can narrow it to one under Account Resources.");
+  accounts.forEach((a, i) => io.log(`  ${i + 1}. ${a.name}`));
+  const answer = Number((await io.ask("Number of the account for the doorbell: ")).trim());
+  const picked = accounts[answer - 1];
+  if (!Number.isInteger(answer) || !picked) throw new TapsterError("that is not one of the listed accounts", `Run this again and type a number from 1 to ${accounts.length}. Setting CLOUDFLARE_ACCOUNT_ID works too.`);
+  return picked;
+}
+
 async function cloudflareFor(io: DoorbellIO, hub: string): Promise<{ cf: Cloudflare; target: CloudflareTarget }> {
   let token = io.env.CLOUDFLARE_API_TOKEN?.trim() ?? "";
   if (token) io.log("Using the Cloudflare token in CLOUDFLARE_API_TOKEN.");
@@ -150,7 +161,7 @@ async function cloudflareFor(io: DoorbellIO, hub: string): Promise<{ cf: Cloudfl
   }
   if (!token) throw new TapsterError("no Cloudflare token was given", "Paste the token Cloudflare showed after Create Token. Setting CLOUDFLARE_API_TOKEN works too.");
   const cf = new Cloudflare(token, io.fetch);
-  const target = await checkCloudflare(cf, { hub, account: io.env.CLOUDFLARE_ACCOUNT_ID?.trim() || undefined });
+  const target = await accountTarget(cf, await chooseAccount(await tokenAccounts(cf), io), hub);
   io.log(`Cloudflare account ${target.account.name}, workers.dev subdomain ${target.subdomain}.`);
   return { cf, target };
 }

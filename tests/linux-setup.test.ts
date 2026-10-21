@@ -23,20 +23,39 @@ packages:
   - { name: maconly, repo: octo/maconly, binaries: [m], assets: { darwin-arm64: m.tar.gz } }
 `;
 
-test("tapster.yml gains the maintainer before packages and linux: true on the picked tools only", () => {
-  const out = withLinux(YML, "octo", "Octo Cat <octo@example.com>", ["ebb"]);
+const shown = (on: Record<string, boolean>, was: Record<string, boolean> = { ebb: false, aims: true }) => Object.entries(on).map(([name, value]) => ({ name, was: was[name] ?? false, on: value }));
+
+test("tapster.yml gains the maintainer before packages and the flags the page changed", () => {
+  const out = withLinux(YML, "octo", "Octo Cat <octo@example.com>", shown({ ebb: true, aims: false }));
   expect(out).toContain('linux: { maintainer: "Octo Cat <octo@example.com>" }\npackages:');
-  expect(out).toContain("  - name: aims\n    repo: octo/aims\n    binaries: [aims]\n    assets:\n      linux-arm64: aims.tgz\n  - { name: maconly");
+  expect(out).toContain("    assets:\n      linux-arm64: aims.tgz\n    linux: false\n  - { name: maconly");
   const parsed = parseHub(out, "octo");
   expect(parsed.invalid).toEqual([]);
   expect(parsed.config.packages.map((p) => [p.name, "linux" in p && p.linux])).toEqual([["ebb", true], ["aims", false], ["maconly", false]]);
   expect(parsed.config.linux).toEqual({ maintainer: "Octo Cat <octo@example.com>" });
-  expect(withLinux(out, "octo", "Octo Cat <octo@example.com>", ["ebb"])).toBe(out);
+  expect(withLinux(out, "octo", "Octo Cat <octo@example.com>", shown({ ebb: true, aims: false }, { ebb: true, aims: false }))).toBe(out);
+});
+
+test("lines the change does not touch stay byte for byte", () => {
+  const spaced = YML.replace("tap: octo/tap", "tap: octo/tap      # my tap").replace("    repo: octo/aims", "    repo:   octo/aims    # spaced");
+  const out = withLinux(spaced, "octo", "Octo Cat <octo@example.com>", shown({ ebb: true }));
+  const added = out.split("\n").filter((l) => !spaced.split("\n").includes(l));
+  expect(added).toEqual(['linux: { maintainer: "Octo Cat <octo@example.com>" }', "  - { name: ebb, repo: octo/ebb, binaries: [ebb], assets: { linux-amd64: ebb.tgz, darwin-arm64: ebb-mac.tar.gz }, linux: true }"]);
+  expect(spaced.split("\n").filter((l) => !out.split("\n").includes(l))).toEqual(["  - { name: ebb, repo: octo/ebb, binaries: [ebb], assets: { linux-amd64: ebb.tgz, darwin-arm64: ebb-mac.tar.gz } }"]);
+});
+
+test("only the tools the page showed change, and a flag that moved since is refused", () => {
+  const pushed = YML.replace("assets: { linux-amd64: ebb.tgz, darwin-arm64: ebb-mac.tar.gz } }", "assets: { linux-amd64: ebb.tgz, darwin-arm64: ebb-mac.tar.gz }, linux: true }");
+  const kept = withLinux(pushed, "octo", "Octo Cat <octo@example.com>", shown({ aims: false }));
+  expect(parseHub(kept, "octo").config.packages.map((p) => [p.name, "linux" in p && p.linux])).toEqual([["ebb", true], ["aims", false], ["maconly", false]]);
+  expect(() => withLinux(pushed, "octo", "Octo Cat <octo@example.com>", shown({ ebb: false, aims: true }))).toThrow("tapster.yml changed");
+  expect(() => withLinux(YML, "octo", "Octo Cat <octo@example.com>", [{ name: "gone", was: false, on: true }])).toThrow("tapster.yml changed");
+  expect(() => withLinux(YML, "octo", "Octo Cat <octo@example.com>", shown({ maconly: true }))).toThrow("tapster.yml changed");
 });
 
 test("an existing linux section keeps its url and only the maintainer changes", () => {
   const before = YML.replace("packages:", 'linux: { maintainer: "Old <old@example.com>", url: "https://apt.example.com" }\npackages:');
-  const out = withLinux(before, "octo", "New Name <new@example.com>", ["ebb", "aims"]);
+  const out = withLinux(before, "octo", "New Name <new@example.com>", shown({ ebb: true, aims: true }));
   expect(out).toContain('linux: { maintainer: "New Name <new@example.com>", url: "https://apt.example.com" }');
   expect(parseHub(out, "octo").config.packages.filter((p) => "linux" in p && p.linux).map((p) => p.name)).toEqual(["ebb", "aims"]);
 });
@@ -46,9 +65,8 @@ test("the choices keep each tool's flag while the maintainer is missing or broke
   expect(linuxChoices(YML.replace("packages:", 'linux: { maintainer: "nobody" }\npackages:'), "octo")).toEqual([{ name: "ebb", on: false }, { name: "aims", on: true }]);
 });
 
-test("a bad maintainer or a tool without Linux archives is refused", () => {
-  expect(() => withLinux(YML, "octo", "octo@example.com", ["ebb"])).toThrow("the maintainer is not Name <address>");
-  expect(() => withLinux(YML, "octo", "Octo <octo@example.com>", ["maconly"])).toThrow("maconly cannot ship to apt and dnf");
+test("a bad maintainer is refused", () => {
+  expect(() => withLinux(YML, "octo", "octo@example.com", shown({ ebb: true }))).toThrow("the maintainer is not Name <address>");
 });
 
 const fake = new FakeHub("octo");
@@ -104,14 +122,16 @@ test.skipIf(!Bun.which("gpg") && !["/opt/homebrew/bin/gpg", "/usr/local/bin/gpg"
 );
 
 test("the maintainer and the picked tools go to tapster.yml in one commit on main", async () => {
-  const bad = await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "nobody", tools: ["ebb"] });
+  const bad = await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "nobody", tools: shown({ ebb: true }) });
   expect(reason(bad)).toBe("the maintainer is not Name <address>");
-  const ok = await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: ["ebb", "aims"] });
+  const stale = await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: shown({ ebb: true, aims: true }, { ebb: true, aims: true }) });
+  expect(reason(stale)).toBe("tapster.yml changed");
+  const ok = await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: shown({ ebb: true, aims: true }) });
   expect(ok.data).toEqual({ result: "committed" });
   const text = fake.get(HUB)!.files!.get("tapster.yml")!;
   expect(text).toContain('linux: { maintainer: "Octo Cat <octo@example.com>" }');
   expect((await linux()).tools).toEqual([{ name: "ebb", on: true }, { name: "aims", on: true }]);
-  expect((await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: ["ebb", "aims"] })).data).toEqual({ result: "unchanged" });
+  expect((await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: shown({ ebb: true, aims: true }, { ebb: true, aims: true }) })).data).toEqual({ result: "unchanged" });
   const health = await call("GET", `/api/hub/health?hub=${HUB}`);
   expect(health.status).toBe(200);
   expect((health.data.checks as { name: string; ok: boolean }[]).find((c) => c.name === "the Linux repositories can be signed and deployed")?.ok).toBe(fake.get(HUB)!.env!.secrets.has("TAPSTER_LINUX_KEY"));
@@ -121,7 +141,7 @@ test("the tapster.yml write refuses a main someone else changed", async () => {
   fake.actor = "mallory";
   await fake.fetch(`https://api.github.com/repos/${HUB}/contents/tapster.yml`, { method: "PUT", body: JSON.stringify({ message: "sneak", content: Buffer.from(`${YML}# mallory\n`).toString("base64"), branch: "main" }) });
   fake.actor = "octo";
-  const refused = await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: [] });
+  const refused = await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: shown({ ebb: false }, { ebb: true }) });
   expect(refused.status).toBe(400);
   expect(reason(refused)).toStartWith("main changed in ways only you may change it");
   expect(fake.get(HUB)!.files!.get("tapster.yml")).toEndWith("# mallory\n");

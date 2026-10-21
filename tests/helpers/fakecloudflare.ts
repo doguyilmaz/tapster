@@ -7,6 +7,8 @@ export class FakeCloudflare {
   token = "cf_0123456789abcdefghijABCDEFGHIJ0123456789";
   status = "active";
   scope: "edit" | "read" | "none" = "edit";
+  rejectWith: { status: number; code: number; message: string } | null = null;
+  broken: string | null = null;
   accounts = [{ id: "0123456789abcdef0123456789abcdef", name: "Octo's Account" }];
   subdomain: string | null = "octo";
   scripts = new Map<string, FakeScript>();
@@ -20,7 +22,8 @@ export class FakeCloudflare {
     if (req.headers.get("authorization") !== `Bearer ${this.token}`) {
       return path === "/user/tokens/verify" ? envelope(null, 401, [{ code: 1000, message: "Invalid API Token" }]) : envelope(null, 400, [{ code: 6003, message: "Invalid request headers" }]);
     }
-    if (path === "/user/tokens/verify") return envelope({ id: "tok", status: this.status });
+    if (path === "/user/tokens/verify") return this.rejectWith ? envelope(null, this.rejectWith.status, [{ code: this.rejectWith.code, message: this.rejectWith.message }]) : envelope({ id: "tok", status: this.status });
+    if (this.broken && path.includes("/workers/")) return envelope(null, 500, [{ code: 10013, message: this.broken }]);
     if (path === "/accounts") return envelope(this.scope === "none" ? [] : this.accounts);
     const m = /^\/accounts\/([0-9a-f]{32})\/workers\/(.+)$/.exec(path);
     if (!m || !this.accounts.some((a) => a.id === m[1])) return envelope(null, 404, [{ code: 7003, message: "Could not route to the account" }]);

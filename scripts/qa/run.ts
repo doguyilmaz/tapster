@@ -181,8 +181,13 @@ try {
   await page.eval("document.querySelector('.sheet-back').click()");
   await page.clickText("Setup", "nav a");
   await page.clickText("Optional extras", ".route button");
+  cf.accounts.push({ id: "f".repeat(32), name: "Work" });
   await page.type("input[name=token]", cf.token);
   await page.clickText("Check the token");
+  await page.waitFor("document.body.textContent.includes('The token reaches several Cloudflare accounts')", 15000);
+  await shot("13d2-doorbell-accounts");
+  await audit("doorbell-accounts");
+  await page.clickText("Octo's Account", ".choice");
   await page.waitFor("document.body.textContent.includes('tapster keeps the token in memory')", 15000);
   await page.waitFor("document.querySelector('form[action^=\"https://github.com/settings/apps/new\"]')");
   await shot("13e-doorbell-app");

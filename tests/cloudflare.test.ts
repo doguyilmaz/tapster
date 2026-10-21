@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
-import { Cloudflare, SCRIPT, TOKEN_PAGE, bundleWorker, checkCloudflare, deployWorker } from "../src/cli/cloudflare";
+import { Cloudflare, SCRIPT, TOKEN_PAGE, accountTarget, bundleWorker, deployWorker, pickAccount, tokenAccounts } from "../src/cli/cloudflare";
 import { FakeCloudflare } from "./helpers/fakecloudflare";
 
 const HUB = { hub: "octo/homebrew-tap" };
+const checkCloudflare = async (cf: Cloudflare, o: { hub: string; account?: string }) => accountTarget(cf, pickAccount(await tokenAccounts(cf), o.account), o.hub);
 const reason = (p: Promise<unknown>) => p.then(() => "resolved", (e: Error & { reason?: string; fix?: string }) => `${e.reason ?? e.message} | ${e.fix ?? ""}`);
 
 test("the token page asks for Workers Scripts edit and nothing else", () => {
@@ -24,7 +25,7 @@ test("a wrong token, an inactive one and one without the permission are told apa
   expect(wrong).toStartWith("Cloudflare did not accept that token");
   expect(wrong).not.toContain("cf_not-the-token");
   cf.status = "expired";
-  expect(await reason(checkCloudflare(new Cloudflare(cf.token, cf.fetch as typeof fetch), HUB))).toStartWith("that Cloudflare token is expired");
+  expect(await reason(checkCloudflare(new Cloudflare(cf.token, cf.fetch as typeof fetch), HUB))).toBe("that Cloudflare token has expired | Create a new token from Cloudflare's token page that tapster opens. It asks for Workers Scripts: Edit. You can narrow it to one account under Account Resources.");
   cf.status = "active";
   cf.scope = "none";
   expect(await reason(checkCloudflare(new Cloudflare(cf.token, cf.fetch as typeof fetch), HUB))).toContain("Cloudflare shows the token no account | Create a new token");
@@ -40,7 +41,7 @@ test("a token that reaches several accounts asks for one, which CLOUDFLARE_ACCOU
   const api = new Cloudflare(cf.token, cf.fetch as typeof fetch);
   expect(await reason(checkCloudflare(api, HUB))).toStartWith("the token reaches 2 Cloudflare accounts");
   expect((await checkCloudflare(api, { ...HUB, account: "f".repeat(32) })).account).toEqual({ id: "f".repeat(32), name: "Work" });
-  expect(await reason(checkCloudflare(api, { ...HUB, account: "e".repeat(32) }))).toStartWith(`the token does not reach the Cloudflare account ${"e".repeat(32)}`);
+  expect(await reason(checkCloudflare(api, { ...HUB, account: "e".repeat(32) }))).toStartWith("the token does not reach that Cloudflare account");
 });
 
 test("an account whose doorbell serves another hub is refused before anything changes", async () => {
@@ -94,4 +95,40 @@ test("a deploy uploads the module with its variables, then the secret, the sched
   expect(s.secrets.get("APP_KEY")).toContain("BEGIN PRIVATE KEY");
   expect(s.crons).toEqual(["*/10 * * * *"]);
   expect(s.workersDev).toBe(true);
+});
+
+test("a token Cloudflare rejects with its error code says it may have expired", async () => {
+  const cf = new FakeCloudflare();
+  cf.rejectWith = { status: 401, code: 9109, message: "Invalid access token" };
+  const said = await reason(checkCloudflare(new Cloudflare(cf.token, cf.fetch as typeof fetch), HUB));
+  expect(said).toStartWith("Cloudflare did not accept that token | It may be mistyped, expired or deleted.");
+});
+
+test("the accounts a token reaches can be listed for a picker and each one checked on its own", async () => {
+  const cf = new FakeCloudflare();
+  cf.accounts.push({ id: "f".repeat(32), name: "Work" });
+  const api = new Cloudflare(cf.token, cf.fetch as typeof fetch);
+  const accounts = await tokenAccounts(api);
+  expect(accounts.map((a) => a.name)).toEqual(["Octo's Account", "Work"]);
+  expect((await accountTarget(api, accounts[1]!, HUB.hub)).account).toEqual({ id: "f".repeat(32), name: "Work" });
+});
+
+test("the upload checks again that the account's doorbell serves this hub", async () => {
+  const cf = new FakeCloudflare();
+  const api = new Cloudflare(cf.token, cf.fetch as typeof fetch);
+  const target = await checkCloudflare(api, HUB);
+  await deployWorker(api, await checkCloudflare(api, { hub: "octo/homebrew-other" }), { HUB: "octo/homebrew-other" }, "key", "*/10 * * * *");
+  const writes = cf.calls.filter((c) => !c.startsWith("GET")).length;
+  expect(await reason(deployWorker(api, target, { HUB: HUB.hub }, "key", "*/10 * * * *"))).toStartWith("the Cloudflare account Octo's Account already runs the doorbell of octo/homebrew-other");
+  expect(cf.calls.filter((c) => !c.startsWith("GET")).length).toBe(writes);
+});
+
+test("Cloudflare's error text reaches the message without the token or control characters", async () => {
+  const cf = new FakeCloudflare();
+  cf.broken = `upstream said Authorization: Bearer ${cf.token}\u0007 and gave up`;
+  const said = await reason(checkCloudflare(new Cloudflare(cf.token, cf.fetch as typeof fetch), HUB));
+  expect(said).toContain("Cloudflare refused GET");
+  expect(said).toContain("upstream said Authorization: Bearer *** and gave up");
+  expect(said).not.toContain(cf.token);
+  expect(said).not.toMatch(/[\u0000-\u001f]/);
 });

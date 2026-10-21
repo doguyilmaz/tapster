@@ -38,7 +38,8 @@ async function key(c: Ctx) {
   return { fingerprint: made.fingerprint, keychain: store.kind === "keychain" };
 }
 
-const configBody = z.object({ hub: z.string(), maintainer: z.string().trim().max(200), tools: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]*$/)).max(200) }).strict();
+const tool = z.object({ name: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(100), was: z.boolean(), on: z.boolean() }).strict();
+const configBody = z.object({ hub: z.string(), maintainer: z.string().trim().max(200), tools: z.array(tool).max(200) }).strict();
 
 async function config(c: Ctx) {
   const body = await readJson(c.req, configBody);

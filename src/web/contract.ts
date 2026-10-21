@@ -31,6 +31,7 @@ export type DoorbellView = {
   app: { id: string; slug: string } | null;
   key: boolean;
   cloudflare: { account: string; subdomain: string } | null;
+  accounts: { id: string; name: string }[] | null;
   tokenPage: string;
 };
 

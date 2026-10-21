@@ -110,3 +110,21 @@ test("a rotation with a token of another account stops before it deploys a secon
   await expect(rotateDoorbell(gh, HUB, 10, run.value)).rejects.toThrow("this token would deploy the doorbell to https://tapster-doorbell.work.workers.dev, but your projects ring https://tapster-doorbell.octo.workers.dev");
   expect(elsewhere.scripts.size).toBe(0);
 });
+
+test("the CLI asks which account to use when the token reaches several, unless CLOUDFLARE_ACCOUNT_ID names one", async () => {
+  await Bun.write(pemPath, fake.bell!.pem);
+  const multi = new FakeCloudflare();
+  const work = "f".repeat(32);
+  multi.accounts.push({ id: work, name: "Work" });
+  const run = io([pemPath, "2"], { CLOUDFLARE_API_TOKEN: multi.token });
+  run.value.fetch = both(fake.fetch, multi);
+  await rotateDoorbell(gh, HUB, 10, run.value);
+  expect(run.lines).toContain("  1. Octo's Account");
+  expect(run.lines).toContain("  2. Work");
+  expect(run.asked.at(-1)!.question).toBe("Number of the account for the doorbell: ");
+  expect(multi.calls).toContain(`PUT /accounts/${work}/workers/scripts/tapster-doorbell`);
+  const named = io([pemPath], { CLOUDFLARE_API_TOKEN: multi.token, CLOUDFLARE_ACCOUNT_ID: work });
+  named.value.fetch = both(fake.fetch, multi);
+  await rotateDoorbell(gh, HUB, 10, named.value);
+  expect(named.asked).toHaveLength(1);
+});

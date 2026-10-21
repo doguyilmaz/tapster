@@ -30,6 +30,31 @@ function BellToken({ h }: { h: HubView }) {
       </p>
     );
   }
+  const accounts = h.extras.doorbell.accounts;
+  if (accounts) {
+    const pick = (account: string) =>
+      run(async () => {
+        await post("/api/hub/doorbell/account", { hub: h.name, account });
+        await loadHub();
+      });
+    return (
+      <>
+        <p class="muted">The token reaches several Cloudflare accounts. Pick the one the doorbell runs in. Next time you can narrow the token to that account under Account Resources on Cloudflare's token page.</p>
+        <div class="choices">
+          {accounts.map((a) => (
+            <button type="button" class="choice" key={a.id} disabled={busy} onClick={() => void pick(a.id)}>
+              <Icon name="circle" />
+              <span class="grow">
+                <strong>{a.name}</strong>
+                <span class="muted small mono">{a.id}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+        <Problem problem={problem} />
+      </>
+    );
+  }
   const submit = (e: Event) => {
     e.preventDefault();
     const token = String(new FormData(e.currentTarget as HTMLFormElement).get("token") ?? "");
@@ -42,7 +67,7 @@ function BellToken({ h }: { h: HubView }) {
   return (
     <>
       <p class="muted">
-        Cloudflare's token page opens with one permission filled in: <strong>Workers Scripts: Edit</strong>. Click <strong>Continue to summary</strong>, then <strong>Create Token</strong>. Copy the token it shows.
+        Cloudflare's token page opens with one permission filled in: <strong>Workers Scripts: Edit</strong>. Click <strong>Continue to summary</strong>, then <strong>Create Token</strong>. Copy the token it shows. To keep it to one Cloudflare account, pick that account under <strong>Account Resources</strong> on the same page.
       </p>
       <div class="row">
         <Out href={h.extras.doorbell.tokenPage}>Open Cloudflare's token page</Out>
@@ -298,7 +323,14 @@ function Linux({ h }: { h: HubView }) {
   const l = h.extras.linux;
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [maintainer, setMaintainer] = useState(l.maintainer ?? "");
+  const [shown, setShown] = useState(l.tools);
   const [picked, setPicked] = useState<string[]>(l.tools.filter((t) => t.on).map((t) => t.name));
+  const seen = JSON.stringify([l.maintainer, l.tools]);
+  useEffect(() => {
+    setMaintainer(l.maintainer ?? "");
+    setShown(l.tools);
+    setPicked(l.tools.filter((t) => t.on).map((t) => t.name));
+  }, [seen]);
   const [making, makeProblem, make] = useAction();
   const [writing, writeProblem, write] = useAction();
   const makeKey = () =>
@@ -311,12 +343,12 @@ function Linux({ h }: { h: HubView }) {
   const submit = (e: Event) => {
     e.preventDefault();
     void write(async () => {
-      const res = await post<{ result: string }>("/api/hub/linux/config", { hub: h.name, maintainer, tools: picked });
+      const res = await post<{ result: string }>("/api/hub/linux/config", { hub: h.name, maintainer, tools: shown.map((t) => ({ name: t.name, was: t.on, on: picked.includes(t.name) })) });
       await loadHub();
       say("ok", res.result === "committed" ? "Wrote the Linux settings to tapster.yml on main." : "tapster.yml already had these settings.");
     });
   };
-  const changed = maintainer !== (l.maintainer ?? "") || picked.join() !== l.tools.filter((t) => t.on).map((t) => t.name).join();
+  const changed = maintainer !== (l.maintainer ?? "") || shown.some((t) => t.on !== picked.includes(t.name));
   return (
     <section class="stack tight">
       <div class="spread">
@@ -390,8 +422,8 @@ function Linux({ h }: { h: HubView }) {
           {h.files.config ? (
             <form class="stack tight" onSubmit={submit}>
               <Field name="maintainer" label="Maintainer" value={maintainer} onInput={setMaintainer} placeholder="Your Name <you@example.com>" hint="Every .deb and .rpm names this person, as Name <address>." />
-              {l.tools.length ? (
-                l.tools.map((t) => (
+              {shown.length ? (
+                shown.map((t) => (
                   <label class="switch" key={t.name}>
                     <input type="checkbox" checked={picked.includes(t.name)} onChange={(e) => setPicked((e.currentTarget as HTMLInputElement).checked ? [...picked, t.name] : picked.filter((x) => x !== t.name))} />
                     <span>

@@ -46,7 +46,7 @@ const between = (act: () => Promise<void>) => {
   };
 };
 const since = (from: number, what: string) => fake.calls.slice(from).filter((c) => c === what).length;
-const linux = () => call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: ["ebb"] });
+const linux = () => call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: [{ name: "ebb", was: false, on: true }] });
 
 test("a push by someone else between the check and the write is refused, not built on", async () => {
   const before = hub().files!.get("tapster.yml");
@@ -84,4 +84,22 @@ test("the hub files write refuses the same race", async () => {
   fake.fetch = real;
   expect(reason(raced)).toStartWith("main changed in ways only you may change it: .github/workflows/evil.yml changed after your last push");
   expect(hub().files!.has(".github/workflows/tapster.yml")).toBe(false);
+});
+
+test("moving main with force: false takes any fast-forward and lets a rewind to an ancestor through, as GitHub does", async () => {
+  const api = (method: string, path: string, body?: unknown) => real(`https://api.github.com/repos/${HUB}${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+  const commitOn = async (parent: string, content: string) => {
+    const base = (await (await api("GET", `/git/commits/${parent}`)).json()) as { tree: { sha: string } };
+    const tree = (await (await api("POST", "/git/trees", { base_tree: base.tree.sha, tree: [{ path: "ff.txt", content }] })).json()) as { sha: string };
+    return ((await (await api("POST", "/git/commits", { message: content, tree: tree.sha, parents: [parent] })).json()) as { sha: string }).sha;
+  };
+  const start = hub().head;
+  const a = await commitOn(start, "a");
+  const b = await commitOn(a, "b");
+  expect((await api("PATCH", "/git/refs/heads/main", { sha: b, force: false })).status).toBe(200);
+  expect(hub().head).toBe(b);
+  const side = await commitOn(start, "side");
+  expect((await api("PATCH", "/git/refs/heads/main", { sha: side, force: false })).status).toBe(422);
+  hub().head = start;
+  expect((await api("PATCH", "/git/refs/heads/main", { sha: b, force: false })).status).toBe(200);
 });
