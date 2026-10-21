@@ -136,48 +136,82 @@ async function appInstall(s: Session, gh: GitHub, hub: string, slug: string, own
   return ids ? installLink(slug, ownerId, ...ids) : `https://github.com/apps/${slug}/installations/new`;
 }
 
+const parsedHub = (config: string | null, hub: string) => {
+  if (config === null) return null;
+  try {
+    return parseHub(config, hub.split("/")[0]!);
+  } catch {
+    return null;
+  }
+};
+
+// Each call starts as soon as what it needs is in. Reads of main and of the tapster environment start at once too; an
+// empty hub or one without the environment drops their answers.
 export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubView> {
-  const repoP = gh.json<{ id: number; private: boolean; html_url: string; owner: { id: number } }>("GET", `/repos/${hub}`);
-  const branchP = mainRef(gh, hub);
-  const envP = or404(gh.json<{ deployment_branch_policy: { custom_branch_policies: boolean } | null }>("GET", `/repos/${hub}/environments/tapster`));
-  const rulesetIdsP = gh.json<{ id: number }[]>("GET", `/repos/${hub}/rulesets`).catch(() => []);
-  const actionsP = gh.json<{ allowed_actions?: string; sha_pinning_required?: boolean }>("GET", `/repos/${hub}/actions/permissions`);
-  const tokenPermsP = gh.json<{ default_workflow_permissions: string }>("GET", `/repos/${hub}/actions/permissions/workflow`);
-  const issuesP = gh.json<{ title: string; html_url: string; number: number; updated_at: string; body: string | null; user: { login: string } | null }[]>("GET", `/repos/${hub}/issues?state=open&creator=${encodeURIComponent("github-actions[bot]")}&per_page=100`).catch(() => []);
-  quiet(branchP, envP, actionsP, tokenPermsP);
+  const get = <T>(path: string) => gh.json<T>("GET", `/repos/${hub}${path}`);
+  const repoP = get<{ id: number; private: boolean; html_url: string; owner: { id: number } }>("");
+  const emptyP = mainRef(gh, hub).then((sha) => sha === null);
+  const envP = or404(get<{ deployment_branch_policy: { custom_branch_policies: boolean } | null }>("/environments/tapster"));
+  const unless = <T>(skip: Promise<boolean>, p: Promise<T>, none: T) => {
+    quiet(p);
+    return skip.then((x) => (x ? none : p));
+  };
+  const noEnvP = envP.then((env) => env === null);
+  const inEnv = <T>(p: Promise<T>, none: T) => unless(noEnvP, p, none);
+  const onMain = <T>(p: Promise<T>, none: T) => unless(emptyP, p, none);
+  const list = (kind: "variables" | "secrets") => inEnv(get<Record<string, Named[]>>(`/environments/tapster/${kind}?per_page=100`).then((r) => r[kind] ?? []), []);
+  const read = (path: string) => onMain(readHubFile(gh, hub, path, "main"), null);
+  const varsP = list("variables");
+  const secretsP = list("secrets");
+  const policiesP = inEnv(get<{ branch_policies: { name: string; type?: string }[] }>("/environments/tapster/deployment-branch-policies"), { branch_policies: [] });
+  const rulesetsP = get<{ id: number }[]>("/rulesets")
+    .catch(() => [])
+    .then((ids) => Promise.all(ids.map((r) => get<Parameters<typeof hubRulesetCheck>[0][number]>(`/rulesets/${r.id}`))));
+  const actionsP = get<{ allowed_actions?: string; sha_pinning_required?: boolean }>("/actions/permissions");
+  const selectedP = get<{ github_owned_allowed?: boolean; verified_allowed?: boolean; patterns_allowed?: string[] }>("/actions/permissions/selected-actions");
+  quiet(selectedP);
+  const tokenPermsP = get<{ default_workflow_permissions: string }>("/actions/permissions/workflow");
+  const issuesP = get<{ title: string; html_url: string; number: number; updated_at: string; body: string | null; user: { login: string } | null }[]>(`/issues?state=open&creator=${encodeURIComponent("github-actions[bot]")}&per_page=100`).catch(() => []);
+  const configP = read("tapster.yml");
+  const stateP = read(".tapster/state.json");
+  const readmeP = read("README.md");
+  const flowP = read(FLOW);
+  const flowsP = onMain(get<{ name: string; type: string }[]>("/contents/.github/workflows?ref=main").catch(() => []), []).then(async (dir) => {
+    const others = dir.filter((x) => x.type === "file" && /\.ya?ml$/.test(x.name) && x.name !== "tapster.yml");
+    return Object.fromEntries(await Promise.all(others.map(async (f) => [f.name, (await read(`.github/workflows/${f.name}`)) ?? ""] as const)));
+  });
+  const parsedP = configP.then((config) => parsedHub(config, hub));
+  const installP = Promise.all([repoP, varsP, parsedP]).then(([repo, vars, parsed]) => {
+    const slug = vars.find((x) => x.name === "TAPSTER_APP_SLUG")?.value ?? null;
+    return slug ? appInstall(s, gh, hub, slug, repo.owner.id, parsed?.config.packages ?? []) : null;
+  });
+  const linuxP = Promise.all([configP, parsedP, secretsP]).then(([config, parsed, secrets]) => linuxView(s, hub, config, parsed?.config ?? null, secrets.map((x) => x.name)));
+  const selectedFor = actionsP.then((a) => (a.allowed_actions === "selected" ? selectedP : null));
+  quiet(emptyP, envP, varsP, secretsP, policiesP, rulesetsP, actionsP, selectedFor, tokenPermsP, configP, stateP, readmeP, flowP, flowsP, installP, linuxP);
   const repo = await repoP;
-  const [branch, env, rulesetIds, actions, tokenPerms, issues] = await Promise.all([branchP, envP, rulesetIdsP, actionsP, tokenPermsP, issuesP]);
-  const empty = branch === null;
-  const list = async (kind: "variables" | "secrets") => (env ? ((await gh.json<Record<string, Named[]>>("GET", `/repos/${hub}/environments/tapster/${kind}?per_page=100`))[kind] ?? []) : []);
-  const read = (path: string) => (empty ? Promise.resolve(null) : readHubFile(gh, hub, path, "main"));
-  const [vars, secrets, policies, rulesets, selected, config, state, readme, flow, flowDir] = await Promise.all([
-    list("variables"),
-    list("secrets"),
-    env ? gh.json<{ branch_policies: { name: string; type?: string }[] }>("GET", `/repos/${hub}/environments/tapster/deployment-branch-policies`) : Promise.resolve({ branch_policies: [] }),
-    Promise.all(rulesetIds.map((r) => gh.json<Parameters<typeof hubRulesetCheck>[0][number]>("GET", `/repos/${hub}/rulesets/${r.id}`))),
-    actions.allowed_actions === "selected" ? gh.json<{ github_owned_allowed?: boolean; verified_allowed?: boolean; patterns_allowed?: string[] }>("GET", `/repos/${hub}/actions/permissions/selected-actions`) : Promise.resolve(null),
-    read("tapster.yml"),
-    read(".tapster/state.json"),
-    read("README.md"),
-    read(FLOW),
-    empty ? Promise.resolve([]) : gh.json<{ name: string; type: string }[]>("GET", `/repos/${hub}/contents/.github/workflows?ref=main`).catch(() => []),
+  const [empty, env, vars, secrets, policies, rulesets, actions, selected, tokenPerms, issues, config, state, readme, flow, flows, install, linux] = await Promise.all([
+    emptyP,
+    envP,
+    varsP,
+    secretsP,
+    policiesP,
+    rulesetsP,
+    actionsP,
+    selectedFor,
+    tokenPermsP,
+    issuesP,
+    configP,
+    stateP,
+    readmeP,
+    flowP,
+    flowsP,
+    installP,
+    linuxP,
   ]);
+  const parsed = await parsedP;
   const names = (xs: Named[]) => xs.map((x) => x.name);
   const v = (n: string) => vars.find((x) => x.name === n)?.value ?? null;
-  const parsed = config === null ? null : (() => {
-    try {
-      return parseHub(config, hub.split("/")[0]!);
-    } catch {
-      return null;
-    }
-  })();
   const appSlug = v("TAPSTER_APP_SLUG");
-  const others = flowDir.filter((x) => x.type === "file" && /\.ya?ml$/.test(x.name) && x.name !== "tapster.yml");
-  const [flows, install, linux] = await Promise.all([
-    Promise.all(others.map(async (f) => [f.name, (await read(`.github/workflows/${f.name}`)) ?? ""] as const)).then((pairs) => Object.fromEntries(pairs)),
-    appSlug ? appInstall(s, gh, hub, appSlug, repo.owner.id, parsed?.config.packages ?? []) : Promise.resolve(null),
-    linuxView(s, hub, config, parsed?.config ?? null, names(secrets)),
-  ]);
   const policyOk = Boolean(env?.deployment_branch_policy?.custom_branch_policies) && policies.branch_policies.length === 1 && policies.branch_policies[0]!.name === "main";
   const checks = [
     { label: "a tapster environment that only main may open", ok: policyOk },
