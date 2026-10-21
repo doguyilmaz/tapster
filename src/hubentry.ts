@@ -53,7 +53,7 @@ function oneEntry(entry: string): Plain {
 }
 
 // tapster.yml with only the lines of one entry replaced. It refuses anything that would change another entry, the
-// package's name or repository, or that the hub would refuse.
+// package's name or repository. It also refuses what the hub would refuse.
 export function withEntryText(text: string, name: string, entry: string, owner: string): string {
   const at = spot(text, name);
   const before = entryText(text, name);
@@ -97,7 +97,7 @@ export function changedEntry(before: string, after: string, name: string, owner:
   }
 }
 
-// Only what the current entry lacks: a key it has is never rewritten, and a map it has only gains keys.
+// Only what the current entry lacks: a key it has is never rewritten. A map it has only gains keys.
 export function missing(current: unknown, proposed: unknown): unknown {
   if (current === undefined) return proposed;
   if (!isPlain(proposed) || !isPlain(current)) return undefined;

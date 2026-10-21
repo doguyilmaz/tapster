@@ -27,7 +27,7 @@ export type EntrySources = {
   draft(assets: Record<string, string>): Promise<DraftApp | null>;
 };
 
-// entry: the current entry with what tapster derived added to it, or null when nothing is missing.
+// entry: the current entry with what tapster derived added to it (null when nothing is missing).
 export type EntryUpdate = { entry: string | null; from: string[]; manual: string[] };
 
 const APP = /^[A-Za-z0-9 ._-]+\.app$/;

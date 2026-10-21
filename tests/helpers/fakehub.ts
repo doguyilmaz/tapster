@@ -4,7 +4,7 @@ import { TapsterError } from "../../src/errors";
 import { REACH_TITLE, reachNote } from "../../src/reachnote";
 
 type Ruleset = { id: number; name: string; target: string; enforcement: string; conditions?: { ref_name?: { include?: string[]; exclude?: string[] } }; rules?: { type: string }[]; bypass_actors?: unknown[] };
-type Release = { id: number; tag_name: string; draft: boolean; prerelease: boolean; created_at: string; published_at: string | null; assets: { id: number; name: string }[]; body: string; html_url?: string };
+type Release = { id: number; tag_name: string; draft: boolean; prerelease: boolean; created_at: string; published_at: string | null; assets: { id: number; name: string; size?: number; digest?: string | null }[]; body: string; html_url?: string };
 
 export type FakeJob = { id: number; name: string; status: string; conclusion: string | null; completed_at: string | null; html_url: string; annotations: { annotation_level: string; title: string; message: string }[] };
 export type FakeRun = { id: number; event: string; status: string; conclusion: string | null; created_at: string; html_url: string; head_branch?: string; head_sha?: string; jobs?: FakeJob[]; listedAt?: number };
@@ -52,6 +52,8 @@ export class FakeHub {
   appKeyWorks = true;
   failWrites = false;
   calls: string[] = [];
+  readonly blobs = new Map<number, Buffer>();
+  downloads = 0;
   actor: string;
   private nextId = 100;
 
@@ -468,6 +470,11 @@ export class FakeHub {
     }
     if (rest.startsWith("/rules/branches/")) {
       return json(r.rulesets.filter((x) => x.target === "branch" && x.enforcement === "active").flatMap((x) => (x.rules ?? []).map((rule) => ({ type: rule.type }))));
+    }
+    const asset = /^\/releases\/assets\/(\d+)$/.exec(rest);
+    if (asset && this.blobs.has(Number(asset[1]))) {
+      this.downloads++;
+      return new Response(new Uint8Array(this.blobs.get(Number(asset[1]))!), { headers: { "content-type": "application/octet-stream" } });
     }
     if (rest.startsWith("/releases")) return json(r.releases);
     if (rest === "/pulls" && method === "POST") {

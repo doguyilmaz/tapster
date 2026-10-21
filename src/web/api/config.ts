@@ -85,6 +85,15 @@ export function remoteSources(gh: GitHub, o: ConfigInput): EntrySources {
   };
 }
 
+// The same view for a caller that has not read the project's files yet.
+export async function readConfig(gh: GitHub, o: Omit<ConfigInput, "goreleaser" | "workflow"> & { workflowFile: string }): Promise<ConfigView | null> {
+  const read = (path: string) => readHubFile(gh, o.repo, path, encodeURIComponent(o.ref)).catch(() => null);
+  const goreleaser = o.kind === "go" ? ((await read(".goreleaser.yaml")) ?? (await read(".goreleaser.yml"))) : null;
+  const name = `.github/workflows/${o.workflowFile}`;
+  const text = await read(name);
+  return configOf(gh, { ...o, goreleaser, workflow: text === null ? null : { name, text } });
+}
+
 // The Configuration section of a project in the hub: its entry, an update waiting in a pull request or what tapster
 // can add to the entry from the project itself.
 export async function configOf(gh: GitHub, o: ConfigInput): Promise<ConfigView | null> {

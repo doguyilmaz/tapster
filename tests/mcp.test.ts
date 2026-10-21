@@ -72,6 +72,26 @@ test("release_status shows what the hub wrote on a refused draft and what it pub
   expect(s.publishedByHub).toEqual([{ tag: "v1.0.0", status: "published" }]);
 });
 
+test("release_status says when the tip carries a skip marker and when an update of the entry waits, and says nothing of either otherwise", async () => {
+  const quiet = (await call("release_status", { repo: "octo/ebb" })).result.structuredContent!;
+  expect(Object.keys(quiet)).toEqual(["hub", "repo", "inHub", "releases", "publishedByHub"]);
+  const ebb = fake.get("octo/ebb")!;
+  const hub = fake.get("octo/homebrew-tap")!;
+  ebb.commit = { message: "Merge pull request #9 from octo/docs [skip ci]", date: "2026-10-20T00:00:00Z", parent: { sha: "d".repeat(40), message: "Docs" } };
+  const yml = hub.files!.get("tapster.yml")!;
+  hub.branches.set("tapster-update-ebb", new Map([...hub.files!, ["tapster.yml", yml.replace("binaries: [ebb],", "binaries: [ebb], license: MIT,")]]));
+  hub.bases.set("tapster-update-ebb", new Map(hub.files!));
+  hub.pulls.push({ number: 12, head: "tapster-update-ebb", html_url: "https://github.com/octo/homebrew-tap/pull/12", title: "Update ebb" });
+  const s = (await call("release_status", { repo: "octo/ebb" })).result.structuredContent as { tipSkipsWorkflows: Record<string, unknown>; entryUpdate: Record<string, unknown> };
+  expect(s.tipSkipsWorkflows).toMatchObject({ branch: "main", marker: "[skip ci]", commitBeforeWithoutMarker: "d".repeat(40) });
+  expect(String(s.tipSkipsWorkflows.what)).toContain("so GitHub may not start the release workflow for a tag on it");
+  expect(s.entryUpdate).toMatchObject({ waitsIn: "https://github.com/octo/homebrew-tap/pull/12", blocked: null });
+  expect(String(s.entryUpdate.change)).toContain("+ - { name: ebb, repo: octo/ebb, binaries: [ebb], license: MIT,");
+  ebb.commit = { message: "Start", date: "2026-10-01T09:00:00Z" };
+  hub.pulls.length = 0;
+  hub.branches.delete("tapster-update-ebb");
+});
+
 test("local_projects, doctor and run_hub work; bad input is an error result, not a crash", async () => {
   const local = (await call("local_projects")).result.structuredContent as { projects: { repo: string; inHub: boolean }[] };
   expect(local.projects.find((p) => p.repo === "octo/ebb")?.inHub).toBe(true);
