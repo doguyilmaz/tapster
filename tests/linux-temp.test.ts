@@ -32,7 +32,8 @@ test("a gpg that fails leaves no GnuPG home behind", async () => {
   try {
     await expect(makeLinuxKey(new GitHub("t", fake.fetch, async () => {}, "user"), "octo/homebrew-tap", { gpg: join(bin, "gpg"), store: memoryStore(), rotate: false })).rejects.toThrow("gpg exited with 2");
   } finally {
-    process.env.TMPDIR = before;
+    if (before === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = before;
   }
   expect(readdirSync(temp)).toEqual([".keep"]);
 });
