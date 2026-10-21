@@ -26,6 +26,7 @@ function FixButton({ name, fix, hub: hubName, onFixed }: { name: string; fix: st
         <span class="row">
           <Busy
             busy={busy}
+            holds={(v) => v.protect}
             class="btn secondary small"
             onClick={async () => {
               setBusy(true);

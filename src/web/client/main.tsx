@@ -8,8 +8,8 @@ import { HubChooser } from "./hubs";
 import { Projects } from "./projects";
 import { Back, Setup } from "./setup";
 import { landing } from "../steps";
-import { account, appResult, back, chooseHub, doorbellResult, go, hubName, loadAccount, loadHub, openStop, path, problemOf, say, session, toast } from "./state";
-import { Icon, Note } from "./ui";
+import { account, accountError, appResult, back, chooseHub, doorbellResult, dropView, go, hubCached, hubName, loadAccount, loadHub, openStop, path, problemOf, restoreHub, say, session, toast } from "./state";
+import { Icon, Note, Spinner } from "./ui";
 
 type Boot = { kind: "claiming" } | { kind: "ready" } | { kind: "no-session" } | { kind: "failed"; problem: ProblemView } | { kind: "stopped" };
 const boot = signal<Boot>({ kind: "claiming" });
@@ -42,6 +42,7 @@ async function start(): Promise<void> {
     return;
   }
   readReturn();
+  if (!back.value) restoreHub();
   boot.value = { kind: "ready" };
   void get<SessionView>("/api/session").then((s) => {
     session.value = s;
@@ -51,6 +52,7 @@ async function start(): Promise<void> {
 }
 
 whenSignedOut(() => {
+  dropView();
   boot.value = { kind: "no-session" };
 });
 
@@ -111,6 +113,14 @@ function Header() {
               <Icon name="down" />
             </button>
           )}
+          <span class="checking" role="status" aria-live="polite">
+            {hubCached.value && (
+              <>
+                <Spinner label="" />
+                Checking GitHub…
+              </>
+            )}
+          </span>
           {acc?.state === "ok" && <span class="who">@{acc.login}</span>}
           <button type="button" class="btn quiet small" onClick={quit} title="Stop tapster setup">
             <Icon name="power" />
@@ -127,7 +137,7 @@ function Toast() {
   if (!t) return null;
   return (
     <div class="toast" role="status" onClick={() => (toast.value = null)}>
-      <Note tone={t.tone === "ok" ? "ok" : "error"}>
+      <Note tone={t.tone}>
         <span>{t.text}</span>
       </Note>
     </div>
@@ -168,8 +178,8 @@ function App() {
       </>
     );
   }
-  if (!acc) return <Waiting text="Checking your GitHub sign-in" />;
-  if (acc.state !== "ok" || acc.missing.length) return <AccountGate />;
+  if (!acc && !(hubCached.value && !accountError.value)) return <Waiting text="Checking your GitHub sign-in" />;
+  if (acc && (acc.state !== "ok" || acc.missing.length)) return <AccountGate />;
   return (
     <>
       <Header />

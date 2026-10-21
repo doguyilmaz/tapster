@@ -189,10 +189,10 @@ function AppStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatu
           ) : (
             <span class="muted small">Create the hub's GitHub App in Setup first.</span>
           )}
-          <button type="button" class="btn secondary small" onClick={() => void ask()} disabled={running}>
+          <Busy busy={false} type="button" class="btn secondary small" onClick={() => void ask()} disabled={running}>
             <Icon name="refresh" />
             Check again
-          </button>
+          </Busy>
         </div>
       )}
     </>

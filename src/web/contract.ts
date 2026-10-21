@@ -10,6 +10,9 @@ export type Check = { label: string; ok: boolean };
 
 export type OtherWorkflow = { file: string; actions: string[] };
 
+// Bump on any change to HubView: the page keeps the last one in localStorage and paints it before GitHub answers.
+export const HUB_VIEW_VERSION = 1;
+
 export type HubView = {
   name: string;
   url: string;
