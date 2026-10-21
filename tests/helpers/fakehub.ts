@@ -124,6 +124,22 @@ export class FakeHub {
     r.history.activity.unshift({ actor: this.actor, after: r.head, type });
   }
 
+  // GitHub moves a ref with force: false whenever the new commit descends from the current one, over any number of commits.
+  private descends(r: FakeRepo, from: string, ancestor: string): boolean {
+    const seen = new Set<string>();
+    const queue = [from];
+    while (queue.length) {
+      const at = queue.shift()!;
+      if (at === ancestor) return true;
+      if (seen.has(at)) continue;
+      seen.add(at);
+      const made = this.commits.get(at);
+      const pushed = r.history?.commits.findIndex((c) => c.sha === at) ?? -1;
+      queue.push(...(made?.parents ?? (pushed > 0 ? [r.history!.commits[pushed - 1]!.sha] : [])));
+    }
+    return false;
+  }
+
   private changedIn(r: FakeRepo, branch: string): { filename: string; status: string; previous_filename?: string }[] {
     const before = r.bases.get(branch) ?? new Map<string, string>();
     const after = r.branches.get(branch) ?? new Map<string, string>();
@@ -335,7 +351,7 @@ export class FakeHub {
     }
     if (rest === "/git/refs/heads/main" && method === "PATCH") {
       const made = this.commits.get(String(body.sha));
-      if (made && body.force === false && !made.parents.includes(r.head)) return json({ message: "Update is not a fast forward" }, 422);
+      if (made && body.force === false && !this.descends(r, String(body.sha), r.head)) return json({ message: "Update is not a fast forward" }, 422);
       if (made) r.files = new Map(this.trees.get(made.tree) ?? []);
       r.head = String(body.sha);
       this.wrote(r, "push", made?.message);

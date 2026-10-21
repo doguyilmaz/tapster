@@ -65,8 +65,10 @@ async function movedOn(gh: GitHub, hub: string, from: string): Promise<string[]>
 
 export type MainWrite = { message: string; files: FileChange[]; parents?: string[]; ready?: () => Promise<void> };
 
-// Each attempt builds on the exact main the foreign-write check passed and moves main only from that commit (force: false).
-// When main moved meanwhile, the next attempt checks it again from scratch, so a push by someone else is refused, never built on.
+// Each attempt builds its commit on the exact main the foreign-write check passed. GitHub moves main with force: false
+// only when that commit descends from main's current head, so a push that lands after the check makes the move fail and
+// the next attempt checks main again from scratch. A main rewound to an ancestor of the checked commit would still move;
+// the hub's ruleset forbids non-fast-forward pushes to main for everyone, so that cannot happen on a protected hub.
 export async function writeMain(
   gh: GitHub,
   hub: string,
