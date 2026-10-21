@@ -38,7 +38,7 @@ export type BellInstallView = { id: number | null; others: string[] };
 
 export type DoorbellDone = { origin: string; rung: string[]; missed: string[] };
 
-export type LinuxView = { wanted: boolean; stored: boolean; gpg: boolean; keystore: boolean; maintainer: string | null; tools: { name: string; on: boolean }[] };
+export type LinuxView = { wanted: boolean; stored: boolean; gpg: boolean; keystore: "keychain" | "keyring" | null; maintainer: string | null; tools: { name: string; on: boolean }[] };
 
 export type InstallView = { checked: boolean; id: number | null; onHub: boolean; repos: string[] };
 

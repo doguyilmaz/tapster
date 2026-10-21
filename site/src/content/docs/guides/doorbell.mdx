@@ -81,7 +81,8 @@ bunx @doguyilmaz/tapster init --doorbell
 <Steps>
 
 1. tapster opens Cloudflare's token page and asks for the token with a hidden prompt. To skip the prompt, set
-   `CLOUDFLARE_API_TOKEN` before you run the command.
+   `CLOUDFLARE_API_TOKEN` before you run the command. When the token reaches several accounts, set
+   `CLOUDFLARE_ACCOUNT_ID` to the one the doorbell should use.
 2. tapster opens a page that explains the doorbell App. Click **Continue to GitHub**, then **Create GitHub App**.
 3. On the install page, choose **Only select repositories** and pick the hub, only the hub. Click **Install**.
 
@@ -125,10 +126,13 @@ bunx @doguyilmaz/tapster init --rotate doorbell
 ```
 
 tapster asks for a new private key from the doorbell App's settings page and a Cloudflare token, then deploys the Worker
-again with the new key. Delete every older key on that page afterwards. Run the same command after
+again with the new key. The token must belong to the Cloudflare account that runs the doorbell now; tapster stops before
+it changes anything when it does not. Delete every older key on that page afterwards. Run the same command after
 [upgrading tapster](/guides/upgrade/), so the Worker runs the same version and schedule as the hub.
 
 ## Limits
 
-- The Worker is always named `tapster-doorbell`, so one Cloudflare account serves the doorbell of one hub.
+- The Worker is always named `tapster-doorbell`, so one Cloudflare account serves the doorbell of one hub. tapster stops
+  before it would replace the doorbell of another hub.
 - The token must reach exactly one Cloudflare account. Pick it under **Account Resources** when you create the token.
+  In a terminal, `CLOUDFLARE_ACCOUNT_ID` picks one instead.

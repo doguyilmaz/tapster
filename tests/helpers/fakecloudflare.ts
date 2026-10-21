@@ -28,7 +28,7 @@ export class FakeCloudflare {
     const write = req.method !== "GET";
     if (this.scope === "none" || (write && this.scope !== "edit")) return envelope(null, 403, [{ code: 10000, message: "Authentication error" }]);
     if (rest === "subdomain") return this.subdomain ? envelope({ subdomain: this.subdomain }) : envelope(null, 404, [{ code: 10007, message: "This subdomain does not exist" }]);
-    const s = /^scripts\/([a-z0-9-]+)(?:\/(secrets|schedules|subdomain))?$/.exec(rest);
+    const s = /^scripts\/([a-z0-9-]+)(?:\/(secrets|schedules|subdomain|settings))?$/.exec(rest);
     if (!s) return envelope(null, 404, [{ code: 10000, message: "unknown route" }]);
     const name = s[1]!;
     const script = this.scripts.get(name);
@@ -44,6 +44,7 @@ export class FakeCloudflare {
       return envelope({ id: name });
     }
     if (!script) return envelope(null, 404, [{ code: 10007, message: "This Worker does not exist on your account." }]);
+    if (s[2] === "settings" && req.method === "GET") return envelope({ bindings: [...(script.metadata.bindings as unknown[]), ...[...script.secrets.keys()].map((name) => ({ type: "secret_text", name }))] });
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | { cron: string }[] | null;
     if (s[2] === "secrets" && req.method === "PUT") {
       const b = body as { name: string; text: string; type: string };

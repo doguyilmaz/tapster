@@ -1,5 +1,5 @@
 import { createPrivateKey } from "node:crypto";
-import { type HubConfig } from "../config";
+import { parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import { GitHub } from "../github";
 import { register } from "../mask";
@@ -30,6 +30,12 @@ export function doorbellManifest(owner: string, hub: string, redirect: string): 
     default_events: [],
     hook_attributes: { url: "https://example.com/tapster-has-no-webhook", active: false },
   };
+}
+
+export function doorbellRepos(text: string, owner: string): string[] {
+  const { config, invalid } = parseHub(text, owner);
+  const repos = [...config.packages.map((p) => p.repo), ...invalid.flatMap((i) => (i.repo && /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(i.repo) ? [i.repo] : []))];
+  return repos.filter((r, at) => repos.findIndex((x) => x.toLowerCase() === r.toLowerCase()) === at);
 }
 
 export type DoorbellVars = { APP_ID: string; INSTALLATION_ID: string; HUB: string; HUB_ID: string; OWNER_ID: string; INTERVAL: string };
@@ -134,7 +140,7 @@ const cli: DoorbellIO = { fetch, ask, log: (line) => console.log(line), open: op
 
 const AGAIN = "Run tapster init --doorbell again; it continues with the App it already created.";
 
-async function cloudflareFor(io: DoorbellIO): Promise<{ cf: Cloudflare; target: CloudflareTarget }> {
+async function cloudflareFor(io: DoorbellIO, hub: string): Promise<{ cf: Cloudflare; target: CloudflareTarget }> {
   let token = io.env.CLOUDFLARE_API_TOKEN?.trim() ?? "";
   if (token) io.log("Using the Cloudflare token in CLOUDFLARE_API_TOKEN.");
   else {
@@ -142,9 +148,9 @@ async function cloudflareFor(io: DoorbellIO): Promise<{ cf: Cloudflare; target: 
     io.open(TOKEN_PAGE);
     token = (await io.ask("Cloudflare token (hidden; tapster uses it for this run only): ", true)).trim();
   }
-  if (!token) throw new TapsterError("no Cloudflare token was given", "Paste the token Cloudflare showed after Create Token, or set CLOUDFLARE_API_TOKEN.");
+  if (!token) throw new TapsterError("no Cloudflare token was given", "Paste the token Cloudflare showed after Create Token. Setting CLOUDFLARE_API_TOKEN works too.");
   const cf = new Cloudflare(token, io.fetch);
-  const target = await checkCloudflare(cf);
+  const target = await checkCloudflare(cf, { hub, account: io.env.CLOUDFLARE_ACCOUNT_ID?.trim() || undefined });
   io.log(`Cloudflare account ${target.account.name}, workers.dev subdomain ${target.subdomain}.`);
   return { cf, target };
 }
@@ -176,13 +182,13 @@ async function waitForInstall(appId: string, pem: string, hub: string, io: Doorb
   throw new TapsterError(`the doorbell App was not installed on ${hub} within 10 minutes`, `Install it on ${hub}, then ${AGAIN.charAt(0).toLowerCase()}${AGAIN.slice(1)}`);
 }
 
-export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, every: number, io: DoorbellIO = cli): Promise<void> {
+export async function setupDoorbell(gh: GitHub, hub: string, repos: string[], every: number, io: DoorbellIO = cli): Promise<void> {
   const vars: Vars = { variables: (await hubEnv(gh, hub, "variables")).map((v) => ({ name: v.name, value: v.value ?? "" })) };
   const stage = doorbellStage(vars);
   if (stage === "done") {
     throw new TapsterError("the hub already has a doorbell", "Run tapster init --rotate doorbell to replace its key. To start over, delete the App and the TAPSTER_DOORBELL variables.");
   }
-  const { cf, target } = await cloudflareFor(io);
+  const { cf, target } = await cloudflareFor(io, hub);
   const [owner] = hub.split("/") as [string];
   let appId: string;
   let pem: string;
@@ -213,7 +219,7 @@ export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, 
   }
   const installation = await waitForInstall(appId, pem, hub, io);
   const origin = await deployDoorbell(gh, cf, target, { hub, appId, pem, installation, every });
-  const { missed } = await ringProjects(hub, config.packages.map((p) => p.repo), origin);
+  const { missed } = await ringProjects(hub, repos, origin);
   for (const repo of missed) io.log(`Could not give ${repo} the doorbell's address. Run: gh variable set TAPSTER_DOORBELL --repo ${repo} --body ${origin}`);
   io.log(`The doorbell answers at ${origin}. Projects ring it after opening a draft.`);
 }
@@ -223,7 +229,11 @@ export async function rotateDoorbell(gh: GitHub, hub: string, every: number, io:
   if (doorbellStage(vars) !== "done") throw new TapsterError("the hub has no working doorbell yet", "Run tapster init --doorbell.");
   const appId = vars.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_ID")!.value;
   const pem = await askKey(appId, vars.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_SLUG")!.value, io);
-  const { cf, target } = await cloudflareFor(io);
+  const { cf, target } = await cloudflareFor(io, hub);
+  const stored = vars.variables.find((v) => v.name === "TAPSTER_DOORBELL")!.value;
+  if (target.origin !== stored) {
+    throw new TapsterError(`this token would deploy the doorbell to ${target.origin}, but your projects ring ${stored}`, "Use a token of the Cloudflare account that runs the doorbell now. Nothing was changed.");
+  }
   const installation = await waitForInstall(appId, pem, hub, io);
   await deployDoorbell(gh, cf, target, { hub, appId, pem, installation, every });
   io.log(`Deployed the doorbell again with the new key; it starts the hub every ${every} minutes. Now delete every other key on the App's settings page.`);

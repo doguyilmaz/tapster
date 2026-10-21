@@ -12,7 +12,7 @@ import { run } from "../run";
 import { appFromManifest, openUrl } from "./appflow";
 import { appInstallation, appManifest, storeApp } from "./hubapp";
 import { checkKeyId, checkP8, inspectP12, notaryKey, saveCertificate, saveNotary, verifyNotary } from "./apple";
-import { rotateDoorbell, setupDoorbell } from "./doorbell";
+import { doorbellRepos, rotateDoorbell, setupDoorbell } from "./doorbell";
 import { currentRepo, hubEnv, setEnvSecret, setEnvVariable, userGitHub } from "./gh";
 import { localStore, newSparkleKey, requireStore } from "./keystore";
 import { findGpg, finishLinuxRotation, linuxKeyAllowed, makeLinuxKey } from "./linuxkey";
@@ -362,7 +362,10 @@ export async function init(argv: string[]): Promise<void> {
     if (action.what === "linux-finish") return finishRotation(gh, hub);
     return setupLinux(gh, dir, hub, true);
   }
-  if (action.kind === "doorbell") return setupDoorbell(gh, hub, hubConfig(dir, hub), flowEvery(dir));
+  if (action.kind === "doorbell") {
+    hubConfig(dir, hub);
+    return setupDoorbell(gh, hub, doorbellRepos(readFileSync(join(dir, "tapster.yml"), "utf8"), hub.split("/")[0]!), flowEvery(dir));
+  }
   if (action.kind === "linux") return setupLinux(gh, dir, hub, false);
   if (action.kind === "sparkle-new") return createSparkleKey(dir, hub, action.label);
   if (action.kind === "sparkle") return storeSparkleKey(gh, dir, hub, action.label, action.account);

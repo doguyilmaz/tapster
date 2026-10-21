@@ -1,12 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { parseHub } from "../../config";
 import { TapsterError } from "../../errors";
 import { readHubFile } from "../../hubcommit";
 import { register } from "../../mask";
 import { type CreatedApp, convertManifest, permissionLines } from "../../cli/appflow";
 import { Cloudflare, TOKEN_PAGE, checkCloudflare } from "../../cli/cloudflare";
-import { checkDoorbellKey, deployDoorbell, doorbellManifest, doorbellStage, hubInstallation, onlyHub, ringProjects } from "../../cli/doorbell";
+import { checkDoorbellKey, deployDoorbell, doorbellManifest, doorbellRepos, doorbellStage, hubInstallation, onlyHub, ringProjects } from "../../cli/doorbell";
 import { hubEnv, setEnvVariable } from "../../cli/gh";
 import { FLOW } from "../../cli/hubfiles";
 import { everyFromFlow } from "../../cli/schedule";
@@ -72,7 +71,7 @@ async function cloudflare(c: Ctx) {
   const { hub } = await hubFrom(c, body.hub);
   const token = body.token.trim();
   if (!/^[A-Za-z0-9._-]{20,400}$/.test(token)) throw new TapsterError("that is not a Cloudflare API token", "Paste the token Cloudflare showed after Create Token. Cloudflare shows it once; create a new one if it is gone.");
-  const target = await checkCloudflare(new Cloudflare(token, c.s.deps.fetch));
+  const target = await checkCloudflare(new Cloudflare(token, c.s.deps.fetch), { hub });
   c.s.cloudflare.set(hub, { token, target, at: Date.now() });
   return { account: target.account.name, subdomain: target.subdomain };
 }
@@ -133,7 +132,7 @@ async function deploy(c: Ctx): Promise<DoorbellDone> {
   await storeBell(hub, bell);
   const [flow, config] = await Promise.all([readHubFile(gh, hub, FLOW, "main"), readHubFile(gh, hub, "tapster.yml", "main")]);
   const every = (flow && everyFromFlow(flow)) || 10;
-  const repos = config === null ? [] : parseHub(config, hub.split("/")[0]!).config.packages.map((p) => p.repo);
+  const repos = config === null ? [] : doorbellRepos(config, hub.split("/")[0]!);
   const origin = await deployDoorbell(gh, new Cloudflare(cloud.token, c.s.deps.fetch), cloud.target, { hub, appId: bell.id, pem: bell.pem, installation: installed, every });
   const rung = await ringProjects(hub, repos, origin);
   c.s.cloudflare.delete(hub);

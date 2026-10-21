@@ -244,7 +244,8 @@ function Doorbell({ h }: { h: HubView }) {
             <dt>Address</dt>
             <dd class="mono">{d.origin}</dd>
           </dl>
-          {done && <p class="muted small">{done.rung.length ? `${done.rung.join(", ")} ring it from now on.` : "No project lists it yet; tapster add gives each new project its address."}</p>}
+          {done && done.rung.length > 0 && <p class="muted small">{done.rung.join(", ")} ring it from now on.</p>}
+          {done && done.rung.length + done.missed.length === 0 && <p class="muted small">No project lists it yet; tapster add gives each new project its address.</p>}
           {done && done.missed.length > 0 && (
             <Note tone="warn" title="These projects did not get the doorbell's address">
               <ul class="log">
@@ -302,10 +303,10 @@ function Linux({ h }: { h: HubView }) {
   const [writing, writeProblem, write] = useAction();
   const makeKey = () =>
     make(async () => {
-      const res = await post<{ fingerprint: string }>("/api/hub/linux/key", { hub: h.name });
+      const res = await post<{ fingerprint: string; keychain: boolean }>("/api/hub/linux/key", { hub: h.name });
       setFingerprint(res.fingerprint);
       await loadHub();
-      say("ok", "Stored the Linux signing key in the hub and in your keychain.");
+      say("ok", `Stored the Linux signing key in the hub and in your ${res.keychain ? "login keychain" : "keyring"}.`);
     });
   const submit = (e: Event) => {
     e.preventDefault();
@@ -356,7 +357,9 @@ function Linux({ h }: { h: HubView }) {
               </li>
             </ul>
             <Note tone="keys" title="Where it goes">
-              <span>The key becomes a secret of {h.name}'s tapster environment. tapster also keeps it in your login keychain, because GitHub never gives a secret back. Nothing else holds it.</span>
+              <span>
+                The key becomes a secret of {h.name}'s tapster environment. tapster also keeps it in your {l.keystore === "keyring" ? "keyring" : "login keychain"}, because GitHub never gives a secret back. Nothing else holds it.
+              </span>
             </Note>
             <Problem problem={makeProblem} />
             <div class="row">

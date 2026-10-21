@@ -37,7 +37,7 @@ rewrite the hub workflow for the tapster that runs them; review the diff before 
 | `init --sparkle <label> [--account <account>]` | Stores a Sparkle key from your login keychain in the hub. See [Mac apps with Sparkle](/guides/sparkle/). |
 | `init --sparkle <label> --new` | Makes a new Sparkle key, keeps it in your login keychain and stores it in the hub. |
 | `init --linux` | Makes the key that signs the apt and dnf repositories and turns on GitHub Pages. Needs GnuPG. See [apt and dnf](/guides/linux/). |
-| `init --doorbell` | Deploys the Worker that starts the hub when a project releases, through Cloudflare's API. Asks for a Cloudflare API token with a hidden prompt. Set `CLOUDFLARE_API_TOKEN` to skip the prompt. See [Faster releases](/guides/doorbell/). |
+| `init --doorbell` | Deploys the Worker that starts the hub when a project releases, through Cloudflare's API. Asks for a Cloudflare API token with a hidden prompt. Set `CLOUDFLARE_API_TOKEN` to skip the prompt. `CLOUDFLARE_ACCOUNT_ID` picks the account when the token reaches several. See [Faster releases](/guides/doorbell/). |
 | `init --rotate app` | Stores a new private key for the hub's App. |
 | `init --rotate certificate` | Stores a new Developer ID certificate. |
 | `init --rotate notary` | Stores a new App Store Connect API key. |

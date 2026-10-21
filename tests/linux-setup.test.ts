@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { parseHub } from "../src/config";
 import { useGhWrite } from "../src/cli/gh";
-import { findGpg, withLinux } from "../src/cli/linuxkey";
+import { findGpg, linuxChoices, withLinux } from "../src/cli/linuxkey";
 import type { HubView } from "../src/web/contract";
 import { sampleHome } from "../scripts/demo";
 import { FakeHub } from "./helpers/fakehub";
@@ -41,6 +41,11 @@ test("an existing linux section keeps its url and only the maintainer changes", 
   expect(parseHub(out, "octo").config.packages.filter((p) => "linux" in p && p.linux).map((p) => p.name)).toEqual(["ebb", "aims"]);
 });
 
+test("the choices keep each tool's flag while the maintainer is missing or broken", () => {
+  expect(linuxChoices(YML, "octo")).toEqual([{ name: "ebb", on: false }, { name: "aims", on: true }]);
+  expect(linuxChoices(YML.replace("packages:", 'linux: { maintainer: "nobody" }\npackages:'), "octo")).toEqual([{ name: "ebb", on: false }, { name: "aims", on: true }]);
+});
+
 test("a bad maintainer or a tool without Linux archives is refused", () => {
   expect(() => withLinux(YML, "octo", "octo@example.com", ["ebb"])).toThrow("the maintainer is not Name <address>");
   expect(() => withLinux(YML, "octo", "Octo <octo@example.com>", ["maconly"])).toThrow("maconly cannot ship to apt and dnf");
@@ -75,7 +80,7 @@ const reason = (r: { data: Record<string, unknown> }) => (r.data.error as { reas
 test("the page lists the tools with Linux archives and says whether GnuPG is there", async () => {
   const saved = gpg;
   gpg = null;
-  expect(await linux()).toEqual({ wanted: true, stored: false, gpg: false, keystore: true, maintainer: null, tools: [{ name: "ebb", on: false }, { name: "aims", on: true }] });
+  expect(await linux()).toEqual({ wanted: true, stored: false, gpg: false, keystore: "keychain", maintainer: null, tools: [{ name: "ebb", on: false }, { name: "aims", on: true }] });
   expect(reason(await call("POST", "/api/hub/linux/key", { hub: HUB }))).toBe("GnuPG is not installed");
   gpg = saved;
 });

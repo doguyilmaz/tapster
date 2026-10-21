@@ -41,7 +41,8 @@ const help: Record<string, string> = {
   tapster init --workflow [--every <minutes>] [--tapster <commit>]
                                rewrite the hub workflow, pinned to this tapster
 
-  The doorbell asks for a Cloudflare API token with a hidden prompt. Set CLOUDFLARE_API_TOKEN to skip it.`,
+  The doorbell asks for a Cloudflare API token with a hidden prompt. Set CLOUDFLARE_API_TOKEN to skip it.
+  CLOUDFLARE_ACCOUNT_ID picks the account when the token reaches several.`,
   add: `tapster add: prepare this project clone and propose it to the hub
 
   tapster add [--hub owner/repo] [--workflow file.yml] [--auto-tag] [--allow-dependabot] [--force]

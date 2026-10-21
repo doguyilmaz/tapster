@@ -15,11 +15,12 @@ export async function linuxView(s: Session, hub: string, text: string | null, co
   } catch {
     tools = [];
   }
+  const store = s.deps.store();
   return {
     wanted: tools.some((t) => t.on),
     stored: secrets.includes("TAPSTER_LINUX_KEY"),
     gpg: (await s.deps.gpg()) !== null,
-    keystore: s.deps.store() !== null,
+    keystore: store ? (store.kind === "keychain" ? "keychain" : "keyring") : null,
     maintainer: config?.linux?.maintainer ?? null,
     tools,
   };

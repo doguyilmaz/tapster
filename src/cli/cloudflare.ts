@@ -51,32 +51,39 @@ export class Cloudflare {
   }
 }
 
-export type CloudflareTarget = { account: { id: string; name: string }; subdomain: string };
+export type CloudflareTarget = { account: { id: string; name: string }; subdomain: string; origin: string };
 
-export async function checkCloudflare(cf: Cloudflare): Promise<CloudflareTarget> {
+const missing = (e: unknown) => {
+  if (e instanceof CloudflareError && e.codes.includes(10007)) return null;
+  throw e;
+};
+
+export async function checkCloudflare(cf: Cloudflare, o: { hub: string; account?: string }): Promise<CloudflareTarget> {
   let verified: { status?: string };
   try {
     verified = await cf.call<{ status?: string }>("GET", "/user/tokens/verify");
   } catch (e) {
-    if (e instanceof CloudflareError && e.status >= 400 && e.status < 500) throw new TapsterError("Cloudflare did not accept that token", `Copy the token again. Cloudflare shows it once, so create a new one if it is gone. ${NEW_TOKEN}`);
+    if (e instanceof CloudflareError && e.status >= 400 && e.status < 500) throw new TapsterError("Cloudflare did not accept that token", `Copy the token again. Cloudflare shows it once, so create a new one if it is gone. Use a token from your profile's API Tokens page, which tapster opens; tokens owned by an account do not work here.`);
     throw e;
   }
   if (verified?.status !== "active") throw new TapsterError(`that Cloudflare token is ${verified?.status ?? "not active"}`, NEW_TOKEN);
   const accounts = (await cf.call<{ id: string; name: string }[]>("GET", "/accounts?per_page=50")) ?? [];
   if (accounts.length === 0) throw new TapsterError("Cloudflare shows the token no account", NEW_TOKEN);
-  if (accounts.length > 1) throw new TapsterError(`the token reaches ${accounts.length} Cloudflare accounts`, "Create it again with only the account the doorbell should use under Account Resources.");
-  const account = accounts[0]!;
+  const chosen = o.account ? accounts.filter((a) => a.id === o.account) : accounts;
+  if (chosen.length === 0) throw new TapsterError(`the token does not reach the Cloudflare account ${o.account}`, "Check CLOUDFLARE_ACCOUNT_ID. Unset it to use the one account the token reaches.");
+  if (chosen.length > 1) throw new TapsterError(`the token reaches ${chosen.length} Cloudflare accounts`, "Create it again with only the account the doorbell should use under Account Resources.");
+  const account = chosen[0]!;
   if (!/^[0-9a-f]{32}$/.test(account.id)) throw new TapsterError("Cloudflare named an account tapster cannot read", "Try again. If it repeats, report it at https://github.com/doguyilmaz/tapster/issues.");
-  let subdomain = "";
-  try {
-    subdomain = (await cf.call<{ subdomain?: string }>("GET", `/accounts/${account.id}/workers/subdomain`))?.subdomain ?? "";
-  } catch (e) {
-    if (!(e instanceof CloudflareError) || !e.codes.includes(10007)) throw e;
-  }
+  const subdomain = (await cf.call<{ subdomain?: string }>("GET", `/accounts/${account.id}/workers/subdomain`).catch(missing))?.subdomain ?? "";
   if (!/^[a-z0-9-]{1,63}$/.test(subdomain)) {
     throw new TapsterError(`the Cloudflare account ${account.name} has no workers.dev subdomain yet`, `Pick one at https://dash.cloudflare.com/${account.id}/workers/onboarding, then try again.`);
   }
-  return { account: { id: account.id, name: account.name }, subdomain };
+  const running = await cf.call<{ bindings?: { name?: string; text?: string }[] }>("GET", `/accounts/${account.id}/workers/scripts/${SCRIPT}/settings`).catch(missing);
+  const other = running?.bindings?.find((b) => b.name === "HUB")?.text;
+  if (other && other.toLowerCase() !== o.hub.toLowerCase()) {
+    throw new TapsterError(`the Cloudflare account ${account.name} already runs the doorbell of ${other}`, "One Cloudflare account serves the doorbell of one hub. Use a token of another Cloudflare account.");
+  }
+  return { account: { id: account.id, name: account.name }, subdomain, origin: `https://${SCRIPT}.${subdomain}.workers.dev` };
 }
 
 const text = (m: unknown) => (m as { default: string }).default;
@@ -102,5 +109,5 @@ export async function deployWorker(cf: Cloudflare, target: CloudflareTarget, var
   await cf.call("PUT", `${base}/secrets`, { name: "APP_KEY", text: key, type: "secret_text" });
   await cf.call("PUT", `${base}/schedules`, [{ cron }]);
   await cf.call("POST", `${base}/subdomain`, { enabled: true, previews_enabled: false });
-  return `https://${SCRIPT}.${target.subdomain}.workers.dev`;
+  return target.origin;
 }

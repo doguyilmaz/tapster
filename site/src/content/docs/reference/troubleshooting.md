@@ -28,10 +28,12 @@ tapster setup and `tapster init` show the same messages for these.
 
 | Message | What to do |
 | --- | --- |
-| `Cloudflare did not accept that token` | Copy the token again. Cloudflare shows it once; if it is gone, create a new one from the token page tapster opens. |
+| `Cloudflare did not accept that token` | Copy the token again. Cloudflare shows it once; if it is gone, create a new one from the token page tapster opens. Tokens owned by an account do not work; create it on your profile's page. |
 | `the Cloudflare token lacks the Workers Scripts edit permission` | Create a new token from the token page tapster opens. It asks for **Workers Scripts: Edit**, the only permission the doorbell needs. |
 | `Cloudflare shows the token no account` | The token reaches no account. Create it again and keep your account under **Account Resources**. |
-| `the token reaches 2 Cloudflare accounts` | Create it again with only the account the doorbell should use under **Account Resources**. |
+| `the token reaches 2 Cloudflare accounts` | Create it again with only the account the doorbell should use under **Account Resources**. In a terminal, set `CLOUDFLARE_ACCOUNT_ID` instead. |
+| `the Cloudflare account ... already runs the doorbell of <other hub>` | One Cloudflare account serves the doorbell of one hub. Use another Cloudflare account for this hub. |
+| `this token would deploy the doorbell to ..., but your projects ring ...` | `init --rotate doorbell` got a token of another Cloudflare account. Use a token of the account that runs the doorbell now. |
 | `the Cloudflare account ... has no workers.dev subdomain yet` | Open the link in the message and pick a subdomain once, then try again. |
 | `the doorbell App reaches ... besides <hub>` | Open the App's installation, choose **Only select repositories** and keep only the hub. The doorbell may start workflows only there. |
 | `that key does not belong to the doorbell App` | Generate the key on the doorbell App's settings page, not on the hub App's. |

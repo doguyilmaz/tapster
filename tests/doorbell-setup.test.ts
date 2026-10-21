@@ -75,3 +75,9 @@ test("a doorbell or Linux key before init says to run init first", async () => {
   const some = { json: async () => ({ variables: [{ name: "A", value: "1" }] }) } as never;
   expect(await hubEnv(some, "o/hub", "variables")).toEqual([{ name: "A", value: "1" }]);
 });
+
+test("the doorbell rings every repository tapster.yml names once, invalid entries included", async () => {
+  const { doorbellRepos } = await import("../src/cli/doorbell");
+  const yml = "version: 1\ntap: o/tap\npackages:\n  - { name: a, repo: o/a, binaries: [a], assets: { linux-amd64: a.tgz } }\n  - { name: a2, repo: O/A, binaries: [a2], assets: { linux-amd64: a2.tgz } }\n  - { name: b, repo: o/b, binaries: [b], assets: { linux-amd64: b.tgz }, linux: true }\n";
+  expect(doorbellRepos(yml, "o")).toEqual(["o/a", "o/b"]);
+});

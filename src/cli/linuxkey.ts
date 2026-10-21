@@ -96,10 +96,10 @@ function setMaintainer(doc: Doc, maintainer: string): void {
   top.items.splice(at < 0 ? top.items.length : at, 0, doc.createPair("linux", node) as never);
 }
 
-// A tool asking for Linux packages is invalid until tapster.yml names a maintainer, so the choices are read as if it did.
+// A tool asking for Linux packages is invalid until tapster.yml names a valid maintainer, so the choices are read as if it did.
 export function linuxChoices(text: string, owner: string): { name: string; on: boolean }[] {
   const doc = parseDocument(text);
-  if (!isMap(doc.get("linux", true))) setMaintainer(doc, "Maintainer <maintainer@example.com>");
+  if (!MAINTAINER.test(String(doc.getIn(["linux", "maintainer"]) ?? ""))) setMaintainer(doc, "Maintainer <maintainer@example.com>");
   return linuxTools(parseHub(doc.toString(YAML_OUT), owner).config).map((p) => ({ name: p.name, on: !isApp(p) && p.linux }));
 }
 

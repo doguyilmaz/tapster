@@ -3,7 +3,6 @@ import { createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseHub } from "../src/config";
 import { TOKEN_PAGE } from "../src/cli/cloudflare";
 import { type DoorbellIO, rotateDoorbell, setupDoorbell } from "../src/cli/doorbell";
 import { useGhWrite } from "../src/cli/gh";
@@ -19,7 +18,7 @@ const dir = mkdtempSync(join(tmpdir(), "tapster-bell-"));
 const pemPath = join(dir, "bell.pem");
 const fetchBoth = both(fake.fetch, cf);
 const gh = new GitHub("t", fetchBoth, async () => {}, "user");
-const config = parseHub("version: 1\ntap: octo/tap\npackages:\n  - { name: ebb, repo: octo/ebb, binaries: [ebb], assets: { linux-amd64: ebb.tgz } }\n  - { name: gone, repo: octo/gone, binaries: [gone], assets: { linux-amd64: gone.tgz } }\n", "octo").config;
+const repos = ["octo/ebb", "octo/gone"];
 
 function io(answers: string[], env: Record<string, string | undefined>) {
   const lines: string[] = [];
@@ -56,7 +55,7 @@ afterAll(() => {
 
 test("tapster init --doorbell continues with the App's new .pem and deploys through Cloudflare's API", async () => {
   const run = io([pemPath], { CLOUDFLARE_API_TOKEN: cf.token });
-  await setupDoorbell(gh, HUB, config, 20, run.value);
+  await setupDoorbell(gh, HUB, repos, 20, run.value);
   const origin = "https://tapster-doorbell.octo.workers.dev";
   const w = cf.scripts.get("tapster-doorbell")!;
   expect(w.crons).toEqual(["*/20 * * * *"]);
@@ -73,7 +72,7 @@ test("tapster init --doorbell continues with the App's new .pem and deploys thro
 });
 
 test("tapster init --doorbell stops once the hub has a doorbell", async () => {
-  await expect(setupDoorbell(gh, HUB, config, 10, io([], { CLOUDFLARE_API_TOKEN: cf.token }).value)).rejects.toThrow("the hub already has a doorbell");
+  await expect(setupDoorbell(gh, HUB, repos, 10, io([], { CLOUDFLARE_API_TOKEN: cf.token }).value)).rejects.toThrow("the hub already has a doorbell");
 });
 
 test("tapster init --rotate doorbell asks for the token with a hidden prompt and redeploys with the new key", async () => {
@@ -100,4 +99,14 @@ test("a .pem of another App is refused before anything reaches Cloudflare", asyn
 test("a wrong token stops the CLI with the same words as setup", async () => {
   await Bun.write(pemPath, fake.bell!.pem);
   await expect(rotateDoorbell(gh, HUB, 10, io([pemPath], { CLOUDFLARE_API_TOKEN: "cf_wrongwrongwrongwrongwrong0123456789" }).value)).rejects.toThrow("Cloudflare did not accept that token");
+});
+
+test("a rotation with a token of another account stops before it deploys a second Worker", async () => {
+  await Bun.write(pemPath, fake.bell!.pem);
+  const elsewhere = new FakeCloudflare();
+  elsewhere.subdomain = "work";
+  const run = io([pemPath], { CLOUDFLARE_API_TOKEN: elsewhere.token });
+  run.value.fetch = both(fake.fetch, elsewhere);
+  await expect(rotateDoorbell(gh, HUB, 10, run.value)).rejects.toThrow("this token would deploy the doorbell to https://tapster-doorbell.work.workers.dev, but your projects ring https://tapster-doorbell.octo.workers.dev");
+  expect(elsewhere.scripts.size).toBe(0);
 });
