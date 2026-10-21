@@ -52,8 +52,9 @@ keychain (`security delete-generic-password -s https://sparkle-project.org -a e2
 
 ## 5. The doorbell
 
-1. In the test hub run `bunx @doguyilmaz/tapster init --doorbell`. Sign in to Cloudflare when Wrangler asks, click
-   "Create GitHub App" and install the new App on the test hub only.
+1. In tapster setup, open Optional extras for the test hub. Create a token from the Cloudflare page it opens, paste it,
+   click "Create GitHub App", install the new App on the test hub only and click "Deploy the doorbell". The CLI path is
+   `bunx @doguyilmaz/tapster init --doorbell` with the same token in `CLOUDFLARE_API_TOKEN`.
 2. Run `bunx @doguyilmaz/tapster doctor` in the test hub; every project must have `TAPSTER_DOORBELL`.
 3. Tag a fixture release. The hub's workflow must start within a minute of the draft opening, with the event
    `workflow_dispatch`. The fixture's "Ring the tapster hub" step answers `202`.
@@ -62,8 +63,9 @@ keychain (`security delete-generic-password -s https://sparkle-project.org -a e2
 
 ## 6. apt and dnf
 
-1. Set `linux: true` on the CLI fixture in the test hub, add `linux.maintainer` and run
-   `bunx @doguyilmaz/tapster init --linux`. Commit and push.
+1. In tapster setup, open Optional extras for the test hub and click "Make the signing key". Fill in the maintainer,
+   tick the CLI fixture and click "Write to tapster.yml". The CLI path is `bunx @doguyilmaz/tapster init --linux`, then
+   `linux: true` and `linux.maintainer` by hand.
 2. Start the hub's workflow by hand with `linux` ticked. `linux-build`, `linux-sign` and `linux-pages` must pass.
 3. Follow the commands on the site's front page in an Ubuntu and a Fedora machine or container. Both must install and
    run the fixture.

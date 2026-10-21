@@ -22,6 +22,24 @@ most. Start with [`tapster doctor`](/reference/commands/#tapster-doctor) in your
 | `git could not push without asking for a password or passphrase` | Push from a terminal in the project's folder; the page shows the command. |
 | `... is outside your home folder` | tapster reads clones inside your home folder only. Move the clone or link it into your home folder. |
 
+## The doorbell and the Linux key
+
+tapster setup and `tapster init` show the same messages for these.
+
+| Message | What to do |
+| --- | --- |
+| `Cloudflare did not accept that token` | Copy the token again. Cloudflare shows it once; if it is gone, create a new one from the token page tapster opens. |
+| `the Cloudflare token lacks the Workers Scripts edit permission` | Create a new token from the token page tapster opens. It asks for **Workers Scripts: Edit**, the only permission the doorbell needs. |
+| `Cloudflare shows the token no account` | The token reaches no account. Create it again and keep your account under **Account Resources**. |
+| `the token reaches 2 Cloudflare accounts` | Create it again with only the account the doorbell should use under **Account Resources**. |
+| `the Cloudflare account ... has no workers.dev subdomain yet` | Open the link in the message and pick a subdomain once, then try again. |
+| `the doorbell App reaches ... besides <hub>` | Open the App's installation, choose **Only select repositories** and keep only the hub. The doorbell may start workflows only there. |
+| `that key does not belong to the doorbell App` | Generate the key on the doorbell App's settings page, not on the hub App's. |
+| `this setup holds no Cloudflare token` | tapster keeps the token for an hour at most. Paste it again; your password manager can fill it in. |
+| `GnuPG is not installed` or `gpg is not installed` | Run `brew install gnupg`, then try again. |
+| `the hub already has a Linux signing key` | The hub has its key. To replace it, run `tapster init --rotate linux`; see [Rotate the key](/guides/linux/#rotate-the-key). |
+| `the maintainer is not Name <address>` | Write it like `Your Name <you@example.com>`. |
+
 ## In your terminal
 
 | Message | What to do |
@@ -39,7 +57,6 @@ most. Start with [`tapster doctor`](/reference/commands/#tapster-doctor) in your
 | `no GoReleaser step found in the release workflow` | Name the workflow that runs GoReleaser: `tapster add --workflow ci.yml`. |
 | `the hub would refuse this entry: ...` | Fix what the message names in the project, then run `tapster add` again. |
 | `the hub already has a branch tapster-add-<name>` | Merge or delete that pull request on the hub, then run `tapster add` again. |
-| `Wrangler could not deploy the doorbell: ...` | The end of Wrangler's message follows the colon. Most often the Cloudflare account has no `workers.dev` subdomain yet. |
 
 ## On the hub's run
 

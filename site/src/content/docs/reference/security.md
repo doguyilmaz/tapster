@@ -22,14 +22,15 @@ tapster reaches them only after you run `tapster init --workflow` and push the r
 | Sparkle key of each app | Secret of the `tapster` environment and your login keychain | Only the step that signs the feed |
 | Linux signing key | Secret of the `tapster` environment and your login keychain | Only the job that signs packages |
 | Doorbell App private key | Secret of your Cloudflare Worker | The Worker |
+| Cloudflare API token | Nowhere: tapster keeps it in memory while it deploys the doorbell | tapster on your computer, for that run |
 | Tag key (with `--auto-tag`) | Secret of the project's `release` environment | The project's workflows on its default branch |
 
 Your projects hold no signing keys. They build, attest and open a draft release.
 
 tapster reads each key once while you set it up and hands it to the GitHub CLI through standard input. The GitHub CLI
-encrypts it for your repository before it leaves your computer. The doorbell's key goes to your Cloudflare account the
-same way, through Cloudflare's Wrangler. tapster does not print keys, keep copies in files or put
-them on a command line. Keys that tapster
+encrypts it for your repository before it leaves your computer. The doorbell's key goes to your Cloudflare account through
+Cloudflare's API, as a secret of the Worker. The Cloudflare token you give for that is used for that one run and never
+stored. tapster does not print keys or tokens, keep copies in files or put them on a command line. Keys that tapster
 creates for you (Sparkle and Linux) also stay in your login keychain, because GitHub never gives a secret back. macOS
 asks you before any app reads them from there.
 

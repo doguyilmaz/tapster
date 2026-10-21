@@ -4,18 +4,72 @@ description: "Deploy the doorbell so the hub starts within a minute of each rele
 sidebar:
   order: 5
 ---
+import { Steps } from "@astrojs/starlight/components";
+import { Image } from "astro:assets";
+import doorbell from "../../../assets/setup/doorbell.webp";
 
 The hub looks for new drafts every 10 minutes. GitHub runs these schedules best-effort: on a quiet hub they can come
-hours apart. The **doorbell** starts the hub as soon as a project opens its draft. It is a small Cloudflare Worker on the free
-plan, deployed to your own Cloudflare account.
+hours apart. The **doorbell** starts the hub as soon as a project opens its draft. It is a small Cloudflare Worker,
+deployed to your own Cloudflare account.
+
+It costs nothing on Cloudflare's free plan. The plan allows 100,000 requests a day and 5 cron triggers. At a 10 minute
+interval the doorbell uses about 150 requests a day and one cron trigger.
 
 ## What you need
 
-- A Cloudflare account with a `workers.dev` subdomain. Create the subdomain once in the Cloudflare dashboard under
-  **Workers & Pages**.
-- Node.js 20 or newer, which Cloudflare's Wrangler needs.
+- A Cloudflare account with a `workers.dev` subdomain. Pick the subdomain once in the Cloudflare dashboard under
+  **Workers & Pages**. If you have none yet, tapster stops and links the page where you pick it.
+- A Cloudflare API token. tapster opens Cloudflare's token page with the one permission it needs already filled in:
+  **Workers Scripts: Edit**. You create the token there in two clicks.
 
-## Deploy it
+Nothing else: tapster talks to Cloudflare's API itself, so you need no Wrangler and no Node.js.
+
+## Deploy it in tapster setup
+
+In [tapster setup](/tutorial/hub/), open **Optional extras**. The doorbell takes four steps on that page.
+
+<Image src={doorbell} alt="The doorbell in Optional extras. The Cloudflare token is checked. The doorbell App waits for Continue to GitHub, followed by Install it on the hub only and Deploy." />
+
+<Steps>
+
+1. **A Cloudflare token.** Click **Open Cloudflare's token page**. Cloudflare shows the permission
+   **Workers Scripts: Edit**. Click **Continue to summary**, then **Create Token**. Copy the token it shows.
+   Paste it into **The token** and click **Check the token**. Your password manager offers to save it under the name
+   above the field.
+
+   :::tip[You should see]{icon="approve-check-circle"}
+   `Cloudflare account <your account>, Workers on <subdomain>.workers.dev.`
+   :::
+
+2. **The doorbell App.** The page explains a second GitHub App that may only start the hub's workflow and turn it back
+   on. Click **Continue to GitHub**, then **Create GitHub App**. GitHub brings you back to the same step.
+
+3. **Install it on the hub only.** Click **Install the doorbell App**. On GitHub, choose **Only select repositories**,
+   pick your hub and only the hub. Click **Install**. The page notices within seconds. If the App reaches any other
+   repository, the page says so and links the installation, where you remove it.
+
+4. **Deploy.** Click **Deploy the doorbell**. tapster bundles the Worker, uploads it to your Cloudflare account and
+   gives every project in `tapster.yml` the doorbell's address.
+
+   :::tip[You should see]{icon="approve-check-circle"}
+   `The doorbell answers at https://tapster-doorbell.<subdomain>.workers.dev.`
+   :::
+
+</Steps>
+
+:::note[Where your keys go]{icon="padlock"}
+The token stays in the memory of tapster setup on your computer until the doorbell is deployed, for an hour at most.
+tapster uses it only to talk to Cloudflare's API and never stores or logs it. The doorbell App's private key goes from
+GitHub to tapster setup, then to the Worker in your own Cloudflare account as a secret. It never goes to GitHub or
+anywhere else. No one else, including tapster's author, ever receives either of them.
+:::
+
+If tapster setup stops before you deploy, open **Optional extras** again. It continues with the App it already
+created. GitHub hands an App's key over only once, so the page asks for a new one: open the App's settings, click
+**Generate a private key** and drop the downloaded `.pem` file on the page. Delete the file and every older key on that
+page once the doorbell runs.
+
+## Or deploy it in a terminal
 
 In an up-to-date clone of your hub, so tapster sees every project in `tapster.yml`:
 
@@ -24,11 +78,14 @@ git pull
 bunx @doguyilmaz/tapster init --doorbell
 ```
 
-1. If Wrangler is not signed in, Cloudflare's sign-in page opens. Sign in and allow Wrangler.
-2. tapster opens a page that explains the **doorbell App**, a second GitHub App that may only start the hub's workflow
-   and turn it back on.
-   Click **Continue to GitHub**, then **Create GitHub App**.
+<Steps>
+
+1. tapster opens Cloudflare's token page and asks for the token with a hidden prompt. To skip the prompt, set
+   `CLOUDFLARE_API_TOKEN` before you run the command.
+2. tapster opens a page that explains the doorbell App. Click **Continue to GitHub**, then **Create GitHub App**.
 3. On the install page, choose **Only select repositories** and pick the hub, only the hub. Click **Install**.
+
+</Steps>
 
 :::caution[tapster waits here]{icon="clock"}
 `Waiting until the App is installed on you/homebrew-tap (only that repository); tapster continues by itself.`
@@ -38,24 +95,25 @@ tapster checks for up to 10 minutes. If it stops before you install, install the
 the App's settings page.
 :::
 
-tapster then deploys the Worker, stores the App's key in it and tells every project in `tapster.yml` the doorbell's
-address.
-
 :::tip[You should see]{icon="approve-check-circle"}
 `The doorbell answers at https://tapster-doorbell.<subdomain>.workers.dev. Projects ring it after opening a draft.`
 :::
 
-:::note[Where your keys go]{icon="padlock"}
-The doorbell App's private key goes from your terminal to the Worker in your own Cloudflare account and nowhere else.
-The Worker uses it only to start the hub's workflow and to turn it back on when GitHub pauses it.
-:::
+## What tapster sets up on Cloudflare
+
+Both ways make the same calls to Cloudflare's API with your token:
+
+- They check the token and read your account and its `workers.dev` subdomain.
+- They upload one Worker named `tapster-doorbell` with the hub's name, the App's ID and the schedule as plain variables.
+- They store the App's key as the Worker's secret `APP_KEY`.
+- They set the Worker's cron trigger to the hub's schedule and turn on its `workers.dev` address.
 
 ## How a project rings it
 
-`tapster add` puts a step named **Ring the tapster hub** in every release workflow. It runs only when the project has
-the doorbell's address, so projects you added before the doorbell ring it without a change. The step sends a
-short-lived token from GitHub that proves which repository and tag it comes from. The Worker checks that token and
-starts the hub.
+`tapster add` and **Add** in tapster setup put a step named **Ring the tapster hub** in every release workflow. They
+also give each new project the doorbell's address when the hub has one. The step runs only when the project has that
+address, so projects you added before the doorbell ring it without a change. The step sends a short-lived token from
+GitHub that proves which repository and tag it comes from. The Worker checks that token and starts the hub.
 
 The Worker also starts the hub on its own schedule when no run started in that time. When GitHub pauses the hub's
 workflow for inactivity, the Worker turns it back on. A workflow you disabled yourself stays off.
@@ -66,10 +124,11 @@ workflow for inactivity, the Worker turns it back on. A workflow you disabled yo
 bunx @doguyilmaz/tapster init --rotate doorbell
 ```
 
-tapster asks for a new private key from the doorbell App's settings page and deploys the Worker again with it. Delete
-every older key on that page afterwards. Run the same command after [upgrading tapster](/guides/upgrade/), so the Worker
-runs the same version and schedule as the hub.
+tapster asks for a new private key from the doorbell App's settings page and a Cloudflare token, then deploys the Worker
+again with the new key. Delete every older key on that page afterwards. Run the same command after
+[upgrading tapster](/guides/upgrade/), so the Worker runs the same version and schedule as the hub.
 
 ## Limits
 
 - The Worker is always named `tapster-doorbell`, so one Cloudflare account serves the doorbell of one hub.
+- The token must reach exactly one Cloudflare account. Pick it under **Account Resources** when you create the token.
