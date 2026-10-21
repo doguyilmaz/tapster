@@ -312,19 +312,28 @@ function LinuxTools({ h }: { h: HubView }) {
   const [writing, writeProblem, write] = useAction();
   const [change, setChange] = useState<LinuxChange | null>(null);
   const [checkProblem, setCheckProblem] = useState<ProblemView | null>(null);
+  const [stale, setStale] = useState(false);
   const body = { hub: h.name, maintainer, tools: shown.map((t) => ({ name: t.name, was: t.on, on: picked.includes(t.name) })) };
   const toolsChanged = body.tools.filter((t) => t.was !== t.on).length;
   const maintainerChanged = maintainer.trim() !== (l.maintainer ?? "");
   const changed = maintainerChanged || toolsChanged > 0;
   const asked = JSON.stringify(body);
   useEffect(() => {
-    setChange(null);
     setCheckProblem(null);
-    if (!changed || !maintainer.trim()) return;
+    if (!changed || !maintainer.trim()) {
+      setChange(null);
+      setStale(false);
+      return;
+    }
+    setStale(true);
     let live = true;
     const timer = setTimeout(() => {
       post<LinuxChange>("/api/hub/linux/preview", body).then(
-        (c) => live && setChange(c),
+        (c) => {
+          if (!live) return;
+          setChange(c);
+          setStale(false);
+        },
         (e) => live && setCheckProblem(problemOf(e)),
       );
     }, 350);
@@ -362,7 +371,7 @@ function LinuxTools({ h }: { h: HubView }) {
                 <span class="grow">
                   <strong>Ship {t.name} to apt and dnf</strong>
                   <span id={`tool-${t.name}`}>
-                    {t.repo} · {KIND[t.kind] ?? t.kind} · {t.archives.join(", ")}
+                    <span class="mono repo">{t.repo}</span> · {KIND[t.kind] ?? t.kind} · {t.archives.join(", ")}
                   </span>
                 </span>
                 <Badge tone={t.on !== now ? "next" : now ? "ok" : undefined}>{toolState(t.on, now)}</Badge>
@@ -375,14 +384,14 @@ function LinuxTools({ h }: { h: HubView }) {
         {l.left.length > 0 && <p class="muted small">Not listed: {l.left.map((x) => `${x.name} ${x.why}`).join("; ")}.</p>}
       </div>
       {change && change.after !== change.before && (
-        <div class="stack tight">
+        <div class={stale ? "stack tight stale" : "stack tight"} aria-busy={stale}>
           <h4 class="section-title">The change to tapster.yml</h4>
           <DiffBlock before={change.before} after={change.after} label="The change to tapster.yml" />
         </div>
       )}
       <Problem problem={checkProblem ?? writeProblem} />
       <div class="row">
-        <Busy busy={writing} class="btn primary" type="submit" disabled={!changed || !change || change.after === change.before}>
+        <Busy busy={writing} class="btn primary" type="submit" disabled={!changed || stale || !change || change.after === change.before}>
           {linuxWrite(maintainerChanged, toolsChanged)}
         </Busy>
       </div>
