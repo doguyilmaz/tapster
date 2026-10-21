@@ -500,16 +500,40 @@ async function runHub(c: Ctx) {
   return { started: (await startHubRun(c.s, gh, hub)).started };
 }
 
+const WARM_TTL = 20_000;
+
+const warmed = (s: Session, key: string, value: Promise<unknown>) => {
+  quiet(value);
+  s.warm.set(key, { at: Date.now(), value });
+};
+
+// The first read joins what setup started at launch. The handler clears every warm start on a write.
+function takeWarm<T>(s: Session, key: string): Promise<T | null> {
+  const w = s.warm.get(key);
+  s.warm.delete(key);
+  if (!w || Date.now() - w.at > WARM_TTL) return Promise.resolve(null);
+  return (w.value as Promise<T>).catch(() => null);
+}
+
+export function warmStart(s: Session, hub: Promise<string | null>): void {
+  warmed(s, "account", account(s));
+  void hub.then((name) => {
+    if (name) warmed(s, `hub:${name}`, s.deps.github().then((gh) => hubView(s, gh, name)));
+  });
+}
+
 export const hubRoutes: Routes = {
-  "GET /api/account": (c) => account(c.s),
+  "GET /api/account": async (c) => (await takeWarm<AccountView>(c.s, "account")) ?? account(c.s),
   "GET /api/hubs": async (c) => {
     const { gh, login } = await me(c.s);
     return { hubs: await hubChoices(gh, login) };
   },
   "POST /api/hubs": createHub,
   "GET /api/hub": async (c) => {
-    const { gh, hub } = await hubFrom(c, c.url.searchParams.get("hub"));
-    return hubView(c.s, gh, hub);
+    const asked = c.url.searchParams.get("hub");
+    const early = takeWarm<HubView>(c.s, `hub:${asked}`);
+    const { gh, hub } = await hubFrom(c, asked);
+    return (await early) ?? hubView(c.s, gh, hub);
   },
   "POST /api/hub/protect": protect,
   "POST /api/hub/app": appStart,
