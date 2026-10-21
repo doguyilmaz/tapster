@@ -32,7 +32,7 @@ function BellToken({ h }: { h: HubView }) {
   }
   const submit = (e: Event) => {
     e.preventDefault();
-    const token = String(new FormData(e.currentTarget as HTMLFormElement).get("password") ?? "");
+    const token = String(new FormData(e.currentTarget as HTMLFormElement).get("token") ?? "");
     void run(async () => {
       await post("/api/hub/doorbell/cloudflare", { hub: h.name, token });
       savedFor("cloudflare");
@@ -48,8 +48,8 @@ function BellToken({ h }: { h: HubView }) {
         <Out href={h.extras.doorbell.tokenPage}>Open Cloudflare's token page</Out>
       </div>
       <form class="secret" onSubmit={submit} autoComplete="on">
-        <Field name="username" label="Name in your password manager" value={`${h.name}: Cloudflare doorbell token`} autoComplete="username" hint="Your password manager saves the token under this name." />
-        <Password name="password" label="The token" hint="tapster uses it for this setup only. It never stores or logs it." />
+        <Field name="username" id="bell-username" label="Name in your password manager" value={`${h.name}: Cloudflare doorbell token`} autoComplete="username" hint="Your password manager saves the token under this name." />
+        <Password name="token" label="The token" hint="tapster uses it for this setup only. It never stores or logs it." />
         <Problem problem={problem} />
         <div class="row">
           <Busy busy={busy} class="btn primary" type="submit">

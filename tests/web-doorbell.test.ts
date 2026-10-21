@@ -130,6 +130,12 @@ test("deploying uploads the Worker, rings every project and forgets the token an
   expect(problem(await call("POST", "/api/hub/doorbell/deploy", { hub: HUB }))).toBe("this setup holds no key of the doorbell App");
 });
 
+test("Health checks the doorbell setup made", async () => {
+  const health = (await call("GET", `/api/hub/health?hub=${HUB}`)).data as { checks: { name: string; ok: boolean }[] };
+  expect(health.checks.find((c) => c.name === "every project rings the hub's doorbell")?.ok).toBe(true);
+  expect(health.checks.find((c) => c.name === "the doorbell keeps the workflow's schedule")?.ok).toBe(true);
+});
+
 test("setup's Add gives a new project the doorbell's address", async () => {
   const added = (await call("POST", "/api/projects/add", { hub: HUB, path: join(home, "Developer", "hafifpix"), options: { workflow: "release.yml", autoTag: false, dependabot: false, force: false } })).data as unknown as AddView;
   expect(added.lines).toContain("- the release workflow rings the hub's doorbell, so the hub publishes right after the draft opens");

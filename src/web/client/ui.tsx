@@ -189,13 +189,13 @@ export function FileDrop(props: { name: string; accept: string; label: string; h
   );
 }
 
-export function Password({ name, label, hint, autoComplete = "current-password" }: { name: string; label: string; hint?: ComponentChildren; autoComplete?: string }) {
+export function Password({ name, id = name, label, hint, autoComplete = "current-password" }: { name: string; id?: string; label: string; hint?: ComponentChildren; autoComplete?: string }) {
   const [shown, setShown] = useState(false);
   return (
     <div class="field">
-      <label for={name}>{label}</label>
+      <label for={id}>{label}</label>
       <div class="with-toggle">
-        <input class="input" id={name} name={name} type={shown ? "text" : "password"} autoComplete={autoComplete} spellcheck={false} autoCapitalize="off" autoCorrect="off" />
+        <input class="input" id={id} name={name} type={shown ? "text" : "password"} autoComplete={autoComplete} spellcheck={false} autoCapitalize="off" autoCorrect="off" />
         <button type="button" class="btn quiet small" onClick={() => setShown(!shown)} aria-pressed={shown}>
           {shown ? "Hide" : "Show"}
         </button>
@@ -205,13 +205,13 @@ export function Password({ name, label, hint, autoComplete = "current-password" 
   );
 }
 
-export function Field({ name, label, hint, value, placeholder, mono, autoComplete = "off", onInput }: { name: string; label: string; hint?: ComponentChildren; value?: string; placeholder?: string; mono?: boolean; autoComplete?: string; onInput?: (v: string) => void }) {
+export function Field({ name, id = name, label, hint, value, placeholder, mono, autoComplete = "off", onInput }: { name: string; id?: string; label: string; hint?: ComponentChildren; value?: string; placeholder?: string; mono?: boolean; autoComplete?: string; onInput?: (v: string) => void }) {
   return (
     <div class="field">
-      <label for={name}>{label}</label>
+      <label for={id}>{label}</label>
       <input
         class={`input${mono ? " mono" : ""}`}
-        id={name}
+        id={id}
         name={name}
         value={value}
         placeholder={placeholder}

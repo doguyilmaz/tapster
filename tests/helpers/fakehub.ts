@@ -497,7 +497,7 @@ export class FakeHub {
         r.pages = String(body.build_type);
         return json({}, 204);
       }
-      return r.pages ? json({ build_type: r.pages }) : json({}, 404);
+      return r.pages ? json({ build_type: r.pages, html_url: `https://${this.login.toLowerCase()}.github.io/${r.name}/` }) : json({}, 404);
     }
     return json({ message: `fake has no ${method} ${rest}` }, 404);
   }

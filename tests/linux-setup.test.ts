@@ -107,6 +107,9 @@ test("the maintainer and the picked tools go to tapster.yml in one commit on mai
   expect(text).toContain('linux: { maintainer: "Octo Cat <octo@example.com>" }');
   expect((await linux()).tools).toEqual([{ name: "ebb", on: true }, { name: "aims", on: true }]);
   expect((await call("POST", "/api/hub/linux/config", { hub: HUB, maintainer: "Octo Cat <octo@example.com>", tools: ["ebb", "aims"] })).data).toEqual({ result: "unchanged" });
+  const health = await call("GET", `/api/hub/health?hub=${HUB}`);
+  expect(health.status).toBe(200);
+  expect((health.data.checks as { name: string; ok: boolean }[]).find((c) => c.name === "the Linux repositories can be signed and deployed")?.ok).toBe(fake.get(HUB)!.env!.secrets.has("TAPSTER_LINUX_KEY"));
 });
 
 test("the tapster.yml write refuses a main someone else changed", async () => {
