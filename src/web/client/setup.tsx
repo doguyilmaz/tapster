@@ -557,6 +557,22 @@ function Files({ h }: { h: HubView }) {
             <h3 class="section-title">{changes.length ? `${changes.length} ${changes.length === 1 ? "change" : "changes"} for main` : "main is up to date"}</h3>
             <span class="muted small">Workflow: {view.pin}</span>
           </div>
+          {view.hubCode &&
+            (view.hubCode.changed.length ? (
+              <Note tone="warn" title={`The hub's code changed since ${view.hubCode.from}`}>
+                <span>
+                  The hub runs tapster {view.hubCode.from}. {view.hubCode.to} changes what runs there ({view.hubCode.changed.join(", ")}), so write the hub files to use it.{" "}
+                  <Out href={view.hubCode.compare}>See every change</Out>
+                </span>
+              </Note>
+            ) : (
+              <Note tone="info" title="Nothing changes in the hub">
+                <span>
+                  The hub runs tapster {view.hubCode.from}. {view.hubCode.to} changes only the setup page and the terminal, so moving the hub to it is optional.{" "}
+                  <Out href={view.hubCode.compare}>See every change</Out>
+                </span>
+              </Note>
+            ))}
           {view.files.map((f) => (
             <FileCard key={f.path} f={f} />
           ))}

@@ -260,3 +260,17 @@ test("a Sparkle key goes to the hub only after the user pasted the very key the 
   expect(hub.files!.get(".github/workflows/tapster.yml")).toContain('SPARKLE_KEY_PIX: "${{ secrets.SPARKLE_KEY_PIX }}"');
   expect((await call("POST", "/api/hub/sparkle/store", { hub: "octo/homebrew-tap", label: "pix", pasted: sparkle.seed })).status).toBe(400);
 });
+
+test("the files step says whether moving the pin changes what runs in the hub", async () => {
+  const files = fake.get("octo/homebrew-fresh")!.files!;
+  const flow = files.get(".github/workflows/tapster.yml")!;
+  files.set(".github/workflows/tapster.yml", flow.replace(/doguyilmaz\/tapster@[0-9a-f]{40} # \S+/g, `doguyilmaz/tapster@${"a".repeat(40)} # v1.0.0`));
+  const body = { hub: "octo/homebrew-fresh", every: null, remove: [], readme: false };
+  fake.tapsterCompare = { status: "ahead", files: [{ filename: "src/web/client/setup.tsx" }, { filename: "README.md" }] };
+  expect(((await call("POST", "/api/hub/files/preview", body)).data as unknown as FilesView).hubCode).toMatchObject({ from: "v1.0.0", changed: [] });
+  fake.tapsterCompare = { status: "ahead", files: [{ filename: "dist/index.js" }, { filename: "src/action/check.ts" }] };
+  expect(((await call("POST", "/api/hub/files/preview", body)).data as unknown as FilesView).hubCode).toMatchObject({ changed: ["dist/index.js"] });
+  fake.tapsterCompare = null;
+  files.set(".github/workflows/tapster.yml", flow);
+  expect(((await call("POST", "/api/hub/files/preview", body)).data as unknown as FilesView).hubCode).toBeNull();
+});
