@@ -6,53 +6,14 @@ import { clonePaths, targetOf } from "./projects";
 import { type SheetTarget, ProjectSheet } from "./sheet";
 import { appResult, clones, go, hub, hubError, hubLoading, hubName, loadClones, loadHub, loadStatuses, mac, macChoice, openStop, problemOf, say, setMac, statusError, statuses } from "./state";
 import { StatusRows } from "./status";
-import { Badge, Busy, Cmd, Copy, Field, FileDrop, Icon, Note, Out, Password, Problem, Spinner } from "./ui";
+import { Extras } from "./extras";
+import { Badge, Busy, Cmd, Done, Field, FileDrop, Head, Icon, Note, Out, Password, Problem, Spinner, savedFor, useAction } from "./ui";
 
 function Dot({ stop, index }: { stop: Stop; index: number }) {
   if (stop.state === "done") return <span class="dot"><Icon name="check" /></span>;
   if (stop.state === "attention") return <span class="dot"><Icon name="alert" /></span>;
   if (stop.state === "skipped") return <span class="dot">–</span>;
   return <span class="dot">{index + 1}</span>;
-}
-
-function Head({ title, lead, children }: { title: string; lead: string; children?: preact.ComponentChildren }) {
-  return (
-    <div class="panel-head">
-      <div class="spread">
-        <h2 class="title">{title}</h2>
-        {children}
-      </div>
-      <p class="lead">{lead}</p>
-    </div>
-  );
-}
-
-function Done({ text }: { text: string }) {
-  return (
-    <div class="row">
-      <span class="seal" aria-hidden="true">
-        <Icon name="check" />
-      </span>
-      <strong>{text}</strong>
-    </div>
-  );
-}
-
-function useAction(): [boolean, ProblemView | null, (f: () => Promise<void>) => Promise<void>] {
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<ProblemView | null>(null);
-  const run = async (f: () => Promise<void>) => {
-    setBusy(true);
-    setProblem(null);
-    try {
-      await f();
-    } catch (e) {
-      setProblem(problemOf(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return [busy, problem, run];
 }
 
 const PROTECTIONS: [string, string][] = [
@@ -330,11 +291,6 @@ function Mac({ h, choice }: { h: HubView; choice: "yes" | "no" | null }) {
       )}
     </div>
   );
-}
-
-function savedFor(text: string): void {
-  history.pushState(null, "", `/setup?saved=${encodeURIComponent(text)}`);
-  setTimeout(() => history.replaceState(null, "", "/setup"), 1500);
 }
 
 function Certificate({ h }: { h: HubView }) {
@@ -700,128 +656,6 @@ function Projects({ h }: { h: HubView }) {
           <Icon name="arrow" />
         </button>
       </div>
-    </div>
-  );
-}
-
-function SparkleKey({ h, label }: { h: HubView; label: string }) {
-  const [account, setAccount] = useState("ed25519");
-  const [read, setRead] = useState<{ publicKey: string; users: string[]; key: string } | null>(null);
-  const [shown, setShown] = useState(false);
-  const [busy, problem, run] = useAction();
-  if (!read) {
-    return (
-      <form
-        class="card pad stack tight"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void run(async () => setRead(await post("/api/hub/sparkle/read", { hub: h.name, label, account })));
-        }}
-      >
-        <strong>
-          Sparkle key <code>{label}</code>
-        </strong>
-        <p class="muted small">tapster reads it from your login keychain, where Sparkle's generate_keys keeps it. macOS asks you first; choose Allow.</p>
-        <div class="row" style="flex-wrap: nowrap; align-items: end">
-          <Field name={`account-${label}`} label="Keychain account" value={account} mono onInput={setAccount} />
-          <Busy busy={busy} class="btn primary" type="submit">
-            <Icon name="key" />
-            Read it from my keychain
-          </Busy>
-        </div>
-        <Problem problem={problem} />
-      </form>
-    );
-  }
-  const submit = (e: Event) => {
-    e.preventDefault();
-    const pasted = String(new FormData(e.currentTarget as HTMLFormElement).get("password") ?? "");
-    void run(async () => {
-      await post("/api/hub/sparkle/store", { hub: h.name, label, pasted });
-      savedFor(`sparkle-${label}`);
-      await loadHub();
-      say("ok", `Stored the Sparkle key ${label} in the hub.`);
-    });
-  };
-  return (
-    <div class="card pad stack tight">
-      <strong>
-        Sparkle key <code>{label}</code>
-      </strong>
-      <p class="muted small">
-        It signs updates for {read.users.join(", ")}. Its public key, <code>{read.publicKey}</code>, matches tapster.yml.
-      </p>
-      <div class="cmd">
-        <code>{shown ? read.key : "•".repeat(32)}</code>
-        <button type="button" class="btn quiet small" onClick={() => setShown(!shown)} aria-pressed={shown}>
-          {shown ? "Hide" : "Show"}
-        </button>
-        <Copy text={read.key} />
-      </div>
-      <Note tone="keys" title="Keep a copy outside your Mac">
-        <span>If this key is lost, installed copies of the app can never update again. Paste it below: your password manager offers to save it when you store the key. tapster checks that the pasted key is the right one.</span>
-      </Note>
-      <form class="secret" onSubmit={submit} autoComplete="on">
-        <Field name="username" label="Name in your password manager" value={`${h.name}: Sparkle key ${label}`} autoComplete="username" />
-        <Password name="password" label="Paste the key" hint="The key from the box above, pasted as it is." />
-        <Problem problem={problem} />
-        <div class="row">
-          <Busy busy={busy} class="btn primary" type="submit">
-            Store in the hub
-          </Busy>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function Extras({ h }: { h: HubView }) {
-  const repo = h.name.split("/")[1]!;
-  const missing = h.extras.sparkle.filter((s) => !s.stored);
-  return (
-    <div class="panel">
-      <Head title="Optional extras" lead="The hub works without these. The doorbell and the apt and dnf key run in a terminal for now, in a clone of the hub, because they need Wrangler or gpg on your computer." />
-      <Cmd text={`gh repo clone ${h.name} && cd ${repo}`} />
-      <section class="stack tight">
-        <div class="spread">
-          <h3 class="section-title">Faster releases: the doorbell</h3>
-          <Badge tone={h.extras.doorbell ? "ok" : undefined}>{h.extras.doorbell ? "On" : "Off"}</Badge>
-        </div>
-        <p class="muted">A small Worker on your own Cloudflare account starts the hub as soon as a project opens its draft, instead of at the next scheduled run. Wrangler asks you to sign in to Cloudflare in your browser.</p>
-        {!h.extras.doorbell && <Cmd text="bunx @doguyilmaz/tapster init --doorbell" />}
-        <a href="https://tapster.doguyilmaz.com/guides/doorbell/" target="_blank" rel="noopener noreferrer" class="small">
-          Read the doorbell guide
-        </a>
-      </section>
-      <section class="stack tight">
-        <div class="spread">
-          <h3 class="section-title">apt and dnf repositories</h3>
-          <Badge tone={h.extras.linux.stored ? "ok" : h.extras.linux.wanted ? "warn" : undefined}>{h.extras.linux.stored ? "Key stored" : h.extras.linux.wanted ? "Key missing" : "Off"}</Badge>
-        </div>
-        <p class="muted">{h.extras.linux.wanted && !h.extras.linux.stored ? "tapster.yml asks for Linux packages, but the hub has no key to sign them yet." : "Linux users install your command line tools with apt and dnf from the hub's GitHub Pages. tapster makes the signing key with gpg and keeps a copy in your keychain."}</p>
-        {!h.extras.linux.stored && <Cmd text="bunx @doguyilmaz/tapster init --linux" />}
-        <a href="https://tapster.doguyilmaz.com/guides/linux/" target="_blank" rel="noopener noreferrer" class="small">
-          Read the apt and dnf guide
-        </a>
-      </section>
-      {h.extras.sparkle.length > 0 && (
-        <section class="stack tight">
-          <div class="spread">
-            <h3 class="section-title">Sparkle keys</h3>
-            <Badge tone={missing.length ? "warn" : "ok"}>{missing.length ? `${missing.length} missing` : "All stored"}</Badge>
-          </div>
-          <p class="muted">Each Mac app signs its update feed with a Sparkle key. tapster keeps it in your keychain and in the hub.</p>
-          {missing[0] && <SparkleKey key={missing[0].label} h={h} label={missing[0].label} />}
-          {missing.length > 1 && <p class="muted small">Then: {missing.slice(1).map((s) => s.label).join(", ")}. One key at a time, so your password manager saves each under its own name.</p>}
-          <p class="faint small">
-            No key yet? Make one in a terminal with <code>bunx @doguyilmaz/tapster init --sparkle &lt;label&gt; --new</code>; see the{" "}
-            <a href="https://tapster.doguyilmaz.com/guides/sparkle/" target="_blank" rel="noopener noreferrer">
-              Sparkle guide
-            </a>
-            .
-          </p>
-        </section>
-      )}
     </div>
   );
 }

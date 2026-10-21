@@ -7,7 +7,7 @@ const out = join(import.meta.dir, "..", "..", "site", "src", "assets", "setup");
 const tmp = process.argv[2] ?? "/tmp";
 mkdirSync(out, { recursive: true });
 const links: string[] = [];
-const { fake } = await demo(8297, (line) => {
+const { fake, cf } = await demo(8297, (line) => {
   const m = /http:\/\/127\.0\.0\.1:\d+\/#c=[0-9a-f]+/.exec(line);
   if (m) links.push(m[0]);
 });
@@ -24,6 +24,13 @@ const shot = async (name: string) => {
 const sheetShot = async (name: string, heading: string) => {
   await Bun.sleep(300);
   await page.eval(`(() => { const s = document.querySelector('.sheet'); const h = [...s.querySelectorAll('h3, strong')].find((e) => e.textContent.includes(${JSON.stringify(heading)})); s.scrollTop = h.getBoundingClientRect().top + s.scrollTop - 100; document.querySelectorAll('.toast').forEach((t) => t.remove()); })()`);
+  await Bun.sleep(150);
+  const png = join(tmp, `${name}.png`);
+  await page.shot(png, false);
+  await sharp(png).resize({ width: 1600 }).webp({ quality: 82 }).toFile(join(out, `${name}.webp`));
+};
+const sectionShot = async (name: string, heading: string) => {
+  await page.eval(`(() => { document.querySelectorAll('.toast').forEach((t) => t.remove()); const h = [...document.querySelectorAll('h3')].find((e) => e.textContent.includes(${JSON.stringify(heading)})); window.scrollTo(0, h.getBoundingClientRect().top + window.scrollY - 90); })()`);
   await Bun.sleep(150);
   const png = join(tmp, `${name}.png`);
   await page.shot(png, false);
@@ -82,6 +89,19 @@ try {
   await page.clickText("Health", "nav a");
   await page.waitFor("document.querySelector('.card.list')", 15000);
   await shot("health");
+  await page.size(1280, 1000);
+  await page.clickText("Setup", "nav a");
+  await page.clickText("Optional extras", ".route button");
+  await page.type("input[name=token]", cf.token);
+  await page.clickText("Check the token");
+  await page.waitFor("document.querySelector('form[action^=\"https://github.com/settings/apps/new\"]')", 15000);
+  await sectionShot("doorbell", "Faster releases: the doorbell");
+  await page.clickText("Make the signing key");
+  await page.waitFor("document.body.textContent.includes('Fingerprint')", 60000);
+  await page.type("input[name=maintainer]", "Octo Cat <octo@example.com>");
+  await page.clickText("Ship aims to apt and dnf", "label");
+  await page.size(1280, 720);
+  await sectionShot("linux", "apt and dnf repositories");
   console.log("docs shots written to", out);
 } catch (e) {
   console.error("FAILED:", (e as Error).message);

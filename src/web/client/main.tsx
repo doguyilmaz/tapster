@@ -7,7 +7,7 @@ import { Health } from "./health";
 import { HubChooser } from "./hubs";
 import { Projects } from "./projects";
 import { Setup } from "./setup";
-import { account, appResult, chooseHub, go, hubName, loadAccount, loadHub, path, problemOf, say, session, toast } from "./state";
+import { account, appResult, chooseHub, doorbellResult, go, hubName, loadAccount, loadHub, openStop, path, problemOf, say, session, toast } from "./state";
 import { Icon, Note } from "./ui";
 
 type Boot = { kind: "claiming" } | { kind: "ready" } | { kind: "no-session" } | { kind: "failed"; problem: ProblemView } | { kind: "stopped" };
@@ -17,11 +17,15 @@ const choosing = signal(false);
 function readReturn(): void {
   const q = new URLSearchParams(location.search);
   const app = q.get("app");
-  if (!app) return;
+  const bell = q.get("doorbell");
+  if (!app && !bell) return;
   const name = q.get("hub");
   if (name && name !== hubName.value) chooseHub(name);
   const problem = { reason: q.get("reason") ?? "the App could not be created", fix: q.get("fix") ?? "Try again." };
-  if (app === "created") appResult.value = { kind: "created" };
+  if (bell) {
+    doorbellResult.value = bell === "created" ? { kind: "created" } : { kind: bell === "unstored" ? "unstored" : "failed", problem };
+    openStop.value = "extras";
+  } else if (app === "created") appResult.value = { kind: "created" };
   else if (app === "failed" || app === "unstored") appResult.value = { kind: app, problem };
   else appResult.value = { kind: "unknown" };
   history.replaceState(null, "", location.pathname);

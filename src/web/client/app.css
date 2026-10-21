@@ -107,6 +107,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 1.75rem 1.25rem 4rem; }
 .row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .stack { display: grid; gap: 1rem; }
 .stack.tight { gap: 0.5rem; }
+.steps { list-style: none; margin: 0; padding: 0; gap: 0.75rem; }
 .spread { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 
 /* icons */

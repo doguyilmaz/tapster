@@ -69,7 +69,10 @@ export async function loadHubs(): Promise<void> {
 }
 
 export function chooseHub(name: string | null): void {
-  if (name !== hubName.value) appResult.value = null;
+  if (name !== hubName.value) {
+    appResult.value = null;
+    doorbellResult.value = null;
+  }
   hubName.value = name;
   remember(HUB_KEY, name);
   hub.value = null;
@@ -171,6 +174,8 @@ export function setMac(name: string, choice: "yes" | "no"): void {
 export const openStop = signal<string | null>(null);
 
 export const appResult = signal<{ kind: "created" } | { kind: "failed" | "unstored"; problem: Problem } | { kind: "unknown" } | null>(null);
+
+export const doorbellResult = signal<{ kind: "created" } | { kind: "failed" | "unstored"; problem: Problem } | null>(null);
 
 export function tilde(path: string): string {
   const home = session.value?.home;

@@ -33,7 +33,8 @@ Add `--every <minutes>` to change how often the hub looks for drafts in the same
 
 ## If the hub has a doorbell
 
-The doorbell runs its own copy of tapster's Worker. Move it to the same version and schedule:
+The doorbell runs its own copy of tapster's Worker. Move it to the same version and schedule. tapster asks for a new
+private key of the doorbell App and a Cloudflare token:
 
 ```sh
 bunx @doguyilmaz/tapster@<version> init --rotate doorbell

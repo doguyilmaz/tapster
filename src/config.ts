@@ -8,6 +8,7 @@ export { TAG, compareSemver, parseTag, type Semver } from "./semver";
 export const PLATFORMS = ["darwin-universal", "darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", "windows-amd64", "windows-arm64"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 export const NAME = /^[a-z0-9][a-z0-9-]*$/;
+export const MAINTAINER = /^[A-Za-z0-9 .'-]+ <[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}>$/;
 export const ENTITLEMENTS = [
   "com.apple.security.cs.allow-jit",
   "com.apple.security.cs.allow-unsigned-executable-memory",
@@ -113,7 +114,7 @@ const hub = z
     tap: z.string().regex(/^[A-Za-z0-9-]+\/[a-z0-9-]+$/),
     linux: z
       .object({
-        maintainer: z.string().regex(/^[A-Za-z0-9 .'-]+ <[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}>$/),
+        maintainer: z.string().regex(MAINTAINER),
         url: z.url({ protocol: /^https$/ }).regex(/^https:\/\/[A-Za-z0-9.-]+(\/[A-Za-z0-9._-]+)*$/).optional(),
       })
       .strict()

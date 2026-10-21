@@ -19,7 +19,9 @@ export function cleanupTemps(): void {
   for (const dir of [...dirs]) removeTemp(dir);
 }
 
-process.on("SIGINT", () => {
-  cleanupTemps();
-  process.exit(130);
-});
+for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]] as const) {
+  process.on(signal, () => {
+    cleanupTemps();
+    process.exit(code);
+  });
+}

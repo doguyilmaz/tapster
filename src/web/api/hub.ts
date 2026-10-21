@@ -5,7 +5,7 @@ import { type HubConfig, isApp, macosCode, parseHub } from "../../config";
 import { GitHubError, TapsterError } from "../../errors";
 import { foreignWrites } from "../../foreign";
 import { GitHub } from "../../github";
-import { commitToHub, readHubFile } from "../../hubcommit";
+import { readHubFile } from "../../hubcommit";
 import { appJwt, installationRepos } from "../../token";
 import { TAPSTER } from "../../version";
 import { P12_LIMIT, P8_LIMIT, inspectP12, notaryKey, saveCertificate, saveNotary } from "../../cli/apple";
@@ -20,8 +20,12 @@ import { protectHub } from "../../cli/init";
 import { everyFromFlow } from "../../cli/schedule";
 import type { AccountView, AppStart, FilePlan, FilesView, HealthView, HubChoice, HubView, InstallView, OtherWorkflow } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
+import { checkHub, checkedMain, hubFrom, lockedEnvironment, me, or404, writeMain } from "./access";
+import { bellCallback, doorbellView } from "./doorbell";
+import { linuxView } from "./linux";
 
-const HUB = /^[A-Za-z0-9-]+\/homebrew-[A-Za-z0-9._-]+$/;
+export { checkHub, me };
+
 const ISSUE_TITLE = "tapster: the hub needs attention";
 
 export async function account(s: Session): Promise<AccountView> {
@@ -45,32 +49,6 @@ export async function account(s: Session): Promise<AccountView> {
   const scopes = header === null ? null : header.split(",").map((x) => x.trim());
   return { state: "ok", login: user.login, missing: scopes === null ? [] : ["repo", "workflow"].filter((x) => !scopes.includes(x)) };
 }
-
-export async function me(s: Session): Promise<{ gh: GitHub; login: string }> {
-  const gh = await s.deps.github();
-  s.login ??= (await gh.json<{ login: string }>("GET", "/user")).login;
-  return { gh, login: s.login };
-}
-
-export function checkHub(name: unknown, owner: string): string {
-  if (typeof name !== "string" || !HUB.test(name)) throw new TapsterError("that is not a hub name", "A hub is one of your repositories whose name starts with homebrew-, such as you/homebrew-tap.");
-  if (name.split("/")[0]!.toLowerCase() !== owner.toLowerCase()) throw new TapsterError(`${name} does not belong to ${owner}`, "tapster serves repositories of your own account.");
-  return name;
-}
-
-async function hubFrom(c: Ctx, value: unknown): Promise<{ gh: GitHub; hub: string; login: string }> {
-  const { gh, login } = await me(c.s);
-  return { gh, hub: checkHub(value, login), login };
-}
-
-const or404 = async <T>(p: Promise<T>): Promise<T | null> => {
-  try {
-    return await p;
-  } catch (e) {
-    if (e instanceof GitHubError && e.status === 404) return null;
-    throw e;
-  }
-};
 
 const mainRef = async (gh: GitHub, hub: string): Promise<string | null> => {
   try {
@@ -195,8 +173,8 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
     invalid: (parsed?.invalid ?? []).map((i) => ({ name: i.name, reason: i.reason })),
     issue: issue ? { url: issue.html_url, number: issue.number, updated: issue.updated_at, body: issue.body ?? "" } : null,
     extras: {
-      doorbell: v("TAPSTER_DOORBELL") !== null,
-      linux: { wanted: parsed?.config.packages.some((p) => !isApp(p) && p.linux) ?? false, stored: names(secrets).includes("TAPSTER_LINUX_KEY") },
+      doorbell: doorbellView(s, hub, v),
+      linux: await linuxView(s, hub, config, parsed?.config ?? null, names(secrets)),
       sparkle: (parsed ? sparkleLabels(parsed.config) : []).map((label) => ({ label, stored: names(secrets).includes(`SPARKLE_KEY_${label.toUpperCase()}`) })),
     },
   };
@@ -209,27 +187,6 @@ async function installView(s: Session, hub: string): Promise<InstallView> {
   const state = await appInstallation(held.id, held.pem, owner, hub, new GitHub(appJwt(held.id, held.pem), s.deps.fetch));
   const repos = state.id === null ? [] : ((await installationRepos(held.id, held.pem, owner, s.deps.fetch)) ?? []);
   return { checked: true, id: state.id, onHub: state.onHub, repos };
-}
-
-async function lockedEnvironment(gh: GitHub, hub: string): Promise<void> {
-  const env = await or404(gh.json<{ deployment_branch_policy: { custom_branch_policies: boolean } | null }>("GET", `/repos/${hub}/environments/tapster`));
-  const policies = env ? await gh.json<{ branch_policies: { name: string; type?: string }[] }>("GET", `/repos/${hub}/environments/tapster/deployment-branch-policies`) : { branch_policies: [] };
-  const locked = Boolean(env?.deployment_branch_policy?.custom_branch_policies) && policies.branch_policies.length === 1 && policies.branch_policies[0]!.name === "main" && (policies.branch_policies[0]!.type ?? "branch") === "branch";
-  if (!locked) throw new TapsterError(`${hub}'s tapster environment is not locked to main`, "Protect the hub first: keys go into that environment only once workflows on other branches cannot open it.");
-}
-
-async function guardMain(gh: GitHub, hub: string, owner: string): Promise<void> {
-  const writes = await foreignWrites(gh, hub, owner).catch((e) => {
-    if (e instanceof GitHubError && e.status === 404) return [];
-    throw e;
-  });
-  const real = writes.filter((w) => !w.startsWith("GitHub shows no push by"));
-  if (real.length) {
-    throw new TapsterError(
-      `main changed in ways only you may change it: ${real.join("; ")}`,
-      "Review those commits on GitHub and revert what you did not make. tapster writes nothing to main until then, because a write from you would mark them as reviewed.",
-    );
-  }
 }
 
 const hubBody = z.object({ hub: z.string() }).strict();
@@ -260,6 +217,7 @@ export async function appCallback(c: Ctx): Promise<Response> {
   const pending = c.s.pending.get(state);
   if (!pending || !/^[A-Za-z0-9_-]{1,128}$/.test(code)) return back({ app: "unknown" });
   c.s.pending.delete(state);
+  if (pending.kind === "doorbell") return bellCallback(c, pending, code, back);
   let created: Awaited<ReturnType<typeof convertManifest>>;
   try {
     created = await convertManifest(code, pending.owner, "If GitHub created the App anyway, delete it at https://github.com/settings/apps first, because its name would block a new one. Then create it again.", c.s.deps.fetch);
@@ -366,10 +324,9 @@ async function filesCommit(c: Ctx) {
     await gh.json("PUT", `/repos/${hub}/contents/README.md`, { message: "Start the tap", content: Buffer.from(readme.content).toString("base64"), branch: "main" });
     if ((await gh.json<{ default_branch: string }>("GET", `/repos/${hub}`)).default_branch !== "main") await gh.json("PATCH", `/repos/${hub}`, { default_branch: "main" });
   }
-  await guardMain(gh, hub, login);
-  const result = await commitToHub(gh, hub, "Set up tapster", async (read) => {
+  const result = await writeMain(gh, hub, login, async (_, read) => {
     const plan = await filePlan(c, gh, hub, q.every, q.remove, q.readme, read);
-    return plan.files.filter((f) => f.change !== "same").map((f) => ({ path: f.path, content: f.change === "remove" ? null : f.content }));
+    return { message: "Set up tapster", files: plan.files.filter((f) => f.change !== "same").map((f) => ({ path: f.path, content: f.change === "remove" ? null : f.content })) };
   });
   return { result };
 }
@@ -415,13 +372,12 @@ async function sparkleStore(c: Ctx) {
   if (body.pasted.trim() !== held.seed) throw new TapsterError("that is not the key shown above", "Paste the key itself, so the copy your password manager keeps is the right one.");
   const config = await sparkleConfig(gh, hub, body.label);
   await lockedEnvironment(gh, hub);
-  await guardMain(gh, hub, login);
+  await checkedMain(gh, hub, login);
   await setEnvSecret(hub, `SPARKLE_KEY_${body.label.toUpperCase()}`, held.seed);
-  const result = await commitToHub(gh, hub, `Pass the Sparkle key ${body.label} to the hub workflow`, async (read) => {
+  const result = await writeMain(gh, hub, login, async (_, read) => {
     const flow = await read(FLOW);
-    if (flow === null) return [];
-    const next = patchSparkleEnv(flow, sparkleLabels(config));
-    return next === flow ? [] : [{ path: FLOW, content: next }];
+    const next = flow === null ? null : patchSparkleEnv(flow, sparkleLabels(config));
+    return { message: `Pass the Sparkle key ${body.label} to the hub workflow`, files: next === null || next === flow ? [] : [{ path: FLOW, content: next }] };
   });
   c.s.sparkle.delete(`${hub} ${body.label}`);
   return { stored: true, workflow: result };

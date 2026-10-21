@@ -10,8 +10,9 @@ Run each command with `bunx @doguyilmaz/tapster <command>`. Every command takes 
 ## tapster setup
 
 Opens the setup in your browser: choosing the hub, its protection, the GitHub App, the Apple credentials, the hub files,
-the projects on your computer and the hub's health. It does what `init`, `add` and `doctor` do. It needs no clone of the
-hub. See [Create the hub](/tutorial/hub/).
+the projects on your computer and the hub's health. Under **Optional extras** it also deploys the
+[doorbell](/guides/doorbell/), makes the [apt and dnf](/guides/linux/) key and stores Sparkle keys. It does what `init`,
+`add` and `doctor` do. It needs no clone of the hub. See [Create the hub](/tutorial/hub/).
 
 | Option | What it does |
 | --- | --- |
@@ -35,12 +36,12 @@ rewrite the hub workflow for the tapster that runs them; review the diff before 
 | `init --tapster <commit>` | Pins the workflow to a specific tapster commit. Goes with `init` or `init --workflow`. |
 | `init --sparkle <label> [--account <account>]` | Stores a Sparkle key from your login keychain in the hub. See [Mac apps with Sparkle](/guides/sparkle/). |
 | `init --sparkle <label> --new` | Makes a new Sparkle key, keeps it in your login keychain and stores it in the hub. |
-| `init --linux` | Makes the key that signs the apt and dnf repositories and turns on GitHub Pages. See [apt and dnf](/guides/linux/). |
-| `init --doorbell` | Deploys the Worker that starts the hub when a project releases. See [Faster releases](/guides/doorbell/). |
+| `init --linux` | Makes the key that signs the apt and dnf repositories and turns on GitHub Pages. Needs GnuPG. See [apt and dnf](/guides/linux/). |
+| `init --doorbell` | Deploys the Worker that starts the hub when a project releases, through Cloudflare's API. Asks for a Cloudflare API token with a hidden prompt. Set `CLOUDFLARE_API_TOKEN` to skip the prompt. When the token reaches several accounts, tapster asks which one; `CLOUDFLARE_ACCOUNT_ID` answers that in advance. See [Faster releases](/guides/doorbell/). |
 | `init --rotate app` | Stores a new private key for the hub's App. |
 | `init --rotate certificate` | Stores a new Developer ID certificate. |
 | `init --rotate notary` | Stores a new App Store Connect API key. |
-| `init --rotate doorbell` | Gives the doorbell a new key and redeploys it with the tapster you run and the hub's schedule. |
+| `init --rotate doorbell` | Gives the doorbell a new key and redeploys it with the tapster you run and the hub's schedule. Asks for the token the same way. |
 | `init --rotate linux` | Makes a new Linux key. The old one keeps signing next to it. |
 | `init --rotate linux --finish` | Stops signing with the previous Linux key. |
 

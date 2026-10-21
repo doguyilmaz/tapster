@@ -1,0 +1,90 @@
+---
+title: "apt and dnf"
+description: "Publish Linux packages from your hub's GitHub Pages site."
+sidebar:
+  order: 4
+---
+import { Image } from "astro:assets";
+import linux from "../../../assets/setup/linux.webp";
+
+Your hub can turn the Linux archives of a command line tool into `.deb` and `.rpm` packages. It serves them as apt and
+dnf repositories from the hub's GitHub Pages site, signed with a key of your own.
+
+The project's releases must include Linux archives. tapster's Bun workflow builds them. With GoReleaser, keep `linux` in
+the build's `goos` list.
+
+## 1. Make the signing key
+
+You need GnuPG on your computer (`brew install gnupg`). On Linux you also need `secret-tool`, so tapster can keep a copy
+of the key.
+
+In [tapster setup](/tutorial/hub/), open **Optional extras** and click **Make the signing key** under
+**apt and dnf repositories**. If GnuPG is missing, the page shows the command that installs it and a **Check again**
+button.
+
+tapster turns on GitHub Pages for the hub, with GitHub Actions as the source. It makes an RSA 4096 key with GnuPG on your
+computer and stores it.
+
+:::tip[You should see]{icon="approve-check-circle"}
+The key's **Fingerprint** (40 letters and digits) and the badge **Key stored**.
+:::
+
+Prefer a terminal? In a clone of your hub, run:
+
+```sh
+bunx @doguyilmaz/tapster init --linux
+```
+
+:::note[Where your keys go]{icon="padlock"}
+The key is a secret of your hub's `tapster` environment. tapster also keeps it in your login keychain (or the Secret
+Service on Linux), because GitHub never gives a secret back. Nothing else holds it.
+:::
+
+## 2. Pick the tools
+
+Below the key, tapster setup lists every command line tool in `tapster.yml` that maps a `linux-amd64` or `linux-arm64`
+archive.
+
+<Image src={linux} alt="The apt and dnf repositories section after the key is made: its fingerprint, a Maintainer field and a box to ship aims to apt and dnf, with a Write to tapster.yml button." />
+
+1. Fill in **Maintainer** as `Name <address>`. Every `.deb` and `.rpm` names this person.
+2. Tick each tool that should ship to apt and dnf.
+3. Click **Write to tapster.yml**. tapster writes the change to the hub's `main` in one commit. Like the hub files, it
+   refuses while `main` holds commits that are not yours.
+
+To edit `tapster.yml` by hand instead, name a maintainer once and set `linux: true` on each tool with Linux builds:
+
+```yaml
+linux: { maintainer: "Your Name <you@example.com>" }
+packages:
+  - name: mytool
+    # the rest of the entry stays as it is
+    linux: true
+```
+
+Then commit and push `tapster.yml`.
+
+## 3. Release
+
+At the next release of the tool, the hub builds a `.deb` and an `.rpm` for each architecture from the published Linux
+archives. A second job, the only one that holds the key, checks every package against those archives, signs the rpms
+and the repository metadata and publishes the site.
+
+:::tip[You should see]{icon="approve-check-circle"}
+Your hub's Pages site, at `https://<you>.github.io/<hub>/`, shows the two commands users run to add the repository.
+:::
+
+## Rotate the key
+
+Rotation runs in a terminal, in a clone of your hub:
+
+```sh
+bunx @doguyilmaz/tapster init --rotate linux
+```
+
+The new key signs next to the old one, so users can fetch it before the old one stops. Once they have had time to update,
+stop signing with the old key:
+
+```sh
+bunx @doguyilmaz/tapster init --rotate linux --finish
+```

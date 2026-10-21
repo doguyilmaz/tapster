@@ -1,6 +1,8 @@
 import type { ComponentChildren, JSX } from "preact";
 import { useState } from "preact/hooks";
+import type { Problem as ProblemView } from "../contract";
 import { capFirst } from "../steps";
+import { problemOf } from "./state";
 
 const PATHS: Record<string, JSX.Element> = {
   check: <path d="M20 6 9 17l-5-5" />,
@@ -187,13 +189,13 @@ export function FileDrop(props: { name: string; accept: string; label: string; h
   );
 }
 
-export function Password({ name, label, hint, autoComplete = "current-password" }: { name: string; label: string; hint?: ComponentChildren; autoComplete?: string }) {
+export function Password({ name, id = name, label, hint, autoComplete = "current-password" }: { name: string; id?: string; label: string; hint?: ComponentChildren; autoComplete?: string }) {
   const [shown, setShown] = useState(false);
   return (
     <div class="field">
-      <label for={name}>{label}</label>
+      <label for={id}>{label}</label>
       <div class="with-toggle">
-        <input class="input" id={name} name={name} type={shown ? "text" : "password"} autoComplete={autoComplete} spellcheck={false} autoCapitalize="off" autoCorrect="off" />
+        <input class="input" id={id} name={name} type={shown ? "text" : "password"} autoComplete={autoComplete} spellcheck={false} autoCapitalize="off" autoCorrect="off" />
         <button type="button" class="btn quiet small" onClick={() => setShown(!shown)} aria-pressed={shown}>
           {shown ? "Hide" : "Show"}
         </button>
@@ -203,13 +205,13 @@ export function Password({ name, label, hint, autoComplete = "current-password" 
   );
 }
 
-export function Field({ name, label, hint, value, placeholder, mono, autoComplete = "off", onInput }: { name: string; label: string; hint?: ComponentChildren; value?: string; placeholder?: string; mono?: boolean; autoComplete?: string; onInput?: (v: string) => void }) {
+export function Field({ name, id = name, label, hint, value, placeholder, mono, autoComplete = "off", onInput }: { name: string; id?: string; label: string; hint?: ComponentChildren; value?: string; placeholder?: string; mono?: boolean; autoComplete?: string; onInput?: (v: string) => void }) {
   return (
     <div class="field">
-      <label for={name}>{label}</label>
+      <label for={id}>{label}</label>
       <input
         class={`input${mono ? " mono" : ""}`}
-        id={name}
+        id={id}
         name={name}
         value={value}
         placeholder={placeholder}
@@ -231,4 +233,49 @@ export function Busy({ busy, children, ...rest }: { busy: boolean; children: Com
       {children}
     </button>
   );
+}
+
+export function Head({ title, lead, children }: { title: string; lead: string; children?: preact.ComponentChildren }) {
+  return (
+    <div class="panel-head">
+      <div class="spread">
+        <h2 class="title">{title}</h2>
+        {children}
+      </div>
+      <p class="lead">{lead}</p>
+    </div>
+  );
+}
+
+export function Done({ text }: { text: string }) {
+  return (
+    <div class="row">
+      <span class="seal" aria-hidden="true">
+        <Icon name="check" />
+      </span>
+      <strong>{text}</strong>
+    </div>
+  );
+}
+
+export function useAction(): [boolean, ProblemView | null, (f: () => Promise<void>) => Promise<void>] {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<ProblemView | null>(null);
+  const run = async (f: () => Promise<void>) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      await f();
+    } catch (e) {
+      setProblem(problemOf(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return [busy, problem, run];
+}
+
+export function savedFor(text: string): void {
+  history.pushState(null, "", `/setup?saved=${encodeURIComponent(text)}`);
+  setTimeout(() => history.replaceState(null, "", "/setup"), 1500);
 }

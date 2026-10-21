@@ -4,9 +4,12 @@ import type { GitHub } from "../github";
 import { runPath } from "../run";
 import { TAPSTER } from "../version";
 import { verifyNotary } from "../cli/apple";
-import { requireStore } from "../cli/keystore";
+import { localStore, requireStore } from "../cli/keystore";
+import { findGpg } from "../cli/linuxkey";
 import { currentRepo, userGitHub } from "../cli/gh";
 import { hubRoutes, appCallback } from "./api/hub";
+import { doorbellRoutes } from "./api/doorbell";
+import { linuxRoutes } from "./api/linux";
 import { entryRoutes } from "./api/entry";
 import { projectRoutes } from "./api/projects";
 import { statusRoutes } from "./api/status";
@@ -35,6 +38,8 @@ export function setupOptions(args: string[]): SetupOptions {
 export function routes(s: Session, quit: () => void): Routes {
   return {
     ...hubRoutes,
+    ...doorbellRoutes,
+    ...linuxRoutes,
     ...projectRoutes,
     ...statusRoutes,
     ...entryRoutes,
@@ -72,6 +77,8 @@ export function realDeps(pin: string | null): Deps {
     open: openBrowser,
     notary: verifyNotary,
     keychain: (account) => requireStore("the Sparkle key").read({ service: "https://sparkle-project.org", account, label: "Private key for signing Sparkle updates" }),
+    gpg: () => findGpg(),
+    store: () => localStore(),
   };
 }
 

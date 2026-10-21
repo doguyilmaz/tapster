@@ -1,27 +1,17 @@
 import { createPrivateKey } from "node:crypto";
-import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
-import { delimiter, join } from "node:path";
-import { type HubConfig } from "../config";
-import { TapsterError } from "../errors";
+import { parseHub } from "../config";
+import { GitHubError, TapsterError } from "../errors";
 import { GitHub } from "../github";
-import { runPath } from "../run";
+import { register } from "../mask";
 import { appJwt } from "../token";
 import ringYaml from "../../templates/project/ring.yml" with { type: "text" };
-import wranglerLock from "../../templates/wrangler/bun.lock" with { type: "text" };
-import wranglerPackage from "../../templates/wrangler/package.json";
-import * as jwtText from "../doorbell/jwt.ts" with { type: "text" };
-import * as workerText from "../doorbell/worker.ts" with { type: "text" };
 import { appFromManifest, openUrl } from "./appflow";
-import { hubEnv, setEnvVariable } from "./gh";
+import { Cloudflare, type CloudflareAccount, type CloudflareTarget, TOKEN_PAGE, accountTarget, deployWorker, pickAccount, tokenAccounts } from "./cloudflare";
+import { hubEnv, setEnvVariable, setRepoVariable } from "./gh";
 import { cleanPath, readInput } from "./paths";
 import { waitFor } from "./poll";
 import { ask } from "./prompt";
-import { removeTemp, tempDir } from "./temp";
 import { workerCron } from "./schedule";
-
-const source = (m: unknown) => (m as { default: string }).default;
 
 export const ringStep = (indent: number) =>
   ringYaml
@@ -42,40 +32,21 @@ export function doorbellManifest(owner: string, hub: string, redirect: string): 
   };
 }
 
+export function doorbellRepos(text: string, owner: string): string[] {
+  const { config, invalid } = parseHub(text, owner);
+  const repos = [...config.packages.map((p) => p.repo), ...invalid.flatMap((i) => (i.repo && /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(i.repo) ? [i.repo] : []))];
+  return repos.filter((r, at) => repos.findIndex((x) => x.toLowerCase() === r.toLowerCase()) === at);
+}
+
 export type DoorbellVars = { APP_ID: string; INSTALLATION_ID: string; HUB: string; HUB_ID: string; OWNER_ID: string; INTERVAL: string };
 
-export function doorbellConfig(vars: DoorbellVars): string {
+export function checkVars(vars: DoorbellVars): DoorbellVars {
   for (const k of ["APP_ID", "INSTALLATION_ID", "HUB_ID", "OWNER_ID", "INTERVAL"] as const) {
     if (!/^[0-9]+$/.test(vars[k])) throw new TapsterError(`${k} must be a number`, "Run tapster init --doorbell again.");
   }
   if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(vars.HUB)) throw new TapsterError("the hub name is not owner/repo", "Run it in the hub clone.");
-  const triggers = { crons: [workerCron(Number(vars.INTERVAL))] };
-  return `${JSON.stringify({ name: "tapster-doorbell", main: "worker.ts", compatibility_date: "2026-10-01", workers_dev: true, vars, triggers }, null, 2)}\n`;
+  return vars;
 }
-
-export function workerOrigin(output: string): string | null {
-  for (const line of output.split("\n")) {
-    let entry: { type?: unknown; targets?: unknown };
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (entry.type !== "deploy" || !Array.isArray(entry.targets)) continue;
-    for (const t of entry.targets) {
-      if (typeof t === "string" && /^https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev\/?$/.test(t)) return new URL(t).origin;
-    }
-  }
-  return null;
-}
-
-export function wranglerSaid(r: { stdout: string; stderr?: string }): string {
-  const lines = `${r.stdout}\n${r.stderr ?? ""}`.split("\n").map((l) => l.trim()).filter(Boolean);
-  const errors = lines.filter((l) => /\[ERROR\]/.test(l));
-  return (errors.length ? errors : lines).slice(-2).join(" / ") || "no output";
-}
-
-export const bunEnv = (path: string) => ({ PATH: path, BUN_BE_BUN: "1" });
 
 type Vars = { variables: { name: string; value: string }[] };
 
@@ -85,139 +56,196 @@ export function doorbellStage(vars: Vars): "new" | "resume" | "done" {
   return has("TAPSTER_DOORBELL_APP_ID") && has("TAPSTER_DOORBELL_APP_SLUG") ? "resume" : "new";
 }
 
-const AGAIN = "Run tapster init --doorbell again; it continues with the App it already created.";
-
-async function askKey(appId: string, slug: string): Promise<string> {
-  console.log(`Open the doorbell App's settings, scroll to "Private keys" and click "Generate a private key":`);
-  openUrl(`https://github.com/settings/apps/${slug}`);
-  const path = cleanPath(await ask("Path of the downloaded .pem file (drag it here): "));
-  const pem = (await readInput(path, "the .pem file")).toString("utf8");
-  await new GitHub(appJwt(appId, pem)).json("GET", "/app").catch(() => {
-    throw new TapsterError("that key does not belong to the doorbell App", `Generate the key on https://github.com/settings/apps/${slug}.`);
-  });
-  console.log(`Once tapster is done, delete ${path} and every older key on that page.`);
-  return pem;
-}
-
-function findNode(): string {
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-    if (dir && existsSync(join(dir, "node"))) return join(dir, "node");
+export async function checkDoorbellKey(appId: string, slug: string, pem: string, fetchImpl?: typeof fetch): Promise<void> {
+  try {
+    createPrivateKey(pem);
+  } catch {
+    throw new TapsterError("that file is not a private key", `Use the .pem file GitHub downloaded from https://github.com/settings/apps/${slug}.`);
   }
-  throw new TapsterError("Wrangler needs Node.js, which is not on PATH", "Install Node.js 20 or newer, then run this again.");
+  register(pem);
+  const app = await new GitHub(appJwt(appId, pem), fetchImpl).json<{ id: number }>("GET", "/app").catch(() => null);
+  if (String(app?.id) !== appId) throw new TapsterError("that key does not belong to the doorbell App", `Generate the key on https://github.com/settings/apps/${slug}.`);
 }
 
-type Wrangler = { dir: string; run(args: string[], opts?: { stdin?: string; env?: Record<string, string>; interactive?: boolean }): Promise<{ code: number; stdout: string; stderr?: string }> };
+export type BellInstall = { id: number | null; others: string[] };
 
-async function installWrangler(): Promise<Wrangler> {
-  const dir = tempDir("tapster-doorbell-");
-  await writeFile(join(dir, "package.json"), `${JSON.stringify(wranglerPackage, null, 2)}\n`);
-  await writeFile(join(dir, "bun.lock"), wranglerLock);
-  await runPath(process.execPath, "bun", ["install", "--frozen-lockfile", "--ignore-scripts"], { cwd: dir, env: bunEnv(process.env.PATH ?? "") });
-  const node = findNode();
-  const bin = join(dir, "node_modules", "wrangler", "bin", "wrangler.js");
-  const pass = Object.fromEntries(["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].flatMap((k) => (process.env[k] ? [[k, process.env[k]!]] : [])));
-  const base = { PATH: `${join(node, "..")}${delimiter}/usr/bin${delimiter}/bin`, WRANGLER_SEND_METRICS: "false", ...pass };
-  return {
-    dir,
-    run(args, opts = {}) {
-      if (opts.interactive) {
-        return new Promise((resolve) => {
-          const child = spawn(node, [bin, ...args], { cwd: dir, stdio: "inherit", env: { HOME: process.env.HOME ?? "", ...base, ...opts.env } });
-          child.on("close", (code) => resolve({ code: code ?? 1, stdout: "" }));
-        });
-      }
-      return runPath(node, "wrangler", [bin, ...args], { cwd: dir, env: { ...base, ...opts.env }, stdin: opts.stdin, allowFail: true });
-    },
-  };
+export async function hubInstallation(appId: string, pem: string, hub: string, fetchImpl?: typeof fetch): Promise<BellInstall> {
+  const app = new GitHub(appJwt(appId, pem), fetchImpl);
+  let id: number;
+  try {
+    id = (await app.json<{ id: number }>("GET", `/repos/${hub}/installation`)).id;
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 404) return { id: null, others: [] };
+    throw e;
+  }
+  const { token } = await app.json<{ token: string }>("POST", `/app/installations/${id}/access_tokens`, { permissions: { metadata: "read" } });
+  register(token);
+  const gh = new GitHub(token, fetchImpl);
+  try {
+    const list = await gh.json<{ total_count?: number; repositories: { full_name: string }[] }>("GET", "/installation/repositories?per_page=100");
+    const others = list.repositories.map((r) => r.full_name).filter((r) => r.toLowerCase() !== hub.toLowerCase());
+    const unseen = (list.total_count ?? list.repositories.length) - list.repositories.length;
+    return { id, others: unseen > 0 ? [...others, `${unseen} more`] : others };
+  } finally {
+    await gh.request("DELETE", "/installation/token").catch(() => undefined);
+  }
 }
 
-async function signIn(w: Wrangler): Promise<void> {
-  if ((await w.run(["whoami"])).code === 0) return;
-  console.log("Sign in to Cloudflare in the browser that opens.");
-  if ((await w.run(["login"], { interactive: true })).code !== 0) throw new TapsterError("Wrangler could not sign in to Cloudflare", "Run tapster init --doorbell again.");
+export function onlyHub(hub: string, found: BellInstall): number {
+  if (found.id === null) throw new TapsterError(`the doorbell App is not installed on ${hub}`, `Install it on ${hub} only, then try again.`);
+  if (found.others.length) {
+    throw new TapsterError(
+      `the doorbell App reaches ${found.others.join(", ")} besides ${hub}`,
+      `It may start workflows only in the hub. Open https://github.com/settings/installations/${found.id}, choose "Only select repositories" and keep only ${hub}.`,
+    );
+  }
+  return found.id;
 }
 
-async function waitForInstall(appId: string, pem: string, hub: string): Promise<number> {
-  const gh = new GitHub(appJwt(appId, pem));
-  console.log(`Waiting until the App is installed on ${hub} (only that repository); tapster continues by itself.`);
-  const found = await waitFor(() => gh.json<{ id: number }>("GET", `/repos/${hub}/installation`).then((r) => r.id, () => null));
-  if (found !== null) return found;
-  throw new TapsterError(`the doorbell App was not installed on ${hub} within 10 minutes`, `Install it on ${hub}, then ${AGAIN.charAt(0).toLowerCase()}${AGAIN.slice(1)}`);
-}
-
-async function deployWorker(w: Wrangler, gh: GitHub, hub: string, appId: string, pem: string, every: number, installation: number): Promise<string> {
-  const ownerId = (await gh.json<{ id: number }>("GET", `/users/${hub.split("/")[0]}`)).id;
-  const hubId = (await gh.getRepo(hub)).id;
-  await writeFile(join(w.dir, "worker.ts"), source(workerText));
-  await writeFile(join(w.dir, "jwt.ts"), source(jwtText));
-  await writeFile(join(w.dir, "wrangler.jsonc"), doorbellConfig({ APP_ID: appId, INSTALLATION_ID: String(installation), HUB: hub, HUB_ID: String(hubId), OWNER_ID: String(ownerId), INTERVAL: String(every) }));
-  const outFile = join(w.dir, "out.ndjson");
-  const deployed = await w.run(["deploy"], { env: { WRANGLER_OUTPUT_FILE_PATH: outFile } });
-  if (deployed.code !== 0) throw new TapsterError(`Wrangler could not deploy the doorbell: ${wranglerSaid(deployed)}`, AGAIN);
-  const origin = workerOrigin(existsSync(outFile) ? readFileSync(outFile, "utf8") : "");
-  if (!origin) throw new TapsterError("the doorbell has no workers.dev address", `Create your workers.dev subdomain in the Cloudflare dashboard (Workers & Pages). ${AGAIN}`);
-  const key = createPrivateKey(pem).export({ type: "pkcs8", format: "pem" }).toString();
-  if ((await w.run(["secret", "put", "APP_KEY"], { stdin: key })).code !== 0) throw new TapsterError("Wrangler could not store the doorbell key", AGAIN);
-  await setEnvVariable(hub, "TAPSTER_DOORBELL_EVERY", String(every));
+export async function deployDoorbell(gh: GitHub, cf: Cloudflare, target: CloudflareTarget, o: { hub: string; appId: string; pem: string; installation: number; every: number }): Promise<string> {
+  const ownerId = (await gh.json<{ id: number }>("GET", `/users/${o.hub.split("/")[0]}`)).id;
+  const hubId = (await gh.getRepo(o.hub)).id;
+  const vars = checkVars({ APP_ID: o.appId, INSTALLATION_ID: String(o.installation), HUB: o.hub, HUB_ID: String(hubId), OWNER_ID: String(ownerId), INTERVAL: String(o.every) });
+  const key = createPrivateKey(o.pem).export({ type: "pkcs8", format: "pem" }).toString();
+  register(key);
+  const origin = await deployWorker(cf, target, vars, key, workerCron(o.every));
+  await setEnvVariable(o.hub, "TAPSTER_DOORBELL_EVERY", String(o.every));
   return origin;
 }
 
-export async function setupDoorbell(gh: GitHub, hub: string, config: HubConfig, setRepoVariable: (repo: string, name: string, value: string) => Promise<void>, every: number): Promise<void> {
+export async function ringProjects(hub: string, repos: string[], origin: string): Promise<{ rung: string[]; missed: string[] }> {
+  const rung: string[] = [];
+  const missed: string[] = [];
+  for (const repo of repos) {
+    try {
+      await setRepoVariable(repo, "TAPSTER_DOORBELL", origin);
+      rung.push(repo);
+    } catch {
+      missed.push(repo);
+    }
+  }
+  await setEnvVariable(hub, "TAPSTER_DOORBELL", origin);
+  return { rung, missed };
+}
+
+export type DoorbellIO = {
+  fetch: typeof fetch;
+  ask: (question: string, hidden?: boolean) => Promise<string>;
+  log: (line: string) => void;
+  open: (url: string) => void;
+  env: Record<string, string | undefined>;
+};
+
+const cli: DoorbellIO = { fetch, ask, log: (line) => console.log(line), open: openUrl, env: process.env };
+
+const AGAIN = "Run tapster init --doorbell again; it continues with the App it already created.";
+
+async function chooseAccount(accounts: CloudflareAccount[], io: DoorbellIO): Promise<CloudflareAccount> {
+  const named = io.env.CLOUDFLARE_ACCOUNT_ID?.trim();
+  if (named || accounts.length === 1) return pickAccount(accounts, named);
+  io.log("The token reaches several Cloudflare accounts. On Cloudflare's token page you can narrow it to one under Account Resources.");
+  accounts.forEach((a, i) => io.log(`  ${i + 1}. ${a.name}`));
+  const answer = Number((await io.ask("Number of the account for the doorbell: ")).trim());
+  const picked = accounts[answer - 1];
+  if (!Number.isInteger(answer) || !picked) throw new TapsterError("that is not one of the listed accounts", `Run this again and type a number from 1 to ${accounts.length}. Setting CLOUDFLARE_ACCOUNT_ID works too.`);
+  return picked;
+}
+
+async function cloudflareFor(io: DoorbellIO, hub: string): Promise<{ cf: Cloudflare; target: CloudflareTarget }> {
+  let token = io.env.CLOUDFLARE_API_TOKEN?.trim() ?? "";
+  if (token) io.log("Using the Cloudflare token in CLOUDFLARE_API_TOKEN.");
+  else {
+    io.log('The doorbell needs a Cloudflare API token that may edit Workers. Cloudflare\'s page opens with that filled in: click "Continue to summary", then "Create Token" and copy the token.');
+    io.open(TOKEN_PAGE);
+    token = (await io.ask("Cloudflare token (hidden; tapster uses it for this run only): ", true)).trim();
+  }
+  if (!token) throw new TapsterError("no Cloudflare token was given", "Paste the token Cloudflare showed after Create Token. Setting CLOUDFLARE_API_TOKEN works too.");
+  const cf = new Cloudflare(token, io.fetch);
+  const target = await accountTarget(cf, await chooseAccount(await tokenAccounts(cf), io), hub);
+  io.log(`Cloudflare account ${target.account.name}, workers.dev subdomain ${target.subdomain}.`);
+  return { cf, target };
+}
+
+async function askKey(appId: string, slug: string, io: DoorbellIO): Promise<string> {
+  io.log(`Open the doorbell App's settings, scroll to "Private keys" and click "Generate a private key":`);
+  io.open(`https://github.com/settings/apps/${slug}`);
+  const path = cleanPath(await io.ask("Path of the downloaded .pem file (drag it here): "));
+  const pem = (await readInput(path, "the .pem file")).toString("utf8");
+  await checkDoorbellKey(appId, slug, pem, io.fetch);
+  io.log(`Once tapster is done, delete ${path} and every older key on that page.`);
+  return pem;
+}
+
+async function waitForInstall(appId: string, pem: string, hub: string, io: DoorbellIO): Promise<number> {
+  io.log(`Waiting until the App is installed on ${hub} (only that repository); tapster continues by itself.`);
+  let last: BellInstall = { id: null, others: [] };
+  let warned = false;
+  const found = await waitFor(async () => {
+    last = await hubInstallation(appId, pem, hub, io.fetch).catch(() => last);
+    if (last.others.length && !warned) {
+      warned = true;
+      io.log(`The App also reaches ${last.others.join(", ")}. Keep only ${hub} at https://github.com/settings/installations/${last.id}; tapster waits.`);
+    }
+    return last.id !== null && last.others.length === 0 ? last.id : null;
+  });
+  if (found !== null) return found;
+  if (last.others.length) onlyHub(hub, last);
+  throw new TapsterError(`the doorbell App was not installed on ${hub} within 10 minutes`, `Install it on ${hub}, then ${AGAIN.charAt(0).toLowerCase()}${AGAIN.slice(1)}`);
+}
+
+export async function setupDoorbell(gh: GitHub, hub: string, repos: string[], every: number, io: DoorbellIO = cli): Promise<void> {
   const vars: Vars = { variables: (await hubEnv(gh, hub, "variables")).map((v) => ({ name: v.name, value: v.value ?? "" })) };
   const stage = doorbellStage(vars);
   if (stage === "done") {
     throw new TapsterError("the hub already has a doorbell", "Run tapster init --rotate doorbell to replace its key. To start over, delete the App and the TAPSTER_DOORBELL variables.");
   }
-  const w = await installWrangler();
-  try {
-    await signIn(w);
-    const [owner] = hub.split("/") as [string];
-    let appId: string;
-    let pem: string;
-    if (stage === "resume") {
-      appId = vars.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_ID")!.value;
-      console.log("Continuing with the doorbell App created earlier.");
-      pem = await askKey(appId, vars.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_SLUG")!.value);
-    } else {
-      const app = await appFromManifest((redirect) => doorbellManifest(owner, hub, redirect), {
-        what: "the doorbell App",
-        title: "Create the doorbell App",
-        lead: `GitHub asks you to confirm a second private App. The doorbell uses it only to start ${hub}'s workflow when a project releases.`,
-        key: "GitHub hands the App's private key to tapster in your terminal, once. tapster stores it as a secret of the doorbell Worker in your Cloudflare account. It goes nowhere else and no one else receives it.",
-        done: "The doorbell App is created",
-        next: [
-          "tapster opens the App's install page in a new tab.",
-          `There, choose "Only select repositories" and pick ${hub}, only that one.`,
-          'Click "Install". tapster notices within seconds and deploys the Worker.',
-        ],
-        again: "tapster init --doorbell",
-      }, owner);
-      appId = String(app.id);
-      pem = app.pem;
-      await setEnvVariable(hub, "TAPSTER_DOORBELL_APP_ID", appId);
-      await setEnvVariable(hub, "TAPSTER_DOORBELL_APP_SLUG", app.slug);
-      openUrl(`https://github.com/apps/${app.slug}/installations/new`);
-    }
-    const origin = await deployWorker(w, gh, hub, appId, pem, every, await waitForInstall(appId, pem, hub));
-    for (const p of config.packages) await setRepoVariable(p.repo, "TAPSTER_DOORBELL", origin);
-    await setEnvVariable(hub, "TAPSTER_DOORBELL", origin);
-    console.log(`The doorbell answers at ${origin}. Projects ring it after opening a draft.`);
-  } finally {
-    removeTemp(w.dir);
+  const { cf, target } = await cloudflareFor(io, hub);
+  const [owner] = hub.split("/") as [string];
+  let appId: string;
+  let pem: string;
+  if (stage === "resume") {
+    appId = vars.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_ID")!.value;
+    io.log("Continuing with the doorbell App created earlier.");
+    pem = await askKey(appId, vars.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_SLUG")!.value, io);
+  } else {
+    const app = await appFromManifest((redirect) => doorbellManifest(owner, hub, redirect), {
+      what: "the doorbell App",
+      title: "Create the doorbell App",
+      lead: `GitHub asks you to confirm a second private App. The doorbell uses it only to start ${hub}'s workflow when a project releases.`,
+      key: "GitHub hands the App's private key to tapster in your terminal, once. tapster stores it as a secret of the doorbell Worker in your Cloudflare account. It goes nowhere else and no one else receives it.",
+      done: "The doorbell App is created",
+      next: [
+        "tapster opens the App's install page in a new tab.",
+        `There, choose "Only select repositories" and pick ${hub}, only that one.`,
+        'Click "Install". tapster notices within seconds and deploys the Worker.',
+      ],
+      again: "tapster init --doorbell",
+    }, owner);
+    appId = String(app.id);
+    pem = app.pem;
+    register(pem);
+    await setEnvVariable(hub, "TAPSTER_DOORBELL_APP_ID", appId);
+    await setEnvVariable(hub, "TAPSTER_DOORBELL_APP_SLUG", app.slug);
+    io.open(`https://github.com/apps/${app.slug}/installations/new`);
   }
+  const installation = await waitForInstall(appId, pem, hub, io);
+  const origin = await deployDoorbell(gh, cf, target, { hub, appId, pem, installation, every });
+  const { missed } = await ringProjects(hub, repos, origin);
+  for (const repo of missed) io.log(`Could not give ${repo} the doorbell's address. Run: gh variable set TAPSTER_DOORBELL --repo ${repo} --body ${origin}`);
+  io.log(`The doorbell answers at ${origin}. Projects ring it after opening a draft.`);
 }
 
-export async function rotateDoorbell(gh: GitHub, hub: string, every: number): Promise<void> {
+export async function rotateDoorbell(gh: GitHub, hub: string, every: number, io: DoorbellIO = cli): Promise<void> {
   const vars = await gh.json<Vars>("GET", `/repos/${hub}/environments/tapster/variables`);
   if (doorbellStage(vars) !== "done") throw new TapsterError("the hub has no working doorbell yet", "Run tapster init --doorbell.");
   const appId = vars.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_ID")!.value;
-  const pem = await askKey(appId, vars.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_SLUG")!.value);
-  const w = await installWrangler();
-  try {
-    await signIn(w);
-    await deployWorker(w, gh, hub, appId, pem, every, await waitForInstall(appId, pem, hub));
-  } finally {
-    removeTemp(w.dir);
+  const pem = await askKey(appId, vars.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_SLUG")!.value, io);
+  const { cf, target } = await cloudflareFor(io, hub);
+  const stored = vars.variables.find((v) => v.name === "TAPSTER_DOORBELL")!.value;
+  if (target.origin !== stored) {
+    throw new TapsterError(`this token would deploy the doorbell to ${target.origin}, but your projects ring ${stored}`, "Use a token of the Cloudflare account that runs the doorbell now. Nothing was changed.");
   }
-  console.log(`Deployed the doorbell again with the new key; it starts the hub every ${every} minutes. Now delete every other key on the App's settings page.`);
+  const installation = await waitForInstall(appId, pem, hub, io);
+  await deployDoorbell(gh, cf, target, { hub, appId, pem, installation, every });
+  io.log(`Deployed the doorbell again with the new key; it starts the hub every ${every} minutes. Now delete every other key on the App's settings page.`);
 }

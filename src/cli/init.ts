@@ -8,16 +8,16 @@ import { GitHub } from "../github";
 import { decodeSparkleKey } from "../sparkle-key";
 import { appJwt } from "../token";
 import { TAPSTER } from "../version";
-import { run, runPath } from "../run";
+import { run } from "../run";
 import { appFromManifest, openUrl } from "./appflow";
 import { appInstallation, appManifest, storeApp } from "./hubapp";
 import { checkKeyId, checkP8, inspectP12, notaryKey, saveCertificate, saveNotary, verifyNotary } from "./apple";
-import { rotateDoorbell, setupDoorbell } from "./doorbell";
-import { currentRepo, deleteEnvSecret, hubEnv, setEnvSecret, setEnvVariable, setRepoVariable, userGitHub } from "./gh";
-import { type KeyRef, type Store, localStore, newSparkleKey, previousKey, requireStore } from "./keystore";
+import { doorbellRepos, rotateDoorbell, setupDoorbell } from "./doorbell";
+import { currentRepo, hubEnv, setEnvSecret, setEnvVariable, userGitHub } from "./gh";
+import { localStore, newSparkleKey, requireStore } from "./keystore";
+import { findGpg, finishLinuxRotation, linuxKeyAllowed, makeLinuxKey } from "./linuxkey";
 import { cleanPath, readInput } from "./paths";
 import { waitFor } from "./poll";
-import { removeTemp, tempDir } from "./temp";
 import { cronFor, everyFromFlow } from "./schedule";
 import { FLOW, type Schedule, hubFiles, patchSparkleEnv, sparkleLabels, workflowFile } from "./hubfiles";
 import { ask } from "./prompt";
@@ -253,73 +253,25 @@ async function createSparkleKey(dir: string, hub: string, label: string): Promis
   console.log("Review and commit the workflow change, then push.");
 }
 
-async function replaceLocal(store: Store, ref: KeyRef, secret: string): Promise<void> {
-  const pending = { ...ref, account: `${ref.account} pending`, label: `${ref.label} (pending)` };
-  await store.remove(pending);
-  await store.save(pending, secret);
-  await store.remove(ref);
-  await store.save(ref, secret);
-  await store.remove(pending);
-}
-
-const linuxRef = (hub: string, previous = false) => ({ service: "tapster-linux-key", account: previous ? `${hub} previous` : hub, label: `tapster Linux key for ${hub}${previous ? " (previous)" : ""}` });
-
-async function finishLinuxRotation(gh: GitHub, hub: string): Promise<void> {
-  const secrets = (await hubEnv(gh, hub, "secrets")).map((x) => x.name);
-  await localStore()?.remove(linuxRef(hub, true));
-  if (!secrets.includes("TAPSTER_LINUX_KEY_PREVIOUS")) {
-    console.log("No Linux key rotation is running, so there is nothing to finish.");
-    return;
-  }
-  await deleteEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS");
-  console.log("The previous Linux key no longer signs; apt and dnf trust only the new one from the next run.");
-}
-
-export function linuxKeyAllowed(secrets: string[], rotate: boolean): void {
-  if (secrets.includes("TAPSTER_LINUX_KEY") && !rotate) {
-    throw new TapsterError("the hub already has a Linux signing key", "Replacing it makes every apt and dnf user fetch the new key. To do that, run tapster init --rotate linux.");
-  }
-}
-
 async function setupLinux(gh: GitHub, dir: string, hub: string, rotate: boolean): Promise<void> {
   const config = hubConfig(dir, hub);
   const secrets = (await hubEnv(gh, hub, "secrets")).map((x) => x.name);
   linuxKeyAllowed(secrets, rotate);
   const store = requireStore("the Linux signing key");
-  const gpg = ["/opt/homebrew/bin/gpg", "/usr/local/bin/gpg", "/usr/bin/gpg"].find((p) => existsSync(p));
+  const gpg = await findGpg();
   if (!gpg) throw new TapsterError("gpg is not installed", "Install it with brew install gnupg, then run this again.");
-  await gh.json("POST", `/repos/${hub}/pages`, { build_type: "workflow" }).catch(async (e) => {
-    if (!(e instanceof GitHubError) || e.status !== 409) throw new TapsterError("GitHub Pages could not be turned on for the hub", "A private hub needs a paid plan for Pages; make the hub public or turn Pages on by hand with GitHub Actions as the source.");
-    await gh.json("PUT", `/repos/${hub}/pages`, { build_type: "workflow" });
-  });
+  if (rotate && store.kind === "keychain") console.log("macOS asks whether tapster may read the previous key from your keychain; choose Allow.");
+  const made = await makeLinuxKey(gh, hub, { gpg, store, rotate });
   console.log("GitHub Pages serves the hub from GitHub Actions.");
-  const home = tempDir("tl-");
-  const env = { GNUPGHOME: home };
-  try {
-    await runPath(gpg, "gpg", ["--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-gen-key", `${hub.split("/")[0]} tapster (${hub})`, "rsa4096", "sign", "never"], { env });
-    const key = (await runPath(gpg, "gpg", ["--batch", "--armor", "--export-secret-keys"], { env })).stdout;
-    const fingerprint = (await runPath(gpg, "gpg", ["--batch", "--with-colons", "--list-secret-keys"], { env })).stdout.split("\n").find((l) => l.startsWith("fpr:"))?.split(":")[9];
-    let old: string | null = null;
-    if (rotate) {
-      if (store.kind === "keychain") console.log("macOS asks whether tapster may read the previous key from your keychain; choose Allow.");
-      old = await previousKey(store, linuxRef(hub));
-    }
-    const pending = { ...linuxRef(hub), account: `${hub} new`, label: `tapster Linux key for ${hub} (new)` };
-    await store.remove(pending);
-    await store.save(pending, key);
-    await setEnvSecret(hub, "TAPSTER_LINUX_KEY", key);
-    if (old) await setEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS", old);
-    if (old) await replaceLocal(store, linuxRef(hub, true), old);
-    await replaceLocal(store, linuxRef(hub), key);
-    await store.remove(pending);
-    console.log(`Stored the Linux key (fingerprint ${fingerprint}) in the hub and in your ${store.kind === "keychain" ? "login keychain" : "keyring"} as "tapster-linux-key".`);
-    if (old) console.log("The previous key keeps signing next to the new one, so apt and dnf users can fetch the new key. Once they have, run tapster init --rotate linux --finish.");
-    else if (rotate) console.log("The previous key is not in your keychain, so apt and dnf users must fetch the new key before they can update.");
-  } finally {
-    await runPath(join(gpg, "..", "gpgconf"), "gpgconf", ["--kill", "all"], { env, allowFail: true }).catch(() => undefined);
-    removeTemp(home);
-  }
+  console.log(`Stored the Linux key (fingerprint ${made.fingerprint}) in the hub and in your ${store.kind === "keychain" ? "login keychain" : "keyring"} as "tapster-linux-key".`);
+  if (made.previous === "kept") console.log("The previous key keeps signing next to the new one, so apt and dnf users can fetch the new key. Once they have, run tapster init --rotate linux --finish.");
+  if (made.previous === "missing") console.log("The previous key is not in your keychain, so apt and dnf users must fetch the new key before they can update.");
   if (!config.packages.some((p) => !isApp(p) && p.linux)) console.log("No package sets linux: true yet; add it to the CLI packages that should ship to apt and dnf.");
+}
+
+async function finishRotation(gh: GitHub, hub: string): Promise<void> {
+  if (await finishLinuxRotation(gh, hub, localStore())) console.log("The previous Linux key no longer signs; apt and dnf trust only the new one from the next run.");
+  else console.log("No Linux key rotation is running, so there is nothing to finish.");
 }
 
 async function writeFiles(gh: GitHub, dir: string, hub: string, flag: string | null, schedule: Schedule): Promise<void> {
@@ -407,10 +359,13 @@ export async function init(argv: string[]): Promise<void> {
     if (action.what === "certificate") return storeCertificate(hub);
     if (action.what === "notary") return storeNotary(hub);
     if (action.what === "doorbell") return rotateDoorbell(gh, hub, flowEvery(dir));
-    if (action.what === "linux-finish") return finishLinuxRotation(gh, hub);
+    if (action.what === "linux-finish") return finishRotation(gh, hub);
     return setupLinux(gh, dir, hub, true);
   }
-  if (action.kind === "doorbell") return setupDoorbell(gh, hub, hubConfig(dir, hub), setRepoVariable, flowEvery(dir));
+  if (action.kind === "doorbell") {
+    hubConfig(dir, hub);
+    return setupDoorbell(gh, hub, doorbellRepos(readFileSync(join(dir, "tapster.yml"), "utf8"), hub.split("/")[0]!), flowEvery(dir));
+  }
   if (action.kind === "linux") return setupLinux(gh, dir, hub, false);
   if (action.kind === "sparkle-new") return createSparkleKey(dir, hub, action.label);
   if (action.kind === "sparkle") return storeSparkleKey(gh, dir, hub, action.label, action.account);

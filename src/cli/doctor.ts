@@ -155,7 +155,7 @@ export function scheduleCheck(runs: { event: string; created_at: string }[], now
   const name = "the hub ran in the last day";
   const recent = runs.some((r) => (r.event === "schedule" || r.event === "workflow_dispatch") && now - Date.parse(r.created_at) < 86_400_000);
   if (recent) return ok(name);
-  return bad(name, doorbell ? "Neither GitHub's schedule nor the doorbell started a run. Check the doorbell's logs with wrangler tail and the workflow in the Actions tab." : "GitHub's schedule did not start a run; it is best effort. tapster init --doorbell adds a second clock that starts the hub on time.");
+  return bad(name, doorbell ? "Neither GitHub's schedule nor the doorbell started a run. Check the doorbell's live logs in the Cloudflare dashboard (Workers & Pages, tapster-doorbell, Logs) and the workflow in the Actions tab." : "GitHub's schedule did not start a run; it is best effort. tapster init --doorbell adds a second clock that starts the hub on time.");
 }
 
 

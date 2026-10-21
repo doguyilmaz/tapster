@@ -50,5 +50,6 @@ command `tapster add` prints, which tags the default branch's latest commit on G
 - A release: in tapster setup, open the project under Projects and click Release. tapster tags the default branch's
   latest commit on GitHub (never a local clone, which can be behind) with the next patch version after the highest tag
   on GitHub. Setup starts the hub as soon as the draft opens. Without setup the hub publishes it
-  on its next scheduled run, which GitHub can start hours late, or right away with the doorbell (`tapster init --doorbell`).
+  on its next scheduled run, which GitHub can start hours late. The doorbell starts it right away (Optional extras in
+  tapster setup or `tapster init --doorbell`).
 - Problems with a release: use the tapster-releases skill.

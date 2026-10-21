@@ -19,6 +19,8 @@ const deps: Deps = {
   open: () => {},
   notary: async () => false,
   keychain: async () => null,
+  gpg: async () => null,
+  store: () => null,
 };
 
 function app(routes: Routes = {}) {
