@@ -141,6 +141,13 @@ latest published release itself, so the branch never runs ahead of what users ca
 Without a workflow you can push the branch yourself with the tag:
 `git push origin v1.2.3 "v1.2.3^{commit}:refs/heads/release"`. The site then goes live before the hub publishes.
 
+## Docs changes
+
+The release workflow starts only from a version tag, so merging docs never releases. Keep it that way: add no push or
+paths triggers on `main` to it. To keep docs-only pull requests off the full CI, see
+[Docs and CI](/tutorial/release/#docs-and-ci). When you merge several pull requests in a row, put `[skip ci]` in every
+merge message but the last. Never tag a commit whose message carries a skip marker.
+
 ## The switch-over release
 
 1. Run `tapster add`, merge the hub's pull request and push the project's changes, as in

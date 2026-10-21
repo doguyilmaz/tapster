@@ -162,7 +162,7 @@ async function inspect(c: Ctx): Promise<InspectView> {
 const options = z.object({ workflow: z.string().regex(/^[A-Za-z0-9._-]+\.ya?ml$/), autoTag: z.boolean(), dependabot: z.boolean(), force: z.boolean() }).strict();
 const addBody = z.object({ ...hubBody, path: z.string(), options, oneGo: z.boolean().optional() }).strict();
 
-const optionsOf = (o: z.infer<typeof options>) => addOptions([...(o.force ? ["--force"] : []), ...(o.autoTag ? ["--auto-tag"] : []), ...(o.dependabot ? ["--allow-dependabot"] : []), "--workflow", o.workflow]);
+const optionsOf = (o: z.infer<typeof options>) => ({ ...addOptions([...(o.force ? ["--force"] : []), ...(o.autoTag ? ["--auto-tag"] : []), ...(o.dependabot ? ["--allow-dependabot"] : []), "--workflow", o.workflow]), update: "show" as const });
 
 async function unpushed(dir: string, defaultBranch: string): Promise<{ ahead: number | null; unpushed: Unpushed[] }> {
   const known = async (rev: string) => (await git(dir, ["rev-parse", "--verify", "--quiet", rev])).code === 0;

@@ -207,6 +207,9 @@ select.input { appearance: auto; }
 .checks.status > li { padding: 0.85rem 0; border-top: 1px solid var(--line); }
 .checks.status > li:first-child { border-top: 0; padding-top: 0.25rem; }
 .release { border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem 1rem; background: var(--paper); margin-top: 0.35rem; }
+.config { border-top: 1px solid var(--line); padding-top: 0.9rem; }
+.note pre.block { margin: 0.45rem 0; }
+textarea.entry-edit { font: 0.82rem/1.55 var(--mono); resize: vertical; min-height: 8rem; white-space: pre; overflow-wrap: normal; overflow-x: auto; tab-size: 2; }
 details.more summary { cursor: pointer; color: var(--link); font-size: 0.88rem; width: fit-content; }
 details.more[open] summary { margin-bottom: 0.5rem; }
 .seal { display: inline-grid; place-items: center; width: 54px; height: 54px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ee6b56, #c8392f 60%, #8f2019); color: #ffe0d8; box-shadow: 0 6px 14px -6px rgb(143 32 25 / 0.6); }

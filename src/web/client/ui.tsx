@@ -1,8 +1,22 @@
 import type { ComponentChildren, JSX } from "preact";
 import { useState } from "preact/hooks";
 import type { Problem as ProblemView } from "../contract";
-import { capFirst } from "../steps";
+import { DIFF_MARK, capFirst, changedOnly, lineDiff } from "../steps";
 import { problemOf } from "./state";
+
+export function DiffBlock({ before, after, label }: { before: string; after: string; label?: string }) {
+  return (
+    <pre class="block diff" tabIndex={0} aria-label={label}>
+      {changedOnly(lineDiff(before, after)).map((l, i) => (
+        <span key={i} class={l.kind === "gap" ? "hunk" : l.kind}>
+          {DIFF_MARK[l.kind]}
+          {l.text}
+          {"\n"}
+        </span>
+      ))}
+    </pre>
+  );
+}
 
 const PATHS: Record<string, JSX.Element> = {
   check: <path d="M20 6 9 17l-5-5" />,

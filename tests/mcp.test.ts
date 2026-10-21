@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -20,7 +21,7 @@ beforeAll(async () => {
     { id: 4, tag_name: "v1.1.0", draft: true, prerelease: false, created_at: "2026-10-20T00:00:00Z", published_at: null, assets: [{ id: 1, name: "checksums.txt" }], body: "<!-- tapster -->\n> **tapster will not publish this draft:** checksums.txt lists a file that is not attached\n<!-- /tapster -->\n\nnotes" },
     { id: 3, tag_name: "v1.0.0", draft: false, prerelease: false, created_at: "2026-10-01T00:00:00Z", published_at: "2026-10-01T01:00:00Z", assets: [], body: "" },
   ];
-  const gh = new GitHub("t", fake.fetch, async () => {}, "user");
+  const gh = new GitHub("t", (url, init) => fake.fetch(url, init), async () => {}, "user");
   ctx = {
     deps: { github: async () => gh, fetch: fake.fetch as typeof fetch, home, cwd: home, pin: null, log: () => {}, open: () => {}, notary: async () => false, keychain: async () => null, gpg: async () => null, store: () => null },
     gh: async () => gh,
@@ -70,6 +71,56 @@ test("release_status shows what the hub wrote on a refused draft and what it pub
   expect(s.inHub).toBe("ebb");
   expect(s.releases[0]).toMatchObject({ tag: "v1.1.0", draft: true, hubNote: "tapster will not publish this draft: checksums.txt lists a file that is not attached" });
   expect(s.publishedByHub).toEqual([{ tag: "v1.0.0", status: "published" }]);
+});
+
+test("release_status says when the tip carries a skip marker and when an update of the entry waits, and says nothing of either otherwise", async () => {
+  const quiet = (await call("release_status", { repo: "octo/ebb" })).result.structuredContent!;
+  expect(Object.keys(quiet)).toEqual(["hub", "repo", "inHub", "releases", "publishedByHub"]);
+  const ebb = fake.get("octo/ebb")!;
+  const hub = fake.get("octo/homebrew-tap")!;
+  ebb.commit = { message: "Merge pull request #9 from octo/docs [skip ci]", date: "2026-10-20T00:00:00Z", parent: { sha: "d".repeat(40), message: "Docs" } };
+  const yml = hub.files!.get("tapster.yml")!;
+  hub.branches.set("tapster-update-ebb", new Map([...hub.files!, ["tapster.yml", yml.replace("binaries: [ebb],", "binaries: [ebb], license: MIT,")]]));
+  hub.bases.set("tapster-update-ebb", new Map(hub.files!));
+  hub.pulls.push({ number: 12, head: "tapster-update-ebb", html_url: "https://github.com/octo/homebrew-tap/pull/12", title: "Update ebb" });
+  const s = (await call("release_status", { repo: "octo/ebb" })).result.structuredContent as { tipSkipsWorkflows: Record<string, unknown>; entryUpdate: Record<string, unknown> };
+  expect(s.tipSkipsWorkflows).toMatchObject({ branch: "main", marker: "[skip ci]", commitBeforeWithoutMarker: "d".repeat(40) });
+  expect(String(s.tipSkipsWorkflows.what)).toContain("so GitHub may not start the release workflow for a tag on it");
+  expect(s.entryUpdate).toMatchObject({ waitsIn: "https://github.com/octo/homebrew-tap/pull/12", blocked: null });
+  expect(String(s.entryUpdate.change)).toContain("+ - { name: ebb, repo: octo/ebb, binaries: [ebb], license: MIT,");
+  ebb.commit = { message: "Start", date: "2026-10-01T09:00:00Z" };
+  hub.pulls.length = 0;
+  hub.branches.delete("tapster-update-ebb");
+});
+
+test("release_status offers no commit to tag when the tags cannot be read, and reads a refused draft's archive once", async () => {
+  const ebb = fake.get("octo/ebb")!;
+  const hub = fake.get("octo/homebrew-tap")!;
+  const yml = hub.files!.get("tapster.yml")!;
+  const draft = ebb.releases[0]!;
+  const assets = draft.assets;
+  ebb.commit = { message: "Docs [skip ci]", date: "2026-10-20T00:00:00Z", parent: { sha: "d".repeat(40), message: "Docs" } };
+  const real = fake.fetch;
+  fake.fetch = async (input, init) => (String(input).includes("/matching-refs/") ? new Response("{}", { status: 403 }) : real(input, init));
+  const blind = (await call("release_status", { repo: "octo/ebb" })).result.structuredContent as { tipSkipsWorkflows: { commitBeforeWithoutMarker: string | null; what: string } };
+  fake.fetch = real;
+  expect(blind.tipSkipsWorkflows.commitBeforeWithoutMarker).toBeNull();
+  expect(blind.tipSkipsWorkflows.what).not.toContain("Or tag");
+  ebb.commit = { message: "Start", date: "2026-10-01T09:00:00Z" };
+  hub.files!.set("tapster.yml", yml.replace('assets: { linux-amd64: "ebb_{version}_linux_amd64.tar.gz" }', 'assets: { darwin-arm64: "ebb_{version}_darwin_arm64.tar.gz", linux-amd64: "ebb_{version}_linux_amd64.tar.gz" }'));
+  hub.env!.vars.set("TAPSTER_TEAM_ID", "ABCDE12345");
+  hub.env!.vars.set("TAPSTER_APP_SLUG", "tapster-octo-tap");
+  const broken = Buffer.from("not a tar.gz");
+  fake.blobs.set(901, broken);
+  draft.assets = [...assets, { id: 901, name: "ebb_1.1.0_darwin_arm64.tar.gz", size: broken.length, digest: `sha256:${createHash("sha256").update(broken).digest("hex")}` }];
+  const before = fake.downloads;
+  await call("release_status", { repo: "octo/ebb" });
+  await call("release_status", { repo: "octo/ebb" });
+  expect(fake.downloads - before).toBe(1);
+  draft.assets = assets;
+  hub.files!.set("tapster.yml", yml);
+  hub.env!.vars.delete("TAPSTER_TEAM_ID");
+  hub.env!.vars.delete("TAPSTER_APP_SLUG");
 });
 
 test("local_projects, doctor and run_hub work; bad input is an error result, not a crash", async () => {

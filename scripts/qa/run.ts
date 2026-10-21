@@ -2,6 +2,9 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { writeTarGz } from "../../src/archive";
+import { sha256 } from "../../src/checksums";
+import { withNote } from "../../src/draftnote";
 import { run } from "../../src/run";
 import { demo, listAims } from "../demo";
 import { launch } from "./cdp";
@@ -253,6 +256,60 @@ try {
   await page.clickText("octo/ebb", ".item button.link");
   await page.waitFor("document.body.textContent.includes('Where ebb stands')", 20000);
   await audit("ebb-sheet-light");
+  await page.eval("document.querySelector('.sheet-back').click()");
+  const machO = Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01]);
+  const appArchive = writeTarGz(
+    [
+      { name: "aims", type: "file", mode: 0o755, data: machO },
+      { name: "aims.app/Contents/Info.plist", type: "file", mode: 0o644, data: Buffer.from('<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.octo.aims</string><key>CFBundleExecutable</key><string>aims</string></dict></plist>') },
+      { name: "aims.app/Contents/MacOS/aims", type: "file", mode: 0o755, data: machO },
+    ],
+    0,
+  );
+  fake.blobs.set(701, appArchive);
+  aims.releases.unshift({ id: 23, tag_name: "v0.2.3", draft: true, prerelease: false, created_at: new Date().toISOString(), published_at: null, assets: [{ id: 701, name: "aims_0.2.3_darwin_arm64.tar.gz", size: appArchive.length, digest: `sha256:${sha256(appArchive)}` }], body: withNote("", "aims_0.2.3_darwin_arm64.tar.gz holds aims.app/Contents/MacOS/aims, a Mach-O file not listed in binaries"), html_url: "https://github.com/octo/aims/releases/tag/v0.2.3" });
+  const toConfig = "(() => { const s = document.querySelector('.sheet'); const h = document.querySelector('.sheet .config'); s.scrollTop = h.getBoundingClientRect().top + s.scrollTop - 90; })()";
+  await page.clickText("octo/aims", ".item button.link");
+  await page.waitFor("document.body.textContent.includes('Where aims stands')", 20000);
+  await page.clickText("Refresh", ".sheet button");
+  await page.waitFor("document.body.textContent.includes('The entry lacks what the project ships now')", 20000);
+  await page.eval(toConfig);
+  await shot("18-aims-update");
+  await audit("aims-update");
+  await page.clickText("Propose the update", ".sheet button");
+  await page.waitFor("document.body.textContent.includes('An update waits in a pull request')", 20000);
+  await page.eval(toConfig);
+  await shot("18b-update-proposed");
+  await audit("update-proposed");
+  await page.clickText("Merge the update", ".sheet button");
+  await page.waitFor("!document.body.textContent.includes('An update waits in a pull request') && document.querySelector('.sheet .config pre').textContent.includes('aims.app')", 20000);
+  await page.eval(toConfig);
+  await shot("18c-update-merged");
+  await page.clickText("Edit", ".sheet .config button");
+  const edit = (from: string, to: string) => page.eval(`(() => { const t = document.querySelector('.sheet textarea'); t.value = t.value.replace(${JSON.stringify(from)}, ${JSON.stringify(to)}); t.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await edit("bundle_id: com.octo.aims", "bundle_id: not an id");
+  await page.waitFor("document.body.textContent.includes('The hub would refuse this entry')", 15000);
+  await page.eval(toConfig);
+  await shot("18d-edit-invalid");
+  await audit("edit-invalid");
+  await edit("bundle_id: not an id", "bundle_id: com.octo.aims");
+  await edit('binaries: ["Contents/MacOS/aims"]', 'binaries: ["Contents/MacOS/aims"]\n  cask:\n    uninstall:\n      launchctl: [com.octo.aims.keepalive]');
+  await page.waitFor("document.body.textContent.includes('The hub accepts this entry')", 15000);
+  await page.clickText("Show the change", ".sheet button");
+  await page.eval(toConfig);
+  await shot("18e-edit-change");
+  await audit("edit-change");
+  await page.clickText("Propose and merge", ".sheet button");
+  await page.waitFor("!document.querySelector('.sheet textarea') && document.querySelector('.sheet .config pre').textContent.includes('keepalive')", 20000);
+  await page.eval(toConfig);
+  await shot("18f-edit-merged");
+  aims.commit = { ...aims.commit, message: "Merge pull request #7 from octo/docs\n\n[skip ci]", parent: { sha: "c".repeat(40), message: "Fix the parser" } };
+  aims.head = "e".repeat(40);
+  await page.clickText("Refresh", ".sheet button");
+  await page.waitFor("document.body.textContent.includes('Push a commit without it to main')", 20000);
+  await page.eval("(() => { const s = document.querySelector('.sheet'); const h = [...s.querySelectorAll('strong')].find((e) => e.textContent === 'Releases'); s.scrollTop = h.getBoundingClientRect().top + s.scrollTop - 90; })()");
+  await shot("18g-skip-marker");
+  await audit("skip-marker");
 } catch (e) {
   if ((e as Error).message !== "stop") {
     console.error("QA FAILED:", (e as Error).message);

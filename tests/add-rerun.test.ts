@@ -120,7 +120,7 @@ const ENTRY = `
 
 test("adding a project the hub already lists keeps its entry and trusts the description it sets", async () => {
   const fake = new FakeHub("octo");
-  hubWith(fake, `${ENTRY}    description: "Switch between AI accounts"\n`);
+  hubWith(fake, `${ENTRY}    description: "Switch between AI accounts"\n    homepage: "https://aims.example.com"\n    license: MIT\n    completions: { zsh: completions/aims.zsh }\n`);
   fake.repo("aims", { description: "a tool for AI accounts.", rulesets: rulesetBodies(false).map((r, i) => ({ ...r, id: i + 1 })) });
   const lines: string[] = [];
   const gh = new GitHub("t", fake.fetch, async () => {}, "user");
@@ -140,7 +140,8 @@ test("tapster add ends with one gh command that tags GitHub's default branch wit
   const gh = new GitHub("t", fake.fetch, async () => {}, "user");
   const hint = await releaseHint(gh, "octo/aims");
   expect(hint).toContain("release v0.2.2 by tagging the latest commit of main on GitHub");
-  expect(hint).toContain('gh api --method POST repos/octo/aims/git/refs -f ref=refs/tags/v0.2.2 -f sha="$(gh api repos/octo/aims/commits/main --jq .sha)"');
+  expect(hint).toContain('gh api --method POST repos/octo/aims/git/refs -f ref=refs/tags/v0.2.2 -f sha="$(gh api repos/octo/aims/commits/main --jq \'if ');
+  expect(hint).toContain("carries a skip marker");
   expect(hint).not.toContain("git tag");
   aims.keys.push({ title: "tapster tags", read_only: false });
   expect(await releaseHint(gh, "octo/aims")).toBe("Your release workflow tags each release by itself.");

@@ -17,10 +17,10 @@ export function identifierFor(item: CodeItem, pkg: Pick<AppPackage, "bundle_id" 
     if (bundleIdAllowed(item.path, id, pkg)) return id;
     throw refuse(`${item.path} claims the identifier ${id}, which belongs outside ${pkg.bundle_id}`);
   }
-  if (configured) return configured;
-  const file = item.path.split("/").pop()!.replace(/[^A-Za-z0-9.-]/g, "-");
-  return `${pkg.bundle_id}.${file}`;
+  return configured ?? defaultIdentifier(pkg.bundle_id, item.path);
 }
+
+export const defaultIdentifier = (bundleId: string, path: string) => `${bundleId}.${path.split("/").pop()!.replace(/[^A-Za-z0-9.-]/g, "-")}`;
 
 const SPARKLE = /^Contents\/Frameworks\/Sparkle\.framework\/Versions\/[^/]+(\/|$)/;
 

@@ -52,4 +52,13 @@ command `tapster add` prints, which tags the default branch's latest commit on G
   on GitHub. Setup starts the hub as soon as the draft opens. Without setup the hub publishes it
   on its next scheduled run, which GitHub can start hours late. The doorbell starts it right away (Optional extras in
   tapster setup or `tapster init --doorbell`).
+- A release starts only from a tag. Never tag a commit whose message carries `[skip ci]`, `[ci skip]`, `[no ci]`,
+  `[skip actions]`, `[actions skip]` or the trailer `skip-checks: true`: GitHub starts no workflow for it. When merging
+  several pull requests in a row, put `[skip ci]` in the merge commit message of all but the last.
+- Merging docs never releases; do not add push or paths triggers on `main` to the release workflow. For docs-only pull
+  requests, the project's own CI workflow takes `paths-ignore` for the docs folder and the docs workflow takes `paths`.
+  tapster does not edit those files.
+- A project's settings in the hub (its entry in `tapster.yml`) change from tapster setup: open the project under
+  Projects and use Configuration. tapster proposes what the entry lacks and merges an edit only when it changes that
+  entry alone.
 - Problems with a release: use the tapster-releases skill.

@@ -28,11 +28,34 @@ Click **Release**. tapster creates the tag on GitHub with your own sign-in, at e
 branch moved in between or the tag exists already, it refuses and says why. It never tags the clone on your computer,
 which can be behind or on another branch.
 
+It also refuses a commit whose message carries `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or
+`[actions skip]`. The same goes for a message that ends with the trailer `skip-checks: true`. GitHub starts no push
+workflow for such a commit, so a tag on it may never start the release workflow. Push a commit without the marker.
+Or tag the commit before it when that one has none; the sheet shows the command for it. When you merge several pull
+requests in a row, put `[skip ci]` in the merge commit message of all but the last.
+
 The same release from a terminal is one command. The sheet shows it with the commit filled in, under
-**Or tag it from a terminal**:
+**Or tag it from a terminal**. Without the sheet, this one reads the latest commit of `main` first and stops on a skip
+marker:
 
 ```sh
-gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.1.0 -f sha="$(gh api repos/you/my-tool/commits/main --jq .sha)"
+gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.1.0 -f sha="$(gh api repos/you/my-tool/commits/main --jq 'if (.commit.message | test("(?i)\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\]")) or ([.commit.message | splits("\\r?\\n[ \\t]*\\r?\\n") | select(test("\\S"))] | length > 1 and (last | test("(?im)^skip-checks:\\s*true\\s*$"))) then error("the latest commit of main carries a skip marker, so a tag on it may not start the release workflow") else .sha end')"
+```
+
+### Docs and CI
+
+The release workflow starts only from a version tag (an app's workflow also runs when you start it by hand), so
+merging docs never releases. Do not add push or paths triggers on `main` to the release workflow.
+
+To keep pull requests that only change docs from running the full test matrix, give the project's own CI workflow
+`paths-ignore` for the docs folder and give the docs workflow `paths` for it. tapster does not edit those files,
+because each project's CI is its own.
+
+```yaml
+# in the project's CI workflow
+on:
+  pull_request:
+    paths-ignore: ["docs/**"]
 ```
 
 ## 2. The project opens a draft

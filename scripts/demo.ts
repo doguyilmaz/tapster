@@ -44,6 +44,8 @@ export const AIMS_ENTRY = `  - name: aims
     description: "Run several AI coding accounts side by side"
     homepage: "https://aims.example.com"
     license: MIT
+    completions:
+      zsh: completions/aims.zsh
 `;
 
 export function listAims(fake: FakeHub): void {

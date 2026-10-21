@@ -3,6 +3,12 @@ import { tmpdir } from "node:os";
 
 import { basename, join } from "node:path";
 import { isMap, isSeq, parse, parseDocument, type Scalar, YAMLMap } from "yaml";
+import { appFromProjectYml, bundleIdOf, feedName, helpersOf, literal } from "../appsource";
+import { type EntrySources, deriveUpdate, refusedDraftApp } from "../entryupdate";
+import { readHubFile } from "../hubcommit";
+import { entryText } from "../hubentry";
+import { changeText } from "../web/steps";
+import { openPull } from "../web/api/entry";
 import { BUNDLE_ID } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import { readGit } from "../clone";
@@ -17,8 +23,9 @@ import appTemplate from "../../templates/project/app-release.yml" with { type: "
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
-import { highestTag, nextTag, tagCommand } from "../web/status";
-import { YAML_OUT, appInstallUrl, autoTagSteps, goreleaserCask, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubEntries, hubFacts, hubName, installSentence, proposeEntry, releaseEntry, releaseSecrets, repoTags, withoutMac } from "./hubpr";
+import { highestTag, nextTag, releasableParent, tagCommand } from "../web/status";
+import { headOf, withParentTag } from "../web/api/status";
+import { YAML_OUT, appInstallUrl, autoTagSteps, goreleaserCask, hasHomebrew, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubEntries, hubFacts, hubName, installSentence, proposeEntry, proposeUpdate, releaseEntry, releaseSecrets, repoTags, tagRefs, withoutMac } from "./hubpr";
 import { ask } from "./prompt";
 import { mustRead, readRegular, readSmall, writeInside } from "./paths";
 
@@ -126,20 +133,9 @@ export function addRingStep(text: string): string | null {
   return null;
 }
 
-export function bundleIdIn(dir: string, app: string): string | null {
-  const base = basename(app, ".app");
-  for (const path of infoPlists(dir)) {
-    try {
-      const bytes = readRegular(path);
-      const info = bytes ? (parsePlist(bytes) as Record<string, unknown>) : {};
-      const id = literal(info.CFBundleIdentifier);
-      if ((info.CFBundleExecutable === base || info.CFBundleName === base) && id && BUNDLE_ID.test(id)) return id;
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
+export const localPlists = (dir: string): Buffer[] => infoPlists(dir).flatMap((path) => readRegular(path) ?? []);
+
+export const bundleIdIn = (dir: string, app: string): string | null => bundleIdOf(localPlists(dir), app);
 
 export function bunWorkflow(name: string, entry: string, pins: Pins, mac = true): string {
   const template = mac ? bunTemplate : bunTemplate.replaceAll("darwin-arm64 darwin-x64 ", "");
@@ -161,9 +157,7 @@ export function bunWorkflow(name: string, entry: string, pins: Pins, mac = true)
 
 export type FoundApp = { name: string; bundleId: string | null; feed: string; publicKey: string | null; universal: boolean; build: string | null; appPath: string | null };
 
-const SKIP = new Set([".git", ".build", "build", "dist", "DerivedData", "node_modules", "Pods", "Carthage"]);
-const literal = (v: unknown) => (typeof v === "string" && !v.includes("$(") ? v : null);
-const feedName = (url: unknown) => (typeof url === "string" ? /\/releases\/latest\/download\/([A-Za-z0-9._-]+\.xml)$/.exec(url)?.[1] ?? null : null);
+export const SKIP = new Set([".git", ".build", "build", "dist", "DerivedData", "node_modules", "Pods", "Carthage"]);
 
 function infoPlists(dir: string, depth = 0): string[] {
   if (depth > 5) return [];
@@ -186,24 +180,8 @@ export function findApp(dir: string): FoundApp | null {
   if (!top.some((f) => f === "project.yml" || f === "Package.swift" || f.endsWith(".xcodeproj"))) return null;
   const make = makeTarget(dir);
   const yml = readSmall(join(dir, "project.yml"));
-  if (yml !== null) {
-    const project = parse(yml) as { settings?: { base?: Record<string, unknown> }; targets?: Record<string, Record<string, unknown>> };
-    for (const [target, t] of Object.entries(project?.targets ?? {})) {
-      if (t.type !== "application") continue;
-      const props = ((t.info as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}) as Record<string, unknown>;
-      const feed = feedName(props.SUFeedURL);
-      if (!feed) continue;
-      const base = { ...(project.settings?.base ?? {}), ...((t.settings as { base?: Record<string, unknown> } | undefined)?.base ?? {}) };
-      return {
-        name: literal(base.PRODUCT_NAME) ?? target,
-        bundleId: literal(base.PRODUCT_BUNDLE_IDENTIFIER),
-        feed,
-        publicKey: literal(props.SUPublicEDKey),
-        universal: String(base.ARCHS ?? "").includes("x86_64"),
-        ...make,
-      };
-    }
-  }
+  const fromYml = yml === null ? null : appFromProjectYml(yml);
+  if (fromYml) return { ...fromYml, ...make };
   const xcodeproj = top.find((f) => f.endsWith(".xcodeproj"));
   for (const path of infoPlists(dir)) {
     let info: Record<string, unknown>;
@@ -290,10 +268,12 @@ export async function protectProject(gh: GitHub, repo: string, deployKeys = fals
   return `- GitHub does not enforce rulesets on ${repo} (private repositories need a paid plan for them). A stolen App key could tag code the hub would sign. Make it public or use a paid plan. To accept the risk, set protection: off for this package in the hub's tapster.yml; until then the hub refuses it.`;
 }
 
-export type AddOptions = { hub: string | null; force: boolean; workflow: string; autoTag: boolean; dependabot: boolean };
+// update: what add does with an update of an entry the hub already has. The terminal proposes it; the setup page shows
+// it and leaves the click to the person.
+export type AddOptions = { hub: string | null; force: boolean; workflow: string; autoTag: boolean; dependabot: boolean; update: "propose" | "show" };
 
 export function addOptions(args: string[]): AddOptions {
-  const opts: AddOptions = { hub: null, force: false, workflow: "release.yml", autoTag: false, dependabot: false };
+  const opts: AddOptions = { hub: null, force: false, workflow: "release.yml", autoTag: false, dependabot: false, update: "propose" };
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (a === "--force") opts.force = true;
@@ -319,15 +299,6 @@ async function writeTemplate(dir: string, file: string, text: string, force: boo
   await write(`.github/workflows/${file}`, text);
   return `- wrote .github/workflows/${file} (build, attest, draft, ring the hub)`;
 }
-
-const hasHomebrew = (text: string) => {
-  try {
-    const cfg = parse(text) as { homebrew_casks?: unknown[]; brews?: unknown[] } | null;
-    return Boolean(cfg?.homebrew_casks?.[0] ?? cfg?.brews?.[0]);
-  } catch {
-    return false;
-  }
-};
 
 const quietGit = (dir: string, args: string[], maxOutput: number) => readGit(dir, args, { timeoutMs: 10_000, maxOutput }).catch(() => null);
 
@@ -440,6 +411,57 @@ async function latestDraftOrRelease(gh: GitHub, repo: string): Promise<{ assets:
   return r ? { assets: r.assets.map((a) => a.name), version: r.tag_name.slice(1) } : null;
 }
 
+// The committed file, as the release workflow's checkout sees it; cat-file runs none of the clone's filters.
+async function committedFile(dir: string, rel: string): Promise<Buffer | null> {
+  if (!/^[A-Za-z0-9._\/-]+$/.test(rel) || rel.split("/").includes("..") || rel.startsWith("-")) return null;
+  const blob = await readGit(dir, ["cat-file", "blob", `HEAD:${rel}`], { timeoutMs: 10_000, maxOutput: 16 << 20 }).catch(() => null);
+  return blob?.code === 0 ? blob.bytes : null;
+}
+
+function localSources(gh: GitHub, dir: string, repo: string, prepared: Prepared, apple: boolean, opts: AddOptions): EntrySources {
+  const flow = `.github/workflows/${prepared.kind === "go" ? opts.workflow : "release.yml"}`;
+  const text = readSmall(join(dir, flow));
+  return {
+    kind: prepared.kind,
+    apple,
+    goreleaser: async () => prepared.original ?? null,
+    plists: async () => localPlists(dir),
+    app: async () => {
+      const found = findApp(dir);
+      const yml = readSmall(join(dir, "project.yml"));
+      return found ? { feed: found.feed, helpers: yml === null ? [] : helpersOf(yml) } : null;
+    },
+    workflow: text === null ? null : { name: flow, text },
+    file: (path) => committedFile(dir, path),
+    draft: async (assets, commands) => refusedDraftApp(gh, repo, assets, await gh.listReleases(repo).catch(() => []), commands),
+  };
+}
+
+const byHand = (m: string) => `- write this in the hub entry by hand: ${m.replace(/\n/g, "\n  ")}`;
+
+// An entry the hub already has gains only what it lacks; with nothing missing, add says what it always said.
+async function updateExisting(gh: GitHub, hub: string, name: string, sources: EntrySources, opts: AddOptions, say: (line: string) => void): Promise<void> {
+  const pull = await openPull(gh, hub, "update", name).catch(() => null);
+  if (pull) return say(`- an update of the hub entry for ${name} waits in ${pull.html_url}; merge it to apply it`);
+  const text = await readHubFile(gh, hub, "tapster.yml", "main");
+  const entry = text === null ? null : entryText(text, name);
+  const found = entry === null ? null : await deriveUpdate(entry, sources);
+  if (!found?.entry) say(`- ${hub} already has the entry for ${name}; tapster leaves it as it is`);
+  else {
+    say(`- ${hub} has an entry for ${name} that lacks what the project ships now. tapster read it from ${found.from.join("; ")}. The change to tapster.yml:\n${changeText(entry!, found.entry).replace(/^/gm, "  ")}`);
+    if (opts.update === "show") say("  Propose it under Configuration below.");
+    else {
+      try {
+        say(`- proposed the update in ${(await proposeUpdate(gh, hub, name, found.entry, entry!)).url}; merge it on GitHub or under Projects in tapster setup`);
+      } catch (e) {
+        if (!(e instanceof TapsterError)) throw e;
+        say(`- the update was not proposed: ${e.reason}. ${e.fix}`);
+      }
+    }
+  }
+  for (const m of found?.manual ?? []) say(byHand(m));
+}
+
 export type Added = { pr: string | null; head: string | null; entry: string | null; installUrl: string; files: string[]; kind: Prepared["kind"] };
 
 export async function addProject(gh: GitHub, dir: string, repo: string, hub: string, facts: { slug: string; apple: boolean }, opts: AddOptions, say: (line: string) => void): Promise<Added> {
@@ -456,9 +478,11 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
   if (opts.autoTag) say(await setupAutoTag(gh, repo, project.default_branch));
   const existing = (await hubEntries(gh, hub)).find((e) => e.name === name || e.repo.toLowerCase() === repo.toLowerCase());
   let { entry, reason } = prepared;
+  const sources = localSources(gh, dir, repo, prepared, apple, opts);
   if (existing) {
     entry = null;
-    say(existing.pr ? `- the hub entry for ${existing.name} waits in ${existing.pr}; merge it to start publishing` : `- ${hub} already has the entry for ${existing.name}; tapster leaves it as it is`);
+    if (existing.pr) say(`- the hub entry for ${existing.name} waits in ${existing.pr}; merge it to start publishing`);
+    else await updateExisting(gh, hub, existing.name, sources, opts, say);
     if (!existing.description) {
       const desc = descriptionNote(project.description, name, true);
       if (desc.line) say(desc.line);
@@ -475,7 +499,7 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
   let head: string | null = null;
   if (entry) {
     entry = entryExtras(entry, { kind: prepared.kind, workflow: opts.workflow, dependabot: opts.dependabot });
-    const cask = goreleaserCask(prepared.original ?? null, { mac: apple, bundleId: (app) => bundleIdIn(dir, app) });
+    const cask = goreleaserCask(prepared.original ?? null, { mac: apple, bundleId: (app) => bundleIdIn(dir, app), commands: ((parse(entry) as { binaries?: string[] }[])[0]?.binaries ?? []).map((b) => b.split("/").pop()!) });
     if (cask.lines.length) entry = `${entry}\n${cask.lines.join("\n")}`;
     const own = cask.description && descProblems(cask.description, name).length === 0 ? cask.description : null;
     if (own) {
@@ -488,6 +512,11 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
     }
     if (cask.carried.length) say(`- carried the ${cask.carried.join(", ")} of GoReleaser's Homebrew section into the hub entry`);
     for (const n of cask.notes) say(`- ${n}`);
+    if (prepared.kind === "app") {
+      const more = await deriveUpdate(entry.replace(/^ {2}/gm, ""), sources);
+      if (more.entry) entry = more.entry.replace(/^(?=.)/gm, "  ");
+      for (const m of more.manual) say(byHand(m));
+    }
     try {
       ({ url: pr, head } = await proposeEntry(gh, hub, name, repo, entry));
       say(`- proposed the hub entry in ${pr}; merge it to start publishing`);
@@ -530,7 +559,13 @@ export async function releaseHint(gh: GitHub, repo: string): Promise<string> {
   const branch = (await gh.getRepo(repo)).default_branch;
   const tag = nextTag(highestTag(await repoTags(gh, repo)));
   const cmd = tagCommand(repo, tag, { branch });
-  return cmd
-    ? `Once they are on ${branch} and the hub entry is merged, release ${tag} by tagging the latest commit of ${branch} on GitHub:\n  ${cmd}`
-    : `Once they are on ${branch} and the hub entry is merged, release ${tag} from tapster setup, under Projects.`;
+  if (!cmd) return `Once they are on ${branch} and the hub entry is merged, release ${tag} from tapster setup, under Projects.`;
+  const tip = await headOf(gh, repo, branch);
+  if (tip?.skip) {
+    const known = await withParentTag(gh, repo, tip, await tagRefs(gh, repo).catch(() => null));
+    const parent = known && releasableParent(known);
+    const before = parent ? `\nOr tag the commit before it, which has no skip marker:\n  ${tagCommand(repo, tag, { sha: parent.sha })}` : "";
+    return `The latest commit of ${branch} says ${tip.skip}, so GitHub may not start the release workflow for a tag on it. Push a commit without it, then release ${tag} by tagging that one:\n  ${cmd}${before}`;
+  }
+  return `Once they are on ${branch} and the hub entry is merged, release ${tag} by tagging the latest commit of ${branch} on GitHub:\n  ${cmd}`;
 }

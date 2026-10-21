@@ -3,11 +3,11 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { AddOptionsView, AddView, CommitResult, DiffView, InspectView, Problem as ProblemView, ProjectStatus } from "../contract";
 import { type OneGo, addInOneGo, oneGoRefusal } from "../oneclick";
 import type { ProjectStepId } from "../status";
-import { changedOnly, lineDiff, notes } from "../steps";
+import { notes } from "../steps";
 import { post } from "./api";
 import { loadClones, loadHub, problemOf, recall, remember, say, statuses, statusOf, tilde } from "./state";
 import { KIND, Mark, StatusCard } from "./status";
-import { Badge, Busy, Cmd, Icon, Note, Problem, Spinner } from "./ui";
+import { Badge, Busy, Cmd, DiffBlock, Icon, Note, Problem, Spinner } from "./ui";
 
 export type SheetTarget = { repo: string; path: string | null; others: string[]; listed: boolean };
 
@@ -85,29 +85,22 @@ const CHANGE: Record<DiffView["files"][number]["change"], { label: string; tone?
 function Diff({ view }: { view: DiffView }) {
   return (
     <div class="stack tight files">
-      {view.files.map((f) => {
-        const lines = f.before === null ? null : changedOnly(lineDiff(f.before, f.after ?? ""));
-        return (
-          <details class="file" key={f.path} open={f.change !== "same"}>
-            <summary>
-              <Icon name="file" />
-              <code>{f.path}</code>
-              <Badge tone={CHANGE[f.change].tone}>{CHANGE[f.change].label}</Badge>
-            </summary>
+      {view.files.map((f) => (
+        <details class="file" key={f.path} open={f.change !== "same"}>
+          <summary>
+            <Icon name="file" />
+            <code>{f.path}</code>
+            <Badge tone={CHANGE[f.change].tone}>{CHANGE[f.change].label}</Badge>
+          </summary>
+          {f.before === null ? (
             <pre class="block diff" tabIndex={0}>
-              {lines
-                ? lines.map((l, i) => (
-                    <span key={i} class={l.kind === "gap" ? "hunk" : l.kind}>
-                      {l.kind === "add" ? "+ " : l.kind === "del" ? "- " : l.kind === "gap" ? "@ " : "  "}
-                      {l.text}
-                      {"\n"}
-                    </span>
-                  ))
-                : f.after}
+              {f.after}
             </pre>
-          </details>
-        );
-      })}
+          ) : (
+            <DiffBlock before={f.before} after={f.after ?? ""} />
+          )}
+        </details>
+      ))}
     </div>
   );
 }
