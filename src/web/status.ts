@@ -1,5 +1,5 @@
 import { compareSemver, parseTag } from "../semver";
-import type { ProjectStatus } from "./contract";
+import type { CommitView, ProjectStatus } from "./contract";
 
 export function highestTag(names: string[]): string | null {
   let best: string | null = null;
@@ -23,11 +23,33 @@ export function tagProblem(tag: string, highest: string | null): string | null {
   return null;
 }
 
+const SKIP = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]/i;
+const SKIP_TRAILER = /^skip-checks:\s*true\s*$/im;
+
+// GitHub runs no push workflow for a commit whose message carries one of these, so a tag on it may start no release.
+export function skipMarker(message: string): string | null {
+  return SKIP.exec(message)?.[0] ?? (SKIP_TRAILER.test(message) ? "skip-checks: true" : null);
+}
+
+const JQ_SKIP = String.raw`(?im)\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\]|^skip-checks:\\s*true\\s*$`;
+
 export function tagCommand(repo: string, tag: string, at: { sha: string } | { branch: string }): string | null {
   const head = `gh api --method POST repos/${repo}/git/refs -f ref=refs/tags/${tag} -f sha=`;
   if ("sha" in at) return /^[0-9a-f]{40,64}$/.test(at.sha) ? `${head}${at.sha}` : null;
-  return /^[A-Za-z0-9._/-]+$/.test(at.branch) ? `${head}"$(gh api repos/${repo}/commits/${at.branch} --jq .sha)"` : null;
+  if (!/^[A-Za-z0-9._/-]+$/.test(at.branch)) return null;
+  const guard = `if (.commit.message | test("${JQ_SKIP}")) then error("the latest commit of ${at.branch} carries a skip marker, so a tag on it may not start the release workflow") else .sha end`;
+  return `sha=$(gh api repos/${repo}/commits/${at.branch} --jq '${guard}') && ${head}"$sha"`;
 }
+
+const cleanParent = (head: CommitView) => (head.parent && !head.parent.skip ? ` Or tag the commit before it, ${head.parent.sha.slice(0, 7)}, which has no skip marker.` : "");
+
+export function skipNote(branch: string, head: CommitView): string | null {
+  if (!head.skip) return null;
+  return `The latest commit on ${branch} says ${head.skip}, so GitHub may not start the release workflow for a tag on it. Push a commit without it to ${branch} and click Refresh.${cleanParent(head)}`;
+}
+
+export const skipFix = (branch: string, head: CommitView) =>
+  `GitHub may not start the release workflow for a tag on that commit. Push a commit without it to ${branch}, then click Release again.${cleanParent(head)}`;
 
 export type ProjectStepId = "setup" | "protect" | "entry" | "app" | "release" | "secrets";
 export type ProjectStep = { id: ProjectStepId; state: "done" | "open" | "wait" | "attention"; label: string };
@@ -45,7 +67,9 @@ export function projectSteps(s: ProjectStatus): ProjectStep[] {
         ? { id: "release", state: "done", label: `Published ${r.latest.tag}` }
         : r.atHead
           ? { id: "release", state: "done", label: `Nothing new since ${r.atHead}` }
-          : { id: "release", state: "open", label: r.autoTag ? "Release from the workflow" : `Release ${r.next}` };
+          : r.head?.skip && !r.autoTag
+            ? { id: "release", state: "open", label: `Push a commit without ${r.head.skip}` }
+            : { id: "release", state: "open", label: r.autoTag ? "Release from the workflow" : `Release ${r.next}` };
   const steps: ProjectStep[] = [
     { id: "setup", state: s.setup.ok ? "done" : "open", label: "Set up the release workflow" },
     { id: "protect", state: s.protection.ok || s.protection.off ? "done" : "open", label: "Protect the repository" },
@@ -72,6 +96,8 @@ export function canRelease(s: ProjectStatus): { ok: boolean; why: string | null 
   if (!s.setup.ok) return { ok: false, why: `First the release workflow on ${s.defaultBranch} must be tapster's.` };
   if (!s.release.head) return { ok: false, why: `GitHub did not show the latest commit on ${s.defaultBranch}. Check again in a moment.` };
   if (s.release.atHead) return { ok: false, why: `Nothing new on ${s.defaultBranch} since ${s.release.atHead}.` };
+  const skip = skipNote(s.defaultBranch, s.release.head);
+  if (skip) return { ok: false, why: skip };
   return { ok: true, why: null };
 }
 

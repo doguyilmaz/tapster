@@ -2,7 +2,7 @@ import { parse } from "yaml";
 import { z } from "zod";
 import { noteIn } from "../../draftnote";
 import { GitHubError, TapsterError } from "../../errors";
-import type { GitHub } from "../../github";
+import type { GitHub, Release as GitHubRelease } from "../../github";
 import { readHubFile } from "../../hubcommit";
 import { protectionProblems } from "../../rulesets";
 import { TAG, compareSemver, parseTag } from "../../semver";
@@ -10,7 +10,8 @@ import type { State } from "../../state";
 import { type HubEntry, type TagRef, hubEntries, hubFacts, installLink, releaseSecrets, tagAt, tagCommit, tagRefs } from "../../cli/hubpr";
 import type { CommitView, FollowView, ProjectStatus, StatusView } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
-import { highestTag, nextTag, tagProblem } from "../status";
+import { highestTag, nextTag, skipFix, skipMarker, tagProblem } from "../status";
+import { configOf } from "./config";
 import { proposal } from "./entry";
 import { checkHub, hubRunList, me, startHubRun } from "./hub";
 import { type HubChecks, hubChecks, reachOf, reachRoutes, stateOf } from "./reach";
@@ -41,29 +42,39 @@ export function setupProblems(o: { kind: string; branch: string; workflowName: s
   return out;
 }
 
-type Shared = { gh: GitHub; hub: string; slug: string | null; ownerId: number; state: State; checks: HubChecks };
+type Shared = { gh: GitHub; hub: string; slug: string | null; apple: boolean; ownerId: number; state: State; checks: HubChecks; hubText: string | null; memo: Map<string, unknown> };
 
 async function shared(s: Session, gh: GitHub, hub: string, login: string): Promise<Shared> {
-  const [slug, stateText, owner, checks] = await Promise.all([
-    hubFacts(gh, hub).then((f) => f.slug, (e) => (e instanceof TapsterError ? null : Promise.reject(e))),
+  const [facts, stateText, owner, checks, hubText] = await Promise.all([
+    hubFacts(gh, hub).catch((e) => (e instanceof TapsterError ? null : Promise.reject(e))),
     readHubFile(gh, hub, ".tapster/state.json", "main"),
     gh.json<{ id: number }>("GET", `/users/${login}`),
     hubChecks(s, gh, hub),
+    readHubFile(gh, hub, "tapster.yml", "main"),
   ]);
-  return { gh, hub, slug, ownerId: owner.id, state: stateOf(stateText), checks };
+  if (s.memo.size > 500) s.memo.clear();
+  return { gh, hub, slug: facts?.slug ?? null, apple: facts?.apple ?? false, ownerId: owner.id, state: stateOf(stateText), checks, hubText, memo: s.memo };
 }
 
 const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim();
 
-type Release = { tag_name: string; draft: boolean; html_url: string; body?: string | null };
+type Release = GitHubRelease & { html_url: string };
 
 const newest = (list: Release[]) => list.filter((r) => TAG.test(r.tag_name)).sort((a, b) => compareSemver(parseTag(b.tag_name)!, parseTag(a.tag_name)!))[0] ?? null;
 
-async function headOf(gh: GitHub, repo: string, branch: string): Promise<CommitView | null> {
+type Commit = { sha: string; html_url: string; commit: { message: string; committer: { date: string } | null }; parents?: { sha: string }[] };
+
+const subjectOf = (c: Commit) => clean(c.commit.message.split("\n")[0] ?? "").slice(0, 120);
+
+export async function headOf(gh: GitHub, repo: string, branch: string): Promise<CommitView | null> {
   try {
     const sha = (await gh.json<{ object: { sha: string } }>("GET", `/repos/${repo}/git/ref/heads/${encodeURIComponent(branch)}`)).object.sha;
-    const c = await gh.json<{ sha: string; html_url: string; commit: { message: string; committer: { date: string } | null } }>("GET", `/repos/${repo}/commits/${sha}`);
-    return { sha: c.sha, subject: clean(c.commit.message.split("\n")[0] ?? "").slice(0, 120), date: c.commit.committer?.date ?? "", url: c.html_url };
+    const c = await gh.json<Commit>("GET", `/repos/${repo}/commits/${sha}`);
+    const head: CommitView = { sha: c.sha, subject: subjectOf(c), date: c.commit.committer?.date ?? "", url: c.html_url };
+    const skip = skipMarker(c.commit.message);
+    if (!skip) return head;
+    const before = c.parents?.length === 1 ? await gh.json<Commit>("GET", `/repos/${repo}/commits/${c.parents[0]!.sha}`).catch(() => null) : null;
+    return { ...head, skip, parent: before && { sha: before.sha, subject: subjectOf(before), url: before.html_url, skip: skipMarker(before.commit.message) } };
   } catch (e) {
     if (e instanceof GitHubError) return null;
     throw e;
@@ -97,6 +108,12 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
   const highest = highestTag([...refs.map((r) => r.name), ...releases.map((r) => r.tag_name)]);
   const atHead = head ? await tagAt(gh, e.repo, refs, head.sha) : null;
   const setup = setupProblems({ kind: e.kind, branch, workflowName: e.workflow, goreleaser, workflow });
+  const config =
+    e.state === "merged"
+      ? await configOf(gh, { hub: sh.hub, apple: sh.apple, hubText: sh.hubText, name: e.name, repo: e.repo, kind: e.kind, ref: head?.sha ?? branch, goreleaser, workflow: workflow === null ? null : { name: `.github/workflows/${e.workflow}`, text: workflow }, releases, memo: sh.memo }).catch((err) =>
+          err instanceof TapsterError || err instanceof GitHubError ? null : Promise.reject(err),
+        )
+      : null;
   return {
     name: e.name,
     repo: e.repo,
@@ -118,6 +135,7 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
     },
     secrets: { names: secrets, published: published.some((p) => p.status === "published") },
     unreadable: null,
+    config,
   };
 }
 
@@ -187,6 +205,7 @@ async function release(c: Ctx) {
   const head = await headOf(gh, entry.repo, branch);
   if (!head) throw new TapsterError(`GitHub did not show the latest commit on ${branch}`, "Try again in a moment.");
   if (head.sha !== body.sha) throw new TapsterError(`${branch} moved since this page read it`, `It now ends at ${head.sha.slice(0, 7)}, ${head.subject}. Check that commit, then click Release again.`);
+  if (head.skip) throw new TapsterError(`the latest commit on ${branch} says ${head.skip}`, skipFix(branch, head));
   const [refs, releases] = await Promise.all([tagRefs(gh, entry.repo), gh.json<{ tag_name: string }[]>("GET", `/repos/${entry.repo}/releases?per_page=100`)]).catch(() => {
     throw new TapsterError(`GitHub did not list the tags of ${entry.repo}`, "Try again in a moment. tapster releases only once it has checked the versions.");
   });

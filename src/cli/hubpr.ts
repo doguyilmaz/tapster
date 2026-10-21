@@ -3,6 +3,8 @@ import { NAME, PLATFORMS, type Platform, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { readHubFile } from "../hubcommit";
+import { entryText as entryLines, withEntryText } from "../hubentry";
+import { changeText } from "../web/steps";
 import { TAG, compareSemver, parseTag } from "../semver";
 import { highestTag } from "../web/status";
 import { hubEnv } from "./gh";
@@ -219,6 +221,15 @@ function readCustomBlock(lines: string[], blocks: boolean): { app: string | null
   return seen ? { app, lines: rest } : flat();
 }
 
+export const hasHomebrew = (text: string) => {
+  try {
+    const cfg = parse(text) as { homebrew_casks?: unknown[]; brews?: unknown[] } | null;
+    return Boolean(cfg?.homebrew_casks?.[0] ?? cfg?.brews?.[0]);
+  } catch {
+    return false;
+  }
+};
+
 export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { lines: string[]; description: string | null; carried: string[]; notes: string[] } {
   type Doc = { homebrew_casks?: GoCask[]; brews?: GoCask[] } | null;
   let cfg: Doc = null;
@@ -365,6 +376,21 @@ async function hubFile(gh: GitHub, hub: string): Promise<{ text: string; sha: st
   }
 }
 
+type HubPull = { branch: string; title: string; text: string; sha: string; body: string; taken: string };
+
+async function openHubPull(gh: GitHub, hub: string, p: HubPull): Promise<{ url: string; head: string }> {
+  const head = (await gh.json<{ object: { sha: string } }>("GET", `/repos/${hub}/git/ref/heads/main`)).object.sha;
+  try {
+    await gh.json("POST", `/repos/${hub}/git/refs`, { ref: `refs/heads/${p.branch}`, sha: head });
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 422) throw new TapsterError(`the hub already has a branch ${p.branch}`, p.taken);
+    throw e;
+  }
+  const put = await gh.json<{ commit: { sha: string } }>("PUT", `/repos/${hub}/contents/tapster.yml`, { message: p.title, content: Buffer.from(p.text).toString("base64"), sha: p.sha, branch: p.branch });
+  const pr = await gh.json<{ html_url: string }>("POST", `/repos/${hub}/pulls`, { title: p.title, head: p.branch, base: "main", body: p.body });
+  return { url: pr.html_url, head: put.commit.sha };
+}
+
 export async function proposeEntry(gh: GitHub, hub: string, name: string, repo: string, entry: string): Promise<{ url: string; head: string }> {
   if (!NAME.test(name)) throw new TapsterError(`${name} is not a valid package name`, "Use lowercase letters, digits and dashes.");
   const { text, sha } = await hubFile(gh, hub);
@@ -372,18 +398,21 @@ export async function proposeEntry(gh: GitHub, hub: string, name: string, repo: 
   const { invalid } = parseHub(next, hub.split("/")[0]!);
   const mine = invalid.find((i) => i.name === name);
   if (mine) throw new TapsterError(`the hub would refuse this entry: ${mine.reason}`, mine.fix);
-  const branch = `tapster-add-${name}`;
-  const head = (await gh.json<{ object: { sha: string } }>("GET", `/repos/${hub}/git/ref/heads/main`)).object.sha;
-  try {
-    await gh.json("POST", `/repos/${hub}/git/refs`, { ref: `refs/heads/${branch}`, sha: head });
-  } catch (e) {
-    if (e instanceof GitHubError && e.status === 422) throw new TapsterError(`the hub already has a branch ${branch}`, `Merge or delete it on ${hub}, then run tapster add again.`);
-    throw e;
-  }
-  const put = await gh.json<{ commit: { sha: string } }>("PUT", `/repos/${hub}/contents/tapster.yml`, { message: `Add ${name}`, content: Buffer.from(next).toString("base64"), sha, branch });
   const body = [`tapster add prepared this entry for ${repo}:`, "", "```yaml", entry, "```", "", `Merge it to let the hub publish ${repo}.`].join("\n");
-  const pr = await gh.json<{ html_url: string }>("POST", `/repos/${hub}/pulls`, { title: `Add ${name}`, head: branch, base: "main", body });
-  return { url: pr.html_url, head: put.commit.sha };
+  return openHubPull(gh, hub, { branch: `tapster-add-${name}`, title: `Add ${name}`, text: next, sha, body, taken: `Merge or delete it on ${hub}, then run tapster add again.` });
+}
+
+// Opens tapster-update-<name>, a pull request that changes only the lines of that entry in tapster.yml.
+export async function proposeUpdate(gh: GitHub, hub: string, name: string, entry: string): Promise<{ url: string; head: string; entry: string }> {
+  if (!NAME.test(name)) throw new TapsterError(`${name} is not a valid package name`, "Use lowercase letters, digits and dashes.");
+  const { text, sha } = await hubFile(gh, hub);
+  const next = withEntryText(text, name, entry, hub.split("/")[0]!);
+  const before = entryLines(text, name)!;
+  const after = entryLines(next, name)!;
+  if (next === text) throw new TapsterError(`the entry of ${name} already reads like this`, "There is nothing to propose.");
+  const body = [`tapster proposes this change to the entry of ${name} in tapster.yml:`, "", "```diff", changeText(before, after), "```", "", "It changes no other line. Merge it to apply it."].join("\n");
+  const pr = await openHubPull(gh, hub, { branch: `tapster-update-${name}`, title: `Update ${name}`, text: next, sha, body, taken: `An earlier update of ${name} waits there. Merge or close its pull request on ${hub} and delete the branch, then try again.` });
+  return { ...pr, entry: after };
 }
 
 export type HubEntry = { name: string; repo: string; kind: "go" | "bun" | "app"; workflow: string; protection: string; description: string | null; state: "merged" | "proposed"; pr: string | null };

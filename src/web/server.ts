@@ -37,6 +37,7 @@ export type Session = {
   cloudflare: Map<string, { token: string; accounts: CloudflareAccount[]; target: CloudflareTarget | null; at: number }>;
   sparkle: Map<string, { seed: string; at: number }>;
   dispatched: Map<string, { at: number; known: number[] }>;
+  memo: Map<string, unknown>;
   touched: number;
   login: string | null;
   link(): string;
@@ -83,6 +84,7 @@ export function newSession(deps: Deps, port: number): Session {
     cloudflare: new Map(),
     sparkle: new Map(),
     dispatched: new Map(),
+    memo: new Map(),
     touched: Date.now(),
     login: null,
     link: () => {

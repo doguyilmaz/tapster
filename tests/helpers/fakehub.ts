@@ -32,7 +32,7 @@ export type FakeRepo = {
   annotated: Map<string, string>;
   branches: Map<string, Map<string, string>>;
   bases: Map<string, Map<string, string>>;
-  commit: { message: string; date: string };
+  commit: { message: string; date: string; parent?: { sha: string; message: string } };
   history: { activity: { actor: string; after: string; type: string }[]; commits: { sha: string; files: Map<string, string>; message: string }[] } | null;
   merges: string[];
   pages: string | null;
@@ -325,7 +325,14 @@ export class FakeHub {
     const commit = /^\/commits\/([^/]+)$/.exec(rest);
     if (commit) {
       const at = commit[1] === "main" ? r.head : commit[1]!;
-      return json({ sha: at, html_url: `https://github.com/${full}/commit/${at}`, commit: { message: r.commit.message, committer: { date: r.commit.date } } });
+      const parent = r.commit.parent;
+      const message = parent && at === parent.sha ? parent.message : r.commit.message;
+      return json({ sha: at, html_url: `https://github.com/${full}/commit/${at}`, commit: { message, committer: { date: r.commit.date } }, parents: parent && at !== parent.sha ? [{ sha: parent.sha }] : [] });
+    }
+    if (rest === "/commits" && r.history) {
+      const path = q.get("path") ?? "";
+      const list = r.history.commits.filter((c, i) => c.files.get(path) !== r.history!.commits[i - 1]?.files.get(path)).reverse();
+      return json(list.map((c) => ({ sha: c.sha, commit: { message: c.message } })));
     }
     const gitCommit = /^\/git\/commits\/([0-9a-f]+)$/.exec(rest);
     if (gitCommit) {

@@ -95,7 +95,7 @@ export type AddView = { lines: string[]; pr: string | null; head: string | null;
 
 export type DiffView = { files: { path: string; before: string | null; after: string | null; change: "create" | "update" | "same" | "remove" }[] };
 
-export type CommitView = { sha: string; subject: string; date: string; url: string };
+export type CommitView = { sha: string; subject: string; date: string; url: string; skip?: string; parent?: { sha: string; subject: string; url: string; skip: string | null } | null };
 
 export type ReachView = {
   reaches: boolean | null;
@@ -128,7 +128,20 @@ export type ProjectStatus = {
   };
   secrets: { names: string[]; published: boolean };
   unreadable: string | null;
+  config?: ConfigView | null;
 };
+
+// entry: this project's lines in main's tapster.yml. update: the same lines with what tapster derived from the project
+// added (null when nothing is missing). pending: an update waiting in the hub's pull request from tapster-update-<name>.
+export type ConfigView = {
+  entry: string;
+  update: string | null;
+  from: string[];
+  manual: string[];
+  pending: { pr: string; head: string | null; entry: string | null; blocked: string | null } | null;
+};
+
+export type EntryCheck = { before: string; problem: Problem | null; same: boolean };
 
 export type StatusView = { projects: ProjectStatus[] };
 
