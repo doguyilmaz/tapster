@@ -72,9 +72,10 @@ Serves tapster's tools to an AI assistant over MCP, on stdin and stdout. See
 
 ## tapster upgrade
 
-Tells how this tapster was installed and prints the command that upgrades it. That is `brew upgrade --cask tapster`
-for Homebrew, `bunx @doguyilmaz/tapster@latest` for bunx, the global Bun or npm command for those installs and
-`git pull` in a checkout. It changes nothing itself and takes no options.
+Tells how this tapster was installed and upgrades it. For Homebrew it runs `brew update` and
+`brew upgrade --cask tapster`; for a global Bun or npm install it runs that tool's install command. For bunx and a
+checkout it prints what to run instead: `bunx @doguyilmaz/tapster@latest` or `git pull`. It takes no options. To move
+the hub to the new version, open tapster setup and write the Hub files.
 
 ## tapster --version
 

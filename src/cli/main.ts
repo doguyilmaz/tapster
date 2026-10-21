@@ -64,8 +64,8 @@ const help: Record<string, string> = {
   They use your GitHub CLI sign-in and never touch your keys.`,
   upgrade: `tapster upgrade: say how to upgrade this tapster
 
-  It tells how this tapster was installed (Homebrew, bunx, a global Bun or npm install, or a checkout)
-  and prints the command that upgrades it. It changes nothing itself.`,
+  It tells how this tapster was installed and upgrades it: Homebrew, a global Bun or npm install.
+  For bunx or a checkout it prints the command instead.`,
 };
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -80,7 +80,7 @@ try {
   else if (cmd === "doctor") {
     if (args.length) throw new TapsterError(`unknown option ${args.join(" ")}`, "tapster doctor takes no options.");
     process.exitCode = await doctor(args);
-  } else if (cmd === "upgrade") upgrade(args);
+  } else if (cmd === "upgrade") await upgrade(args);
   else {
     const unknown = cmd && cmd !== "help" && cmd !== "--help";
     if (unknown) console.error(`tapster: unknown command "${cmd}"`);
