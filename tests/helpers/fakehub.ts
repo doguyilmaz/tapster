@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { createHash, createVerify, generateKeyPairSync } from "node:crypto";
 import { parse } from "yaml";
 import { TapsterError } from "../../src/errors";
 import { REACH_TITLE, reachNote } from "../../src/reachnote";
@@ -35,6 +35,7 @@ export type FakeRepo = {
   commit: { message: string; date: string };
   history: { activity: { actor: string; after: string; type: string }[]; commits: { sha: string; files: Map<string, string>; message: string }[] } | null;
   merges: string[];
+  pages: string | null;
 };
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => new Response(status === 204 ? null : JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
@@ -44,6 +45,8 @@ export class FakeHub {
   readonly repos = new Map<string, FakeRepo>();
   readonly pem = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString();
   installation: { id: number; repos: string[] } | null = null;
+  bell: { id: number; slug: string; pem: string; installation: { id: number; repos: string[] } | null } | null = null;
+  manifestApp: { id: number; slug: string; pem: string } | null = null;
   runDelay: number | null = null;
   listDelay = 0;
   appKeyWorks = true;
@@ -84,6 +87,7 @@ export class FakeHub {
       commit: { message: "Start", date: "2026-10-01T09:00:00Z" },
       history: null,
       merges: ["merge", "squash", "rebase"],
+      pages: null,
       ...o,
     };
     this.repos.set(full.toLowerCase(), r);
@@ -212,8 +216,41 @@ export class FakeHub {
     const method = (init.method ?? "GET").toUpperCase();
     const body = typeof init.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : {};
     this.calls.push(`${method} ${url.pathname}`);
-    return this.route(method, url, body);
+    const auth = (init.headers as Record<string, string> | undefined)?.Authorization ?? "";
+    return this.asBell(auth, method, url.pathname) ?? this.route(method, url, body);
   };
+
+  // The doorbell App signs with its own key; its installation is separate from the hub App's.
+  private appOf(auth: string): number | null {
+    const jwt = auth.replace(/^Bearer /, "").split(".");
+    if (jwt.length !== 3) return null;
+    let iss: number;
+    try {
+      iss = Number((JSON.parse(Buffer.from(jwt[1]!, "base64url").toString()) as { iss: string }).iss);
+    } catch {
+      return null;
+    }
+    const pem = iss === this.bell?.id ? this.bell.pem : iss === 777 ? this.pem : null;
+    if (!pem || !createVerify("RSA-SHA256").update(`${jwt[0]}.${jwt[1]}`).verify(pem, Buffer.from(jwt[2]!, "base64url"))) return -1;
+    return iss;
+  }
+
+  private asBell(auth: string, method: string, p: string): Response | null {
+    const app = this.appOf(auth);
+    if (p === "/app" && app !== null) return app > 0 ? json({ id: app }) : json({ message: "A JSON web token could not be decoded" }, 401);
+    const bell = this.bell;
+    if (!bell) return null;
+    if (auth === "Bearer ghs_bell") {
+      if (p === "/installation/repositories") return json({ total_count: bell.installation?.repos.length ?? 0, repositories: (bell.installation?.repos ?? []).map((full_name) => ({ full_name })) });
+      if (p === "/installation/token") return json({}, 204);
+      return json({ message: "Resource not accessible by integration" }, 403);
+    }
+    if (app !== bell.id) return null;
+    const hubInstall = /^\/repos\/([^/]+\/[^/]+)\/installation$/.exec(p);
+    if (hubInstall) return bell.installation?.repos.some((r) => r.toLowerCase() === hubInstall[1]!.toLowerCase()) ? json({ id: bell.installation.id }) : json({ message: "Not Found" }, 404);
+    if (p === `/app/installations/${bell.installation?.id}/access_tokens` && method === "POST") return json({ token: "ghs_bell" }, 201);
+    return json({ message: `fake doorbell App has no ${method} ${p}` }, 404);
+  }
 
   private route(method: string, url: URL, body: Record<string, unknown>): Response {
     const p = url.pathname;
@@ -229,7 +266,7 @@ export class FakeHub {
       return json({ full_name: `${this.login}/${r.name}` }, 201);
     }
     const manifest = /^\/app-manifests\/([^/]+)\/conversions$/.exec(p);
-    if (manifest && method === "POST") return json({ id: 777, slug: `tapster-${this.login}-tap`, pem: this.pem, owner: { login: this.login } }, 201);
+    if (manifest && method === "POST") return json({ ...(this.manifestApp ?? { id: 777, slug: `tapster-${this.login}-tap`, pem: this.pem }), owner: { login: this.login } }, 201);
     if (p === `/users/${this.login}/installation`) return !this.appKeyWorks ? json({ message: "Bad credentials" }, 401) : this.installation ? json({ id: this.installation.id }) : json({}, 404);
     const instToken = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(p);
     if (instToken) return json({ token: "ghs_fake" }, 201);
@@ -450,7 +487,18 @@ export class FakeHub {
       const job = r.runs.flatMap((x) => x.jobs ?? []).find((j) => j.id === Number(notes[1]));
       return job ? json(job.annotations) : json({ message: "not found" }, 404);
     }
-    if (rest === "/pages") return json({}, 404);
+    if (rest === "/pages") {
+      if (method === "POST") {
+        if (r.pages) return json({ message: "GitHub Pages is already enabled." }, 409);
+        r.pages = String(body.build_type);
+        return json({ build_type: r.pages }, 201);
+      }
+      if (method === "PUT") {
+        r.pages = String(body.build_type);
+        return json({}, 204);
+      }
+      return r.pages ? json({ build_type: r.pages }) : json({}, 404);
+    }
     return json({ message: `fake has no ${method} ${rest}` }, 404);
   }
 }

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { appWorkflow, bunWorkflow, adaptReleaseWorkflow } from "../src/cli/add";
 import { doorbellCheck } from "../src/cli/doctor";
-import { bunEnv, doorbellConfig, doorbellManifest, doorbellStage, ringStep, workerOrigin } from "../src/cli/doorbell";
+import { checkVars, doorbellManifest, doorbellStage, ringStep } from "../src/cli/doorbell";
 import pins from "../templates/pins.json";
 
 test("the dispatch App is private and can only start workflows", () => {
@@ -15,27 +15,11 @@ test("the dispatch App is private and can only start workflows", () => {
   expect(m.name).toBe("tapster-doorbell-o-tap");
 });
 
-test("the Worker config holds the variables and no secret", () => {
-  const text = doorbellConfig({ APP_ID: "1001", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42", INTERVAL: "10" });
-  const c = JSON.parse(text) as { name: string; main: string; vars: Record<string, string>; workers_dev: boolean; triggers: { crons: string[] } };
-  expect(c.triggers).toEqual({ crons: ["*/10 * * * *"] });
-  expect(JSON.parse(doorbellConfig({ APP_ID: "1", INSTALLATION_ID: "7", HUB: "o/h", HUB_ID: "5", OWNER_ID: "4", INTERVAL: "60" })).triggers).toEqual({ crons: ["0 * * * *"] });
-  expect(c.name).toBe("tapster-doorbell");
-  expect(c.main).toBe("worker.ts");
-  expect(c.workers_dev).toBe(true);
-  expect(c.vars).toEqual({ APP_ID: "1001", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42", INTERVAL: "10" });
-  expect(text).not.toContain("APP_KEY");
-  expect(() => doorbellConfig({ APP_ID: "x", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42", INTERVAL: "10" })).toThrow();
-});
-
-test("the Worker address comes from Wrangler's output file", () => {
-  const out = [
-    JSON.stringify({ version: 1, type: "wrangler-session", wrangler_version: "4.151.1" }),
-    JSON.stringify({ version: 1, type: "deploy", worker_name: "tapster-doorbell", targets: ["https://tapster-doorbell.dogu.workers.dev"] }),
-  ].join("\n");
-  expect(workerOrigin(out)).toBe("https://tapster-doorbell.dogu.workers.dev");
-  expect(workerOrigin(JSON.stringify({ version: 1, type: "deploy", targets: [] }))).toBeNull();
-  expect(workerOrigin("not json")).toBeNull();
+test("the Worker's variables are numbers and the hub name, nothing else", () => {
+  const vars = { APP_ID: "1001", INSTALLATION_ID: "77", HUB: "o/homebrew-tap", HUB_ID: "555", OWNER_ID: "42", INTERVAL: "10" };
+  expect(checkVars(vars)).toEqual(vars);
+  expect(() => checkVars({ ...vars, APP_ID: "x" })).toThrow("APP_ID must be a number");
+  expect(() => checkVars({ ...vars, HUB: "o/h\nx" })).toThrow("the hub name is not owner/repo");
 });
 
 const RING = "Ring the tapster hub";
@@ -83,10 +67,6 @@ test("a doorbell setup that stopped after creating its App continues with that A
   expect(doorbellStage(v(["TAPSTER_DOORBELL_APP_ID", "TAPSTER_DOORBELL_APP_SLUG", "TAPSTER_DOORBELL"]))).toBe("done");
 });
 
-test("Wrangler is installed by the bun inside a compiled tapster", () => {
-  expect(bunEnv("/usr/bin:/bin")).toEqual({ PATH: "/usr/bin:/bin", BUN_BE_BUN: "1" });
-});
-
 test("a doorbell or Linux key before init says to run init first", async () => {
   const { hubEnv } = await import("../src/cli/gh");
   const { GitHubError } = await import("../src/errors");
@@ -94,11 +74,4 @@ test("a doorbell or Linux key before init says to run init first", async () => {
   await expect(hubEnv(missing, "o/hub", "variables")).rejects.toThrow("o/hub has no tapster environment yet");
   const some = { json: async () => ({ variables: [{ name: "A", value: "1" }] }) } as never;
   expect(await hubEnv(some, "o/hub", "variables")).toEqual([{ name: "A", value: "1" }]);
-});
-
-test("a failed Wrangler run shows the end of what Wrangler said", async () => {
-  const { wranglerSaid } = await import("../src/cli/doorbell");
-  expect(wranglerSaid({ stdout: "Uploading\n", stderr: "\n✘ [ERROR] You need a workers.dev subdomain\n\nSee the dashboard\n" })).toBe("✘ [ERROR] You need a workers.dev subdomain");
-  expect(wranglerSaid({ stdout: "", stderr: "" })).toBe("no output");
-  expect(wranglerSaid({ stdout: "", stderr: "✘ [ERROR] A request to the Cloudflare API failed.\n\nLogs were written to /x.log\n" })).toBe("✘ [ERROR] A request to the Cloudflare API failed.");
 });

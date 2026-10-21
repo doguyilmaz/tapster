@@ -4,7 +4,7 @@ import { parse } from "yaml";
 import { linuxNeeded } from "../src/action/check";
 import { linuxCheck } from "../src/cli/doctor";
 import { fillWorkflow } from "../src/cli/hubfiles";
-import { linuxKeyAllowed } from "../src/cli/init";
+import { linuxKeyAllowed } from "../src/cli/linuxkey";
 import { parseConfig } from "../src/config";
 import pins from "../templates/pins.json";
 

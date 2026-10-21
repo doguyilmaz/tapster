@@ -1,4 +1,4 @@
-import { DoorbellError, type KeySource, jwksSource, verifyOidc } from "./jwt";
+import { DoorbellError, type KeySource, jwksSource, verifyOidc } from "./jwt.ts";
 
 export type Env = { APP_ID: string; INSTALLATION_ID: string; HUB: string; HUB_ID: string; OWNER_ID: string; INTERVAL?: string; APP_KEY: string };
 

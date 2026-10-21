@@ -39,7 +39,9 @@ const help: Record<string, string> = {
   tapster init --doorbell      deploy the Worker that starts the hub when a project releases
   tapster init --linux         make the key for the apt and dnf repositories
   tapster init --workflow [--every <minutes>] [--tapster <commit>]
-                               rewrite the hub workflow, pinned to this tapster`,
+                               rewrite the hub workflow, pinned to this tapster
+
+  The doorbell asks for a Cloudflare API token with a hidden prompt. Set CLOUDFLARE_API_TOKEN to skip it.`,
   add: `tapster add: prepare this project clone and propose it to the hub
 
   tapster add [--hub owner/repo] [--workflow file.yml] [--auto-tag] [--allow-dependabot] [--force]
