@@ -95,7 +95,7 @@ export type AddView = { lines: string[]; pr: string | null; head: string | null;
 
 export type DiffView = { files: { path: string; before: string | null; after: string | null; change: "create" | "update" | "same" | "remove" }[] };
 
-export type CommitView = { sha: string; subject: string; date: string; url: string; skip?: string; parent?: { sha: string; subject: string; url: string; skip: string | null } | null };
+export type CommitView = { sha: string; subject: string; date: string; url: string; skip?: string; parent?: { sha: string; subject: string; url: string; skip: string | null; tag?: string } | null };
 
 export type ReachView = {
   reaches: boolean | null;

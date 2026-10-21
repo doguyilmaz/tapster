@@ -65,6 +65,26 @@ test("an edit that reaches another entry or the rest of tapster.yml is refused",
   expect(reason("name: aims\nrepo: o/aims")).toBe("the box must hold exactly one entry that starts with - name:");
 });
 
+test("an entry that leans on another entry's anchor cannot be read or edited on its own, and nothing throws", () => {
+  const shared = HUB.replace("    binaries: [aims]\n", "    binaries: [aims]\n    license: &lic MIT\n").replace("binaries: [ebb],", "binaries: [ebb], license: *lic,");
+  expect(entryText(shared, "ebb")).toBeNull();
+  expect(entryText(shared, "aims")).toContain("license: &lic MIT");
+  expect(() => withEntryText(shared, "ebb", "- { name: ebb, repo: o/ebb }", "o")).toThrow("tapster cannot read the entry of ebb on its own in tapster.yml");
+  expect(() => withEntryText(HUB, "aims", `${AIMS}\n  license: *nowhere`, "o")).toThrow("the entry is not valid YAML");
+});
+
+test("an untouched entry comes back byte for byte, blank lines with spaces and CRLF files included", () => {
+  const spaced = HUB.replace("    binaries: [aims]\n", "    binaries: [aims]\n      \n");
+  expect(withEntryText(spaced, "aims", entryText(spaced, "aims")!, "o")).toBe(spaced);
+  expect(withEntryText(spaced, "aims", entryText(spaced, "aims")!.replace("repo: o/aims", "repo: o/aims\n  license: MIT"), "o")).toBe(spaced.replace("    repo: o/aims\n", "    repo: o/aims\n    license: MIT\n"));
+  const crlf = HUB.replace(/\n/g, "\r\n");
+  expect(entryText(crlf, "aims")).toBe(AIMS);
+  expect(withEntryText(crlf, "aims", AIMS, "o")).toBe(crlf);
+  expect(withEntryText(crlf, "aims", `${AIMS}\n  license: MIT`, "o")).toBe(crlf.replace('    zap: { trash: ["~/.config/aims"] }\r\n', '    zap: { trash: ["~/.config/aims"] }\r\n    license: MIT\r\n'));
+  const keep = "version: 1\ntap: o/tap\npackages:\n  - name: t\n    repo: o/t\n    binaries: [t]\n    assets: { linux-amd64: t.tar.gz }\n    cask:\n      caveats: |+\n        keep\n\n";
+  expect(withEntryText(keep, "t", entryText(keep, "t")!, "o")).toBe(keep);
+});
+
 test("a pull request that changes more than the entry is not read as an entry change", () => {
   const edited = withEntryText(HUB, "aims", `${AIMS}\n  license: MIT`, "o");
   expect(changedEntry(HUB, edited, "aims", "o")).toBe(`${AIMS}\n  license: MIT`);

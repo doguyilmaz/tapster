@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
-import { basename, join, sep } from "node:path";
+import { basename, join } from "node:path";
 import { isMap, isSeq, parse, parseDocument, type Scalar, YAMLMap } from "yaml";
 import { appFromProjectYml, bundleIdOf, feedName, helpersOf, literal } from "../appsource";
 import { type EntrySources, deriveUpdate, refusedDraftApp } from "../entryupdate";
@@ -23,9 +23,9 @@ import appTemplate from "../../templates/project/app-release.yml" with { type: "
 import bunTemplate from "../../templates/project/bun-release.yml" with { type: "text" };
 import { currentRepo, setEnvSecret, setRepoVariable, userGitHub } from "./gh";
 import { removeTemp, tempDir } from "./temp";
-import { highestTag, nextTag, tagCommand } from "../web/status";
-import { headOf } from "../web/api/status";
-import { YAML_OUT, appInstallUrl, autoTagSteps, goreleaserCask, hasHomebrew, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubEntries, hubFacts, hubName, installSentence, proposeEntry, proposeUpdate, releaseEntry, releaseSecrets, repoTags, withoutMac } from "./hubpr";
+import { highestTag, nextTag, releasableParent, tagCommand } from "../web/status";
+import { headOf, withParentTag } from "../web/api/status";
+import { YAML_OUT, appInstallUrl, autoTagSteps, goreleaserCask, hasHomebrew, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubEntries, hubFacts, hubName, installSentence, proposeEntry, proposeUpdate, releaseEntry, releaseSecrets, repoTags, tagRefs, withoutMac } from "./hubpr";
 import { ask } from "./prompt";
 import { mustRead, readRegular, readSmall, writeInside } from "./paths";
 
@@ -411,14 +411,11 @@ async function latestDraftOrRelease(gh: GitHub, repo: string): Promise<{ assets:
   return r ? { assets: r.assets.map((a) => a.name), version: r.tag_name.slice(1) } : null;
 }
 
-function cloneFile(dir: string, rel: string): Buffer | null {
-  if (!/^[A-Za-z0-9._\/-]+$/.test(rel) || rel.split("/").includes("..")) return null;
-  try {
-    const real = realpathSync(join(dir, rel));
-    return real.startsWith(`${realpathSync(dir)}${sep}`) ? readRegular(real, 16 << 20) : null;
-  } catch {
-    return null;
-  }
+// The committed file, as the release workflow's checkout sees it; cat-file runs none of the clone's filters.
+async function committedFile(dir: string, rel: string): Promise<Buffer | null> {
+  if (!/^[A-Za-z0-9._\/-]+$/.test(rel) || rel.split("/").includes("..") || rel.startsWith("-")) return null;
+  const blob = await readGit(dir, ["cat-file", "blob", `HEAD:${rel}`], { timeoutMs: 10_000, maxOutput: 16 << 20 }).catch(() => null);
+  return blob?.code === 0 ? blob.bytes : null;
 }
 
 function localSources(gh: GitHub, dir: string, repo: string, prepared: Prepared, apple: boolean, opts: AddOptions): EntrySources {
@@ -435,7 +432,7 @@ function localSources(gh: GitHub, dir: string, repo: string, prepared: Prepared,
       return found ? { feed: found.feed, helpers: yml === null ? [] : helpersOf(yml) } : null;
     },
     workflow: text === null ? null : { name: flow, text },
-    file: async (path) => cloneFile(dir, path),
+    file: (path) => committedFile(dir, path),
     draft: async (assets) => refusedDraftApp(gh, repo, assets, await gh.listReleases(repo).catch(() => [])),
   };
 }
@@ -455,7 +452,7 @@ async function updateExisting(gh: GitHub, hub: string, name: string, sources: En
     if (opts.update === "show") say("  Propose it under Configuration below.");
     else {
       try {
-        say(`- proposed the update in ${(await proposeUpdate(gh, hub, name, found.entry)).url}; merge it on GitHub or under Projects in tapster setup`);
+        say(`- proposed the update in ${(await proposeUpdate(gh, hub, name, found.entry, entry!)).url}; merge it on GitHub or under Projects in tapster setup`);
       } catch (e) {
         if (!(e instanceof TapsterError)) throw e;
         say(`- the update was not proposed: ${e.reason}. ${e.fix}`);
@@ -563,10 +560,12 @@ export async function releaseHint(gh: GitHub, repo: string): Promise<string> {
   const tag = nextTag(highestTag(await repoTags(gh, repo)));
   const cmd = tagCommand(repo, tag, { branch });
   if (!cmd) return `Once they are on ${branch} and the hub entry is merged, release ${tag} from tapster setup, under Projects.`;
-  const head = await headOf(gh, repo, branch);
-  if (head?.skip) {
-    const before = head.parent && !head.parent.skip ? `\nOr tag the commit before it, which has no skip marker:\n  ${tagCommand(repo, tag, { sha: head.parent.sha })}` : "";
-    return `The latest commit of ${branch} says ${head.skip}, so GitHub may not start the release workflow for a tag on it. Push a commit without it, then release ${tag} by tagging that one:\n  ${cmd}${before}`;
+  const tip = await headOf(gh, repo, branch);
+  if (tip?.skip) {
+    const refs = await tagRefs(gh, repo).catch(() => null);
+    const parent = refs && releasableParent((await withParentTag(gh, repo, tip, refs))!);
+    const before = parent ? `\nOr tag the commit before it, which has no skip marker:\n  ${tagCommand(repo, tag, { sha: parent.sha })}` : "";
+    return `The latest commit of ${branch} says ${tip.skip}, so GitHub may not start the release workflow for a tag on it. Push a commit without it, then release ${tag} by tagging that one:\n  ${cmd}${before}`;
   }
   return `Once they are on ${branch} and the hub entry is merged, release ${tag} by tagging the latest commit of ${branch} on GitHub:\n  ${cmd}`;
 }

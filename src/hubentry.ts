@@ -26,14 +26,24 @@ function spot(text: string, name: string): Spot | null {
   return { start, end, indent: lead[1]!.length, index };
 }
 
-// The entry's own lines in tapster.yml, without the list's indent: what the page shows and edits.
+function readEntry(text: string, at: Spot): string | null {
+  const pad = " ".repeat(at.indent);
+  const lines = text.slice(at.start, at.end).split("\n").map((l) => l.replace(/\r$/, ""));
+  if (lines.some((l) => l.trim() !== "" && !l.startsWith(pad))) return null;
+  const entry = lines.map((l) => l.slice(Math.min(at.indent, l.length))).join("\n");
+  try {
+    oneEntry(entry);
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+// The entry's own lines in tapster.yml, without the list's indent: what the page shows and edits. Null when they do not
+// stand on their own, such as an entry that uses an anchor another entry defines.
 export function entryText(text: string, name: string): string | null {
   const at = spot(text, name);
-  if (!at) return null;
-  const pad = " ".repeat(at.indent);
-  const lines = text.slice(at.start, at.end).split("\n");
-  if (lines.some((l) => l.trim() !== "" && !l.startsWith(pad))) return null;
-  return lines.map((l) => (l.trim() === "" ? "" : l.slice(at.indent))).join("\n");
+  return at && readEntry(text, at);
 }
 
 const tidy = (entry: string) => entry.replace(/\r\n?/g, "\n").replace(/\s+$/, "");
@@ -41,11 +51,14 @@ const tidy = (entry: string) => entry.replace(/\r\n?/g, "\n").replace(/\s+$/, ""
 function oneEntry(entry: string): Plain {
   const doc = parseDocument(entry);
   const err = doc.errors[0];
-  if (err) {
-    const line = err.linePos?.[0]?.line;
-    throw new TapsterError(`the entry is not valid YAML${line ? ` at line ${line}` : ""}: ${err.message.split("\n")[0]!.replace(/ at line \d+, column \d+:?$/, "")}`, "Fix the YAML in the box.");
+  const invalid = (what: string, line?: number) => new TapsterError(`the entry is not valid YAML${line ? ` at line ${line}` : ""}: ${what}`, "Fix the YAML in the box.");
+  if (err) throw invalid(err.message.split("\n")[0]!.replace(/ at line \d+, column \d+:?$/, ""), err.linePos?.[0]?.line);
+  let list: unknown;
+  try {
+    list = doc.toJS();
+  } catch (e) {
+    throw invalid(e instanceof Error ? e.message.split("\n")[0]!.slice(0, 120) : "it does not stand on its own");
   }
-  const list = doc.toJS() as unknown;
   if (!Array.isArray(list) || list.length !== 1 || !isPlain(list[0]) || !entry.startsWith("- ")) {
     throw new TapsterError("the box must hold exactly one entry that starts with - name:", "Keep the entry as one item of the packages list.");
   }
@@ -56,15 +69,17 @@ function oneEntry(entry: string): Plain {
 // package's name or repository. It also refuses what the hub would refuse.
 export function withEntryText(text: string, name: string, entry: string, owner: string): string {
   const at = spot(text, name);
-  const before = entryText(text, name);
-  if (!at || before === null) throw new TapsterError(`the entry of ${name} is not on lines of its own in tapster.yml`, "Edit tapster.yml on GitHub instead.");
+  const before = at && readEntry(text, at);
+  if (!at || !before) throw new TapsterError(`tapster cannot read the entry of ${name} on its own in tapster.yml`, "Edit tapster.yml on GitHub instead.");
   const next = tidy(entry);
   const pkg = oneEntry(next);
+  if (next === tidy(before)) return text;
   const old = (parse(text) as { packages: Plain[] }).packages[at.index]!;
   if (pkg.name !== name) throw new TapsterError(`the entry must keep the name ${name}`, "tapster changes one package at a time. To rename it, edit tapster.yml on GitHub.");
   if (pkg.repo !== old.repo) throw new TapsterError(`the entry must keep the repository ${String(old.repo)}`, "To publish another repository, add it as a project of its own.");
   const pad = " ".repeat(at.indent);
-  const out = `${text.slice(0, at.start)}${next.split("\n").map((l) => (l === "" ? "" : `${pad}${l}`)).join("\n")}${text.slice(at.end)}`;
+  const eol = text.slice(at.start, at.end).includes("\r\n") ? "\r\n" : "\n";
+  const out = `${text.slice(0, at.start)}${next.split("\n").map((l) => (l === "" ? "" : `${pad}${l}`)).join(eol)}${text.slice(at.end)}`;
   let a: Plain;
   let b: Plain;
   try {

@@ -10,7 +10,7 @@ import { type Ctx, type Routes, type Session, readJson } from "../server";
 import { writeMain } from "./access";
 import { checkHub, me } from "./hub";
 
-export type Proposal = { number: number; head: string; entry: string; repo: string; text: string; url: string };
+export type Proposal = { number: number; head: string; entry: string; repo: string; text: string; url: string; main: string };
 export type PullKind = "add" | "update";
 
 export const pullBranch = (kind: PullKind, name: string) => `tapster-${kind}-${name}`;
@@ -57,11 +57,11 @@ export async function proposal(gh: GitHub, hub: string, name: string, main = "ma
   if (bad) throw new TapsterError(`the hub would refuse this entry: ${bad.reason}`, bad.fix);
   const pkg = config.packages.find((p) => p.name === name);
   if (!pkg) throw new TapsterError(`the pull request has no entry named ${name}`, REVIEW);
-  return { number: pr.number, head: pr.head.sha, entry, repo: pkg.repo, text: text!, url: pr.html_url };
+  return { number: pr.number, head: pr.head.sha, entry, repo: pkg.repo, text: text!, url: pr.html_url, main: before! };
 }
 
 const entryBody = { hub: z.string(), name: z.string().regex(NAME).max(100), repo: z.string().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/), entry: z.string().max(20_000) };
-const mergeBody = z.object({ ...entryBody, sha: z.string().regex(/^[0-9a-f]{40,64}$/) }).strict();
+const mergeBody = z.object({ ...entryBody, before: z.string().max(20_000).optional(), sha: z.string().regex(/^[0-9a-f]{40,64}$/) }).strict();
 
 const ref = (gh: GitHub, hub: string, branch: string) => gh.json<{ object: { sha: string } }>("GET", `/repos/${hub}/git/ref/heads/${branch}`).then((r) => r.object.sha);
 
@@ -81,6 +81,7 @@ async function land(c: Ctx, kind: PullKind): Promise<{ merged: true; deleted: bo
       const p = await proposal(gh, hub, body.name, checked, kind);
       if (p.head !== body.sha) throw new TapsterError("the pull request changed since this page read it", STALE);
       if (p.entry !== body.entry) throw new TapsterError(WORDS[kind].differs, STALE);
+      if (kind === "update" && entryText(p.main, body.name) !== body.before) throw new TapsterError(`the entry of ${body.name} on main changed since this page read it`, STALE);
       if (p.repo.toLowerCase() !== body.repo.toLowerCase()) throw new TapsterError(`the entry publishes ${p.repo}, not ${body.repo}`, REVIEW);
       const settings = await gh.json<{ allow_merge_commit?: boolean }>("GET", `/repos/${hub}`);
       number = p.number;
@@ -112,10 +113,11 @@ async function mainText(s: Session, gh: GitHub, hub: string): Promise<string> {
 }
 
 const editBody = z.object(entryBody).strict();
+const proposeBody = z.object({ ...entryBody, before: z.string().max(20_000) }).strict();
 
 function listedAs(text: string, name: string, repo: string): string {
   const before = entryText(text, name);
-  if (before === null) throw new TapsterError(`the entry of ${name} is not on lines of its own in tapster.yml`, "Edit tapster.yml on GitHub instead.");
+  if (before === null) throw new TapsterError(`tapster cannot read the entry of ${name} on its own in tapster.yml`, "Edit tapster.yml on GitHub instead.");
   const listed = String(((parse(before) as { repo?: unknown }[])[0] ?? {}).repo);
   if (listed.toLowerCase() !== repo.toLowerCase()) throw new TapsterError(`${name} publishes ${listed}, not ${repo}`, "Reload the page and try again.");
   return before;
@@ -137,12 +139,12 @@ async function check(c: Ctx): Promise<{ before: string; problem: { reason: strin
 }
 
 async function propose(c: Ctx): Promise<{ pr: string; head: string; entry: string }> {
-  const body = await readJson(c.req, editBody);
+  const body = await readJson(c.req, proposeBody);
   const { gh, login } = await me(c.s);
   const hub = checkHub(body.hub, login);
   c.s.memo.delete(`hub-text:${hub}`);
   listedAs(await mainText(c.s, gh, hub), body.name, body.repo);
-  const done = await proposeUpdate(gh, hub, body.name, body.entry);
+  const done = await proposeUpdate(gh, hub, body.name, body.entry, body.before);
   return { pr: done.url, head: done.head, entry: done.entry };
 }
 

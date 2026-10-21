@@ -10,12 +10,16 @@ import { openPull, proposal } from "./entry";
 
 const SKIP = /(^|\/)(\.git|\.build|build|dist|DerivedData|node_modules|Pods|Carthage)\/|\.(app|xcodeproj)\//;
 
+// Only an answer that the thing is not there counts as absent; a rate limit or an outage must not look like it.
+const gone = (e: unknown) => e instanceof GitHubError && (e.status === 404 || e.status === 409);
+const emptyIfGone = <T>(empty: T) => (e: unknown) => (gone(e) ? empty : Promise.reject(e));
+
 async function bytesAt(gh: GitHub, repo: string, path: string, ref: string): Promise<Buffer | null> {
   try {
     const f = await gh.json<{ content?: unknown; encoding?: string }>("GET", `/repos/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`);
     return f.encoding !== "none" && typeof f.content === "string" && f.content !== "" ? Buffer.from(f.content, "base64") : null;
   } catch (e) {
-    if (e instanceof GitHubError) return null;
+    if (gone(e)) return null;
     throw e;
   }
 }
@@ -23,9 +27,9 @@ async function bytesAt(gh: GitHub, repo: string, path: string, ref: string): Pro
 // GoReleaser's Homebrew section as it stood before the project moved to the hub, from the file's own history on GitHub.
 async function homebrewHistory(gh: GitHub, repo: string, ref: string): Promise<string | null> {
   for (const file of [".goreleaser.yaml", ".goreleaser.yml"]) {
-    const list = await gh.json<{ sha: string }[]>("GET", `/repos/${repo}/commits?path=${file}&sha=${encodeURIComponent(ref)}&per_page=6`).catch(() => []);
+    const list = await gh.json<{ sha: string }[]>("GET", `/repos/${repo}/commits?path=${file}&sha=${encodeURIComponent(ref)}&per_page=6`).catch(emptyIfGone([]));
     for (const c of list.slice(1, 6)) {
-      const text = await readHubFile(gh, repo, file, c.sha).catch(() => null);
+      const text = await readHubFile(gh, repo, file, c.sha);
       if (text !== null && hasHomebrew(text)) return text;
     }
     if (list.length) return null;
@@ -34,7 +38,7 @@ async function homebrewHistory(gh: GitHub, repo: string, ref: string): Promise<s
 }
 
 async function plistsAt(gh: GitHub, repo: string, ref: string): Promise<Buffer[]> {
-  const tree = await gh.json<{ tree: { path: string; type: string }[] }>("GET", `/repos/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`).catch(() => ({ tree: [] }));
+  const tree = await gh.json<{ tree: { path: string; type: string }[] }>("GET", `/repos/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`).catch(emptyIfGone({ tree: [] }));
   const paths = tree.tree.filter((t) => t.type === "blob" && /(^|\/)Info\.plist$/.test(t.path) && !SKIP.test(t.path) && t.path.split("/").length <= 7).map((t) => t.path).slice(0, 8);
   return (await Promise.all(paths.map((p) => bytesAt(gh, repo, p, ref)))).filter((b): b is Buffer => b !== null);
 }
@@ -62,6 +66,7 @@ export function remoteSources(gh: GitHub, o: ConfigInput): EntrySources {
       if (known) return known;
       const p = f();
       memo?.set(k, p);
+      p.catch(() => memo?.delete(k));
       return p;
     };
   };
@@ -71,7 +76,7 @@ export function remoteSources(gh: GitHub, o: ConfigInput): EntrySources {
     goreleaser: once("goreleaser", async () => (o.goreleaser !== null && hasHomebrew(o.goreleaser) ? o.goreleaser : homebrewHistory(gh, o.repo, o.ref))),
     plists: once("plists", () => plistsAt(gh, o.repo, o.ref)),
     app: once("app", async () => {
-      const yml = await readHubFile(gh, o.repo, "project.yml", encodeURIComponent(o.ref)).catch(() => null);
+      const yml = await readHubFile(gh, o.repo, "project.yml", encodeURIComponent(o.ref));
       const fromYml = yml === null ? null : appFromProjectYml(yml);
       if (fromYml) return { feed: fromYml.feed, helpers: helpersOf(yml!) };
       for (const p of await plistsAt(gh, o.repo, o.ref)) {
@@ -88,7 +93,7 @@ export function remoteSources(gh: GitHub, o: ConfigInput): EntrySources {
 
 // The same view for a caller that has not read the project's files yet.
 export async function readConfig(gh: GitHub, o: Omit<ConfigInput, "goreleaser" | "workflow"> & { workflowFile: string }): Promise<ConfigView | null> {
-  const read = (path: string) => readHubFile(gh, o.repo, path, encodeURIComponent(o.ref)).catch(() => null);
+  const read = (path: string) => readHubFile(gh, o.repo, path, encodeURIComponent(o.ref));
   const goreleaser = o.kind === "go" ? ((await read(".goreleaser.yaml")) ?? (await read(".goreleaser.yml"))) : null;
   const name = `.github/workflows/${o.workflowFile}`;
   const text = await read(name);
@@ -100,7 +105,7 @@ export async function readConfig(gh: GitHub, o: Omit<ConfigInput, "goreleaser" |
 export async function configOf(gh: GitHub, o: ConfigInput): Promise<ConfigView | null> {
   const entry = o.hubText === null ? null : entryText(o.hubText, o.name);
   if (entry === null) return null;
-  const pull = await openPull(gh, o.hub, "update", o.name).catch(() => null);
+  const pull = await openPull(gh, o.hub, "update", o.name);
   if (pull) {
     try {
       const p = await proposal(gh, o.hub, o.name, "main", "update");
@@ -110,6 +115,6 @@ export async function configOf(gh: GitHub, o: ConfigInput): Promise<ConfigView |
       return { entry, update: null, from: [], manual: [], pending: { pr: pull.html_url, head: null, entry: null, blocked: `${e.reason}. ${e.fix}` } };
     }
   }
-  const found = await deriveUpdate(entry, remoteSources(gh, o));
+  const found = await deriveUpdate(entry, remoteSources(gh, o)).catch((e) => (e instanceof GitHubError ? { entry: null, from: [], manual: [] } : Promise.reject(e)));
   return { entry, update: found.entry, from: found.from, manual: found.manual, pending: null };
 }

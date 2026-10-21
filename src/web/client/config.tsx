@@ -42,8 +42,8 @@ function Editor({ s, c, onDone, onCancel }: { s: ProjectStatus; c: ConfigView; o
   const land = async () => {
     setBusy(true);
     try {
-      const opened = await post<Opened>("/api/projects/entry/propose", { ...target(s), entry: text });
-      await post("/api/projects/entry/merge", { ...target(s), entry: opened.entry, sha: opened.head });
+      const opened = await post<Opened>("/api/projects/entry/propose", { ...target(s), entry: text, before: check.before });
+      await post("/api/projects/entry/merge", { ...target(s), entry: opened.entry, before: check.before, sha: opened.head });
       say("ok", `Merged the change to the entry of ${s.name}.`);
       onDone(null);
     } catch (e) {
@@ -113,12 +113,12 @@ export function Configuration({ s, onStatus }: { s: ProjectStatus; onStatus: (s:
   };
   const propose = () =>
     act(async () => {
-      await post("/api/projects/entry/propose", { ...target(s), entry: c.update });
+      await post("/api/projects/entry/propose", { ...target(s), entry: c.update, before: c.entry });
       say("ok", `Proposed the update of ${s.name}.`);
     });
   const merge = () =>
     act(async () => {
-      await post("/api/projects/entry/merge", { ...target(s), entry: c.pending!.entry, sha: c.pending!.head });
+      await post("/api/projects/entry/merge", { ...target(s), entry: c.pending!.entry, before: c.entry, sha: c.pending!.head });
       say("ok", `Merged the update of ${s.name}.`);
     });
   const p = c.pending;

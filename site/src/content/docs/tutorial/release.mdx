@@ -39,7 +39,7 @@ The same release from a terminal is one command. The sheet shows it with the com
 marker:
 
 ```sh
-sha=$(gh api repos/you/my-tool/commits/main --jq 'if (.commit.message | test("(?im)\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\]|^skip-checks:\\s*true\\s*$")) then error("the latest commit of main carries a skip marker, so a tag on it may not start the release workflow") else .sha end') && gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.1.0 -f sha="$sha"
+gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.1.0 -f sha="$(gh api repos/you/my-tool/commits/main --jq 'if (.commit.message | test("(?i)\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\]")) or ([.commit.message | splits("\\r?\\n[ \\t]*\\r?\\n") | select(test("\\S"))] | length > 1 and (last | test("(?im)^skip-checks:\\s*true\\s*$"))) then error("the latest commit of main carries a skip marker, so a tag on it may not start the release workflow") else .sha end')"
 ```
 
 ## 2. The project opens a draft

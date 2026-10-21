@@ -140,8 +140,8 @@ test("tapster add ends with one gh command that tags GitHub's default branch wit
   const gh = new GitHub("t", fake.fetch, async () => {}, "user");
   const hint = await releaseHint(gh, "octo/aims");
   expect(hint).toContain("release v0.2.2 by tagging the latest commit of main on GitHub");
-  expect(hint).toContain('sha=$(gh api repos/octo/aims/commits/main --jq ');
-  expect(hint).toContain(' && gh api --method POST repos/octo/aims/git/refs -f ref=refs/tags/v0.2.2 -f sha="$sha"');
+  expect(hint).toContain('gh api --method POST repos/octo/aims/git/refs -f ref=refs/tags/v0.2.2 -f sha="$(gh api repos/octo/aims/commits/main --jq \'if ');
+  expect(hint).toContain("carries a skip marker");
   expect(hint).not.toContain("git tag");
   aims.keys.push({ title: "tapster tags", read_only: false });
   expect(await releaseHint(gh, "octo/aims")).toBe("Your release workflow tags each release by itself.");

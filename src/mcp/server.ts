@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline";
 import { z } from "zod";
 import { parseHub } from "../config";
-import { TapsterError } from "../errors";
+import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { readHubFile } from "../hubcommit";
 import { parseState } from "../state";
@@ -10,11 +10,11 @@ import { TAPSTER } from "../version";
 import { doctorChecks } from "../cli/doctor";
 import { currentRepo } from "../cli/gh";
 import { readGit } from "../clone";
-import { hubFacts } from "../cli/hubpr";
+import { hubFacts, tagRefs } from "../cli/hubpr";
 import { readConfig } from "../web/api/config";
 import { checkHub, hubChoices, hubView } from "../web/api/hub";
-import { headOf } from "../web/api/status";
-import { skipNote } from "../web/status";
+import { headOf, withParentTag } from "../web/api/status";
+import { releasableParent, skipNote } from "../web/status";
 import { changeText } from "../web/steps";
 import { defaultRoots, scanClones } from "../web/scan";
 import { type Deps, newSession } from "../web/server";
@@ -109,7 +109,8 @@ export const TOOLS: Tool[] = [
       const pkg = config ? parseHub(config, login).config.packages.find((p) => p.repo.toLowerCase() === repo.toLowerCase()) : undefined;
       const state = parseState(await readHubFile(gh, hub, ".tapster/state.json", "main"));
       const branch = (await gh.getRepo(repo)).default_branch;
-      const head = await headOf(gh, repo, branch);
+      const tip = await headOf(gh, repo, branch);
+      const head = tip?.skip ? await withParentTag(gh, repo, tip, await tagRefs(gh, repo).catch(() => [])) : tip;
       const out: Record<string, unknown> = {
         hub,
         repo,
@@ -117,10 +118,10 @@ export const TOOLS: Tool[] = [
         releases: all.slice(0, 8).map((r) => ({ tag: r.tag_name, draft: r.draft, published: r.published_at, files: r.assets.length, hubNote: noteIn(r.body) })),
         publishedByHub: pkg ? (state.packages[pkg.name] ?? []).map((e) => ({ tag: e.tag, status: e.status })) : [],
       };
-      if (head?.skip) out.tipSkipsWorkflows = { branch, commit: head.sha, marker: head.skip, commitBeforeWithoutMarker: head.parent && !head.parent.skip ? head.parent.sha : null, what: skipNote(branch, head) };
+      if (head?.skip) out.tipSkipsWorkflows = { branch, commit: head.sha, marker: head.skip, commitBeforeWithoutMarker: releasableParent(head)?.sha ?? null, what: skipNote(branch, head) };
       if (pkg) {
         const apple = await hubFacts(gh, hub).then((f) => f.apple, () => false);
-        const c = await readConfig(gh, { hub, apple, hubText: config, name: pkg.name, repo: pkg.repo, kind: pkg.kind, ref: head?.sha ?? branch, workflowFile: pkg.workflow, releases: all });
+        const c = await readConfig(gh, { hub, apple, hubText: config, name: pkg.name, repo: pkg.repo, kind: pkg.kind, ref: head?.sha ?? branch, workflowFile: pkg.workflow, releases: all }).catch((e) => (e instanceof GitHubError ? null : Promise.reject(e)));
         if (c?.pending) out.entryUpdate = { waitsIn: c.pending.pr, change: c.pending.entry ? changeText(c.entry, c.pending.entry) : null, blocked: c.pending.blocked };
         else if (c && (c.update || c.manual.length)) {
           out.entryUpdate = { change: c.update ? changeText(c.entry, c.update) : null, readFrom: c.from, byHand: c.manual, how: "The user proposes it in tapster setup (Projects, the project's Configuration) or runs bunx @doguyilmaz/tapster add in the project's clone." };

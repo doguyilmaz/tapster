@@ -185,7 +185,7 @@ let pending: NonNullable<ConfigView["pending"]>;
 
 test("Propose the update opens tapster-update-aims, which changes only the lines of that entry", async () => {
   const c = await config("octo/aims");
-  const proposed = await call("POST", "/api/projects/entry/propose", { hub: HUB, name: "aims", repo: "octo/aims", entry: c.update });
+  const proposed = await call("POST", "/api/projects/entry/propose", { hub: HUB, name: "aims", repo: "octo/aims", entry: c.update, before: c.entry });
   expect(proposed.data).toMatchObject({ entry: AIMS_APP, head: fake.branchHead(HUB, "tapster-update-aims") });
   const branch = hub().branches.get("tapster-update-aims")!;
   expect(changedEntry(MAIN, branch.get("tapster.yml")!, "aims", "octo")).toBe(AIMS_APP);
@@ -194,13 +194,13 @@ test("Propose the update opens tapster-update-aims, which changes only the lines
   pending = (await config("octo/aims")).pending!;
   expect(pending).toMatchObject({ entry: AIMS_APP, head: fake.branchHead(HUB, "tapster-update-aims"), blocked: null });
   expect((await config("octo/aims")).update).toBeNull();
-  expect(reason(await call("POST", "/api/projects/entry/propose", { hub: HUB, name: "aims", repo: "octo/aims", entry: c.update }))).toBe("the hub already has a branch tapster-update-aims");
+  expect(reason(await call("POST", "/api/projects/entry/propose", { hub: HUB, name: "aims", repo: "octo/aims", entry: c.update, before: c.entry }))).toBe("the hub already has a branch tapster-update-aims");
 });
 
 test("the checked merge refuses a pull request that changes more than the shown lines", async () => {
   const branch = hub().branches.get("tapster-update-aims")!;
   const yml = branch.get("tapster.yml")!;
-  const merge = () => call("POST", "/api/projects/entry/merge", { hub: HUB, name: "aims", repo: "octo/aims", entry: pending.entry, sha: fake.branchHead(HUB, "tapster-update-aims") });
+  const merge = () => call("POST", "/api/projects/entry/merge", { hub: HUB, name: "aims", repo: "octo/aims", entry: pending.entry, before: entryText(MAIN, "aims"), sha: fake.branchHead(HUB, "tapster-update-aims") });
   branch.set("tapster.yml", yml.replace("binaries: [ebb]", "binaries: [ebb, evil]"));
   expect(reason(await merge())).toBe("the pull request does more than change this entry in main's tapster.yml");
   expect((await config("octo/aims")).pending?.blocked).toStartWith("the pull request does more than change this entry in main's tapster.yml.");
@@ -214,12 +214,15 @@ test("the checked merge refuses a pull request that changes more than the shown 
   branch.set(".github/workflows/tapster.yml", "jobs: {}\n");
   expect(reason(await merge())).toBe("the pull request does more than edit tapster.yml");
   branch.delete(".github/workflows/tapster.yml");
-  expect(reason(await call("POST", "/api/projects/entry/merge", { hub: HUB, name: "aims", repo: "octo/aims", entry: pending.entry, sha: "f".repeat(40) }))).toBe("the pull request changed since this page read it");
+  expect(reason(await call("POST", "/api/projects/entry/merge", { hub: HUB, name: "aims", repo: "octo/aims", entry: pending.entry, before: entryText(MAIN, "aims"), sha: "f".repeat(40) }))).toBe("the pull request changed since this page read it");
   expect(hub().files!.get("tapster.yml")).toBe(MAIN);
 });
 
 test("the update lands through the person's checked merge, and the card then shows nothing more to add", async () => {
-  const done = await call("POST", "/api/projects/entry/merge", { hub: HUB, name: "aims", repo: "octo/aims", entry: pending.entry, sha: pending.head });
+  const shownBefore = { hub: HUB, name: "aims", repo: "octo/aims", entry: pending.entry, sha: pending.head };
+  expect(reason(await call("POST", "/api/projects/entry/merge", { ...shownBefore, before: AIMS_APP }))).toBe("the entry of aims on main changed since this page read it");
+  expect(reason(await call("POST", "/api/projects/entry/merge", shownBefore))).toBe("the entry of aims on main changed since this page read it");
+  const done = await call("POST", "/api/projects/entry/merge", { ...shownBefore, before: entryText(MAIN, "aims") });
   expect(done.data).toEqual({ merged: true, deleted: true });
   expect(hub().files!.get("tapster.yml")).toBe(MAIN.replace(AIMS, `${AIMS_APP.replace(/^/gm, "  ")}\n`));
   expect(await hubCheck()).toEqual([]);
@@ -228,7 +231,7 @@ test("the update lands through the person's checked merge, and the card then sho
 
 const now = () => hub().files!.get("tapster.yml")!;
 const check = async (entry: string) => (await call("POST", "/api/projects/entry/check", { hub: HUB, name: "aims", repo: "octo/aims", entry })).data as unknown as EntryCheck;
-const propose = (entry: string, name = "aims", repo = "octo/aims") => call("POST", "/api/projects/entry/propose", { hub: HUB, name, repo, entry });
+const propose = (entry: string, name = "aims", repo = "octo/aims", before = entryText(now(), "aims")) => call("POST", "/api/projects/entry/propose", { hub: HUB, name, repo, entry, before });
 
 test("an edit that touches another entry is refused", async () => {
   const touched = `${AIMS_APP}\n- name: ebb\n  repo: octo/ebb\n  binaries: [ebb]\n  assets: { linux-amd64: "x.tar.gz" }`;
@@ -259,7 +262,7 @@ test("a valid edit is proposed and merged through the checked merge, and the car
   expect((await check(edited)).problem).toBeNull();
   const opened = (await propose(edited)).data as { pr: string; head: string; entry: string };
   expect(opened.entry).toBe(edited);
-  const done = await call("POST", "/api/projects/entry/merge", { hub: HUB, name: "aims", repo: "octo/aims", entry: opened.entry, sha: opened.head });
+  const done = await call("POST", "/api/projects/entry/merge", { hub: HUB, name: "aims", repo: "octo/aims", entry: opened.entry, before: AIMS_APP, sha: opened.head });
   expect(done.data).toEqual({ merged: true, deleted: true });
   expect(now()).toBe(MAIN.replace(AIMS, `${edited.replace(/^/gm, "  ")}\n`));
   expect(entryText(now(), "ebb")).toBe(entryText(MAIN, "ebb"));
@@ -320,9 +323,40 @@ test("tapster add in a terminal prints what GoReleaser's Homebrew section adds a
   await addProject(gh, dir, "octo/aims", HUB, { slug: "tapster-octo-tap", apple: true }, addOptions([]), (l) => again.push(l));
   expect(again.join("\n")).toMatch(/- an update of the hub entry for aims waits in https:\/\/github\.com\/octo\/homebrew-tap\/pull\/\d+; merge it to apply it/);
   const opened = (await config("octo/aims")).pending!;
-  expect((await call("POST", "/api/projects/entry/merge", { hub: HUB, name: "aims", repo: "octo/aims", entry: opened.entry, sha: opened.head })).data).toEqual({ merged: true, deleted: true });
+  expect((await call("POST", "/api/projects/entry/merge", { hub: HUB, name: "aims", repo: "octo/aims", entry: opened.entry, before: entryText(before, "aims"), sha: opened.head })).data).toEqual({ merged: true, deleted: true });
   const quiet: string[] = [];
   await addProject(gh, dir, "octo/aims", HUB, { slug: "tapster-octo-tap", apple: true }, addOptions([]), (l) => quiet.push(l));
   expect(quiet.join("\n")).toContain(`- ${HUB} already has the entry for aims; tapster leaves it as it is`);
   expect(hub().branches.has("tapster-update-aims")).toBe(false);
+});
+
+test("a proposal built on an entry main no longer has is refused", async () => {
+  const stale = await propose(`${entryText(now(), "aims")}\n  attestation: auto`, "aims", "octo/aims", entryText(MAIN, "aims")!);
+  expect(reason(stale)).toBe("the entry of aims on main changed since tapster read it");
+  expect(hub().branches.has("tapster-update-aims")).toBe(false);
+});
+
+test("a GitHub error while reading the project is not kept as an answer", async () => {
+  const fresh = webApp(fake, home);
+  const real = fake.fetch;
+  let failed = 0;
+  fake.fetch = async (input, init) => {
+    if (new URL(String(input)).pathname === "/repos/octo/battistics/contents/project.yml" && failed++ === 0) return new Response('{"message":"API rate limit exceeded"}', { status: 403 });
+    return real(input, init);
+  };
+  const read = async () => ((await fresh.call("GET", `/api/projects/status?hub=${HUB}&repo=octo/battistics`)).data as unknown as StatusView).projects[0]!.config!;
+  const first = await read();
+  const second = await read();
+  fake.fetch = real;
+  expect(first.update).toBeNull();
+  expect(second.update).toContain("feed: appcast-2.xml");
+});
+
+test("an entry that uses another entry's anchor shows no configuration and breaks no other card", async () => {
+  const yml = now();
+  hub().files!.set("tapster.yml", yml.replace("    binaries: [aims]\n", "    binaries: [aims]\n    attestation: &att auto\n").replace("binaries: [ebb],", "binaries: [ebb], attestation: *att,"));
+  const list = ((await call("GET", `/api/projects/status?hub=${HUB}`)).data as unknown as StatusView).projects;
+  hub().files!.set("tapster.yml", yml);
+  expect(list.find((p) => p.name === "ebb")!.config).toBeNull();
+  expect(list.find((p) => p.name === "aims")!.config?.entry).toContain("attestation: &att auto");
 });

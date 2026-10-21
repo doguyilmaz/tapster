@@ -228,7 +228,7 @@ tapster commits nothing. When it ends with
   the next patch version after the highest tag there:
 
   ```sh
-  sha=$(gh api repos/you/my-tool/commits/main --jq 'if (.commit.message | test("(?im)\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\]|^skip-checks:\\s*true\\s*$")) then error("the latest commit of main carries a skip marker, so a tag on it may not start the release workflow") else .sha end') && gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.2.2 -f sha="$sha"
+  gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.2.2 -f sha="$(gh api repos/you/my-tool/commits/main --jq 'if (.commit.message | test("(?i)\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\]")) or ([.commit.message | splits("\\r?\\n[ \\t]*\\r?\\n") | select(test("\\S"))] | length > 1 and (last | test("(?im)^skip-checks:\\s*true\\s*$"))) then error("the latest commit of main carries a skip marker, so a tag on it may not start the release workflow") else .sha end')"
   ```
 
   It tags GitHub's copy, not your clone, so a clone that is behind or on another branch cannot put the tag on the

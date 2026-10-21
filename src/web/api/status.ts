@@ -66,6 +66,13 @@ type Commit = { sha: string; html_url: string; commit: { message: string; commit
 
 const subjectOf = (c: Commit) => clean(c.commit.message.split("\n")[0] ?? "").slice(0, 120);
 
+// The commit before a marked tip is worth tagging only when no version tag sits on it yet.
+export async function withParentTag(gh: GitHub, repo: string, head: CommitView | null, refs: TagRef[]): Promise<CommitView | null> {
+  if (!head?.parent || head.parent.skip) return head;
+  const tag = await tagAt(gh, repo, refs, head.parent.sha);
+  return tag ? { ...head, parent: { ...head.parent, tag } } : head;
+}
+
 export async function headOf(gh: GitHub, repo: string, branch: string): Promise<CommitView | null> {
   try {
     const sha = (await gh.json<{ object: { sha: string } }>("GET", `/repos/${repo}/git/ref/heads/${encodeURIComponent(branch)}`)).object.sha;
@@ -86,7 +93,7 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
   const project = await gh.getRepo(e.repo);
   const branch = project.default_branch;
   const read = (path: string) => readHubFile(gh, e.repo, path, encodeURIComponent(branch));
-  const [goreleaser, workflow, problems, keys, releases, refs, head, secrets, proposed] = await Promise.all([
+  const [goreleaser, workflow, problems, keys, releases, refs, tip, secrets, proposed] = await Promise.all([
     e.kind === "go" ? read(".goreleaser.yaml").then((t) => t ?? read(".goreleaser.yml")) : Promise.resolve(null),
     read(`.github/workflows/${e.workflow}`),
     e.protection === "off" ? Promise.resolve([]) : protectionProblems(gh, e.repo, branch, "admin", e.protection === "dependabot").catch(() => ["GitHub did not show the repository's rulesets"]),
@@ -102,6 +109,7 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
         )
       : Promise.resolve({ proposal: null, blocked: null }),
   ]);
+  const head = await withParentTag(gh, e.repo, tip, refs);
   const published = sh.state.packages[e.name] ?? [];
   const latest = newest(releases.filter((r) => !r.draft));
   const draft = newest(releases.filter((r) => r.draft && TAG.test(r.tag_name) && (!latest || compareSemver(parseTag(r.tag_name)!, parseTag(latest.tag_name)!) > 0)));
@@ -205,10 +213,10 @@ async function release(c: Ctx) {
   const head = await headOf(gh, entry.repo, branch);
   if (!head) throw new TapsterError(`GitHub did not show the latest commit on ${branch}`, "Try again in a moment.");
   if (head.sha !== body.sha) throw new TapsterError(`${branch} moved since this page read it`, `It now ends at ${head.sha.slice(0, 7)}, ${head.subject}. Check that commit, then click Release again.`);
-  if (head.skip) throw new TapsterError(`the latest commit on ${branch} says ${head.skip}`, skipFix(branch, head));
   const [refs, releases] = await Promise.all([tagRefs(gh, entry.repo), gh.json<{ tag_name: string }[]>("GET", `/repos/${entry.repo}/releases?per_page=100`)]).catch(() => {
     throw new TapsterError(`GitHub did not list the tags of ${entry.repo}`, "Try again in a moment. tapster releases only once it has checked the versions.");
   });
+  if (head.skip) throw new TapsterError(`the latest commit on ${branch} says ${head.skip}`, skipFix(branch, (await withParentTag(gh, entry.repo, head, refs))!));
   const done = { tag: body.tag, sha: body.sha };
   const at = await tagAt(gh, entry.repo, refs, head.sha);
   if (at === body.tag) return done;

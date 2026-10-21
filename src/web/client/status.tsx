@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { FollowView, Problem as ProblemView, ProjectStatus, ReachView } from "../contract";
-import { type ProjectStep, type ProjectStepId, canRelease, projectNext, projectSteps, tagCommand, tagProblem } from "../status";
+import { type ProjectStep, type ProjectStepId, canRelease, projectNext, projectSteps, releasableParent, tagCommand, tagProblem } from "../status";
 import { get, post } from "./api";
 import { hub, hubName, problemOf, say, statusOf, tilde } from "./state";
 import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner } from "./ui";
@@ -336,7 +336,8 @@ function ReleaseBox({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSt
   useEffect(() => setVersion(s.release.next), [s.release.next]);
   if (started) return <Follow s={s} tag={started} onStatus={onStatus} />;
   const gate = canRelease(s);
-  const before = s.release.head?.skip && s.release.head.parent && !s.release.head.parent.skip ? tagCommand(s.repo, s.release.next, { sha: s.release.head.parent.sha }) : null;
+  const parent = s.release.head?.skip ? releasableParent(s.release.head) : null;
+  const before = parent ? tagCommand(s.repo, s.release.next, { sha: parent.sha }) : null;
   if (!gate.ok) {
     return (
       <>

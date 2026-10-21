@@ -403,11 +403,12 @@ export async function proposeEntry(gh: GitHub, hub: string, name: string, repo: 
 }
 
 // Opens tapster-update-<name>, a pull request that changes only the lines of that entry in tapster.yml.
-export async function proposeUpdate(gh: GitHub, hub: string, name: string, entry: string): Promise<{ url: string; head: string; entry: string }> {
+export async function proposeUpdate(gh: GitHub, hub: string, name: string, entry: string, shown: string): Promise<{ url: string; head: string; entry: string }> {
   if (!NAME.test(name)) throw new TapsterError(`${name} is not a valid package name`, "Use lowercase letters, digits and dashes.");
   const { text, sha } = await hubFile(gh, hub);
   const next = withEntryText(text, name, entry, hub.split("/")[0]!);
   const before = entryLines(text, name)!;
+  if (before !== shown) throw new TapsterError(`the entry of ${name} on main changed since tapster read it`, "Read it again and check the change, then propose it again.");
   const after = entryLines(next, name)!;
   if (next === text) throw new TapsterError(`the entry of ${name} already reads like this`, "There is nothing to propose.");
   const body = [`tapster proposes this change to the entry of ${name} in tapster.yml:`, "", "```diff", changeText(before, after), "```", "", "It changes no other line. Merge it to apply it."].join("\n");

@@ -27,21 +27,29 @@ const SKIP = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]/i;
 const SKIP_TRAILER = /^skip-checks:\s*true\s*$/im;
 
 // GitHub runs no push workflow for a commit whose message carries one of these, so a tag on it may start no release.
+// skip-checks: true counts only as a trailer, in the last paragraph of a message that has more than one.
 export function skipMarker(message: string): string | null {
-  return SKIP.exec(message)?.[0] ?? (SKIP_TRAILER.test(message) ? "skip-checks: true" : null);
+  const marker = SKIP.exec(message)?.[0];
+  if (marker) return marker;
+  const paragraphs = message.split(/\r?\n[ \t]*\r?\n/).filter((p) => /\S/.test(p));
+  return paragraphs.length > 1 && SKIP_TRAILER.test(paragraphs.at(-1)!) ? "skip-checks: true" : null;
 }
 
-const JQ_SKIP = String.raw`(?im)\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\]|^skip-checks:\\s*true\\s*$`;
+const JQ_SKIP = String.raw`(.commit.message | test("(?i)\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\]")) or ([.commit.message | splits("\\r?\\n[ \\t]*\\r?\\n") | select(test("\\S"))] | length > 1 and (last | test("(?im)^skip-checks:\\s*true\\s*$")))`;
 
+// With a branch, the command reads the tip's message first and stops on a skip marker: the error leaves sha empty,
+// which GitHub refuses, so no tag is made.
 export function tagCommand(repo: string, tag: string, at: { sha: string } | { branch: string }): string | null {
   const head = `gh api --method POST repos/${repo}/git/refs -f ref=refs/tags/${tag} -f sha=`;
   if ("sha" in at) return /^[0-9a-f]{40,64}$/.test(at.sha) ? `${head}${at.sha}` : null;
   if (!/^[A-Za-z0-9._/-]+$/.test(at.branch)) return null;
-  const guard = `if (.commit.message | test("${JQ_SKIP}")) then error("the latest commit of ${at.branch} carries a skip marker, so a tag on it may not start the release workflow") else .sha end`;
-  return `sha=$(gh api repos/${repo}/commits/${at.branch} --jq '${guard}') && ${head}"$sha"`;
+  const guard = `if ${JQ_SKIP} then error("the latest commit of ${at.branch} carries a skip marker, so a tag on it may not start the release workflow") else .sha end`;
+  return `${head}"$(gh api repos/${repo}/commits/${at.branch} --jq '${guard}')"`;
 }
 
-const cleanParent = (head: CommitView) => (head.parent && !head.parent.skip ? ` Or tag the commit before it, ${head.parent.sha.slice(0, 7)}, which has no skip marker.` : "");
+export const releasableParent = (head: CommitView) => (head.parent && !head.parent.skip && !head.parent.tag ? head.parent : null);
+
+const cleanParent = (head: CommitView) => (releasableParent(head) ? ` Or tag the commit before it, ${head.parent!.sha.slice(0, 7)}, which has no skip marker.` : "");
 
 export function skipNote(branch: string, head: CommitView): string | null {
   if (!head.skip) return null;
