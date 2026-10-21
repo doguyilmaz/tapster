@@ -31,7 +31,12 @@ test("the kind comes from which build files exist", () => {
   expect(projectKind(dir, ["go.mod"])).toEqual({ kind: null, why: "a Go project without GoReleaser" });
   writeFileSync(join(dir, ".goreleaser.yaml"), "");
   expect(projectKind(dir, ["go.mod", ".goreleaser.yaml"]).kind).toBe("go");
-  expect(projectKind(dir, ["MyApp.xcodeproj"]).kind).toBe("app");
+  mkdirSync(join(dir, "MyApp.xcodeproj"), { recursive: true });
+  expect(projectKind(dir, ["MyApp.xcodeproj"])).toEqual({ kind: null, why: "an Xcode project without a Sparkle feed" });
+  const mac = join(base, "kinds-mac");
+  mkdirSync(mac, { recursive: true });
+  writeFileSync(join(mac, "project.yml"), "targets:\n  MyApp:\n    type: application\n    platform: macOS\n    info:\n      properties:\n        SUFeedURL: https://github.com/me/MyApp/releases/latest/download/appcast.xml\n        CFBundleIdentifier: com.me.MyApp\n");
+  expect(projectKind(mac, ["project.yml"]).kind).toBe("app");
   expect(projectKind(dir, ["README.md"]).why).toBe("no build that tapster knows");
   const js = join(base, "kinds-js");
   mkdirSync(js, { recursive: true });

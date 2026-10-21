@@ -1,4 +1,5 @@
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
+import { findApp } from "../cli/add";
 import { readSmall } from "../cli/paths";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import type { LocalProject, ProjectKind } from "./contract";
@@ -24,7 +25,9 @@ export function originRepo(config: string): string | null {
 
 export function projectKind(dir: string, entries: string[]): { kind: ProjectKind | null; why: string | null } {
   const has = (f: string) => entries.includes(f) && isFile(join(dir, f));
-  if (entries.some((f) => f === "project.yml" || f === "Package.swift" || f.endsWith(".xcodeproj"))) return { kind: "app", why: null };
+  if (entries.some((f) => f === "project.yml" || f === "Package.swift" || f.endsWith(".xcodeproj"))) {
+    return findApp(dir) ? { kind: "app", why: null } : { kind: null, why: "an Xcode project without a Sparkle feed" };
+  }
   if (has("go.mod")) return has(".goreleaser.yaml") || has(".goreleaser.yml") ? { kind: "go", why: null } : { kind: null, why: "a Go project without GoReleaser" };
   if (has("package.json")) {
     if (!has("bun.lock") && !has("bun.lockb")) return { kind: null, why: "a JavaScript project without Bun" };
