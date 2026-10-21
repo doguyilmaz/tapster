@@ -1,9 +1,10 @@
 import { signal } from "@preact/signals";
-import type { AccountView, BellCloud, HubChoice, HubView, Problem, ProjectStatus, ScanView, SessionView, StatusView } from "../contract";
+import { type AccountView, type BellCloud, type HubChoice, type HubView, type Problem, type ProjectStatus, type ScanView, type SessionView, type StatusView, HUB_VIEW_VERSION } from "../contract";
 import type { Answer, Landing } from "../steps";
 import { ApiError, get, post } from "./api";
 
 const HUB_KEY = "tapster.hub";
+const VIEW_KEY = "tapster.view";
 
 const saved = (key: string) => {
   try {
@@ -33,7 +34,42 @@ export const hubName = signal<string | null>(saved(HUB_KEY));
 export const hub = signal<HubView | null>(null);
 export const hubLoading = signal(false);
 export const hubError = signal<Problem | null>(null);
-export const toast = signal<{ tone: "ok" | "error"; text: string } | null>(null);
+export const hubCached = signal(false);
+export const toast = signal<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
+
+let waiting: ((view: HubView | null) => void)[] = [];
+
+function settle(view: HubView | null): void {
+  hubCached.value = false;
+  const done = waiting;
+  waiting = [];
+  setTimeout(() => done.forEach((f) => f(view)));
+}
+
+export const freshHub = (): Promise<HubView | null> => (hubCached.value ? new Promise((resolve) => waiting.push(resolve)) : Promise.resolve(hub.value));
+
+export const dropView = () => remember(VIEW_KEY, null);
+
+// The saved view leaves out what only this setup's memory holds: an App key or a Cloudflare token waiting to be used.
+function saveView(view: HubView): void {
+  const doorbell = { ...view.extras.doorbell, key: false, cloudflare: null, accounts: null };
+  remember(VIEW_KEY, JSON.stringify({ v: HUB_VIEW_VERSION, view: { ...view, app: { ...view.app, held: false }, extras: { ...view.extras, doorbell } } }));
+}
+
+export function restoreHub(): void {
+  const name = hubName.value;
+  if (!name || hub.value) return;
+  const saved = ((): { v?: unknown; view?: HubView } | null => {
+    try {
+      return JSON.parse(recall(VIEW_KEY) ?? "null");
+    } catch {
+      return null;
+    }
+  })();
+  if (saved?.v !== HUB_VIEW_VERSION || saved.view?.name !== name) return;
+  hub.value = saved.view;
+  hubCached.value = true;
+}
 
 export function go(to: string, replace = false): void {
   if (replace) history.replaceState(null, "", to);
@@ -46,7 +82,7 @@ addEventListener("popstate", () => {
   path.value = location.pathname;
 });
 
-export function say(tone: "ok" | "error", text: string): void {
+export function say(tone: "ok" | "error" | "info", text: string): void {
   toast.value = { tone, text };
   setTimeout(() => {
     if (toast.value?.text === text) toast.value = null;
@@ -59,6 +95,7 @@ export async function loadAccount(): Promise<void> {
   try {
     account.value = await get<AccountView>("/api/account");
     accountError.value = null;
+    if (account.value.state !== "ok") dropView();
   } catch (e) {
     accountError.value = problemOf(e);
   }
@@ -73,15 +110,20 @@ export function chooseHub(name: string | null, load = true): void {
   if (name !== hubName.value) {
     appResult.value = null;
     doorbellResult.value = null;
+    dropView();
   }
   hubName.value = name;
   remember(HUB_KEY, name);
   hub.value = null;
+  if (hubCached.value) settle(null);
   hubError.value = null;
   statuses.value = null;
   statusError.value = null;
   clones.value = null;
-  if (name && load) void loadHub();
+  if (name && load) {
+    restoreHub();
+    void loadHub();
+  }
 }
 
 export const statuses = signal<{ hub: string; list: ProjectStatus[] } | null>(null);
@@ -152,9 +194,18 @@ export async function loadHub(): Promise<void> {
     if (hubName.value === name) {
       hub.value = view;
       hubError.value = null;
+      saveView(view);
+      if (hubCached.value) settle(view);
     }
   } catch (e) {
-    if (hubName.value === name) hubError.value = problemOf(e);
+    if (hubName.value === name) {
+      hubError.value = problemOf(e);
+      if (hubCached.value) {
+        hub.value = null;
+        dropView();
+        settle(null);
+      }
+    }
   } finally {
     hubLoading.value = false;
   }

@@ -65,6 +65,18 @@ const comeBack = async (url: string, title: string) => {
   fake.lag = 0;
   await page.send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
 };
+const SLOW = 1500;
+const paints: string[] = [];
+const PAINT = `${SEEN} window.__painted = 0; new MutationObserver(() => { if (!window.__painted && document.querySelector('.route')) window.__painted = performance.now(); }).observe(document, { subtree: true, childList: true });`;
+const reopen = async (lag: number, before = "") => {
+  if (before) await page.eval(before);
+  const { identifier } = await page.send<{ identifier: string }>("Page.addScriptToEvaluateOnNewDocument", { source: PAINT });
+  fake.lag = lag;
+  await page.eval("location.reload()");
+  await page.waitFor("window.__painted > 0", 20000);
+  await page.send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  return Math.round(await page.eval<number>("window.__painted"));
+};
 const flashed = async (name: string) => {
   const seen = await page.eval<string[]>("window.__seen");
   if (seen.length) throw new Error(`${name} flashed ${seen.join(", ")}`);
@@ -88,8 +100,30 @@ try {
   await page.waitFor("document.querySelector('.route')");
   await shot("02-protect");
   if (only === "start") throw new Error("stop");
+  const cold = await reopen(SLOW, "localStorage.removeItem('tapster.view')");
+  await page.waitFor("!document.querySelector('.checking:not(:empty)') && document.querySelector('.route')", 15000);
+  fake.get("octo/homebrew-tap")!.workflowPerm = "read";
+  const cached = await reopen(SLOW);
+  paints.push(`first paint with ${SLOW} ms per GitHub call: ${cold} ms from GitHub, ${cached} ms from the saved view`);
+  await flashed("the saved view");
+  if (!(await page.eval<boolean>("document.querySelector('.checking').textContent.includes('Checking GitHub…')"))) throw new Error("the saved view shows no Checking GitHub indicator");
+  await shot("02a-saved-view-checking", false);
+  await page.clickText("macOS or not", ".route button");
+  await page.waitFor("document.body.textContent.includes('Will this hub sign macOS software') && document.querySelector('.checking:not(:empty)')");
+  await page.clickText("Protect the hub", ".route button");
   await page.clickText("Protect octo/homebrew-tap");
-  await page.waitFor("document.body.textContent.includes('is protected')");
+  await page.waitFor(`[...document.querySelectorAll('button[aria-busy="true"]')].some((b) => b.textContent.includes('Checking GitHub first')) && document.querySelector('.checking:not(:empty)')`, 2000);
+  await shot("02b-click-while-checking", false);
+  await audit("click-while-checking");
+  await page.waitFor("document.querySelector('.toast')?.textContent.includes('GitHub shows changes here since your last visit')", 15000);
+  await shot("02c-changed-meanwhile", false);
+  if (fake.get("octo/homebrew-tap")!.env) throw new Error("a click on the saved view protected the hub after GitHub showed a change");
+  if (await page.eval<boolean>("Boolean(document.querySelector('.checking:not(:empty)'))")) throw new Error("the Checking GitHub indicator stayed after GitHub answered");
+  await reopen(SLOW);
+  await page.clickText("Restore the protection");
+  await page.waitFor(`[...document.querySelectorAll('button[aria-busy="true"]')].some((b) => b.textContent.includes('Checking GitHub first'))`, 2000);
+  await page.waitFor("document.body.textContent.includes('is protected')", 20000);
+  fake.lag = 0;
   await page.waitFor("document.querySelector('form[action^=\"https://github.com/settings/apps/new\"]')");
   await shot("03-app");
   const state = await page.eval<string>("new URL(document.querySelector('form').action).searchParams.get('state')");
@@ -329,6 +363,11 @@ try {
   await shot("16-phone-dark");
   await audit("phone-extras-dark");
   await colors("phone-extras-dark");
+  await reopen(SLOW);
+  await shot("16a-phone-dark-checking", false);
+  await audit("phone-dark-checking");
+  await page.waitFor("!document.querySelector('.checking:not(:empty)')", 20000);
+  fake.lag = 0;
   await page.clickText("Projects", "nav a");
   await page.waitFor("document.body.textContent.includes('Set up the release workflow')", 20000);
   await shot("16b-phone-projects-dark");
@@ -421,6 +460,7 @@ try {
   }
 } finally {
   console.log(shots.join("\n"));
+  console.log(paints.join("\n"));
   console.log(page.errors.length ? `CONSOLE ERRORS:\n${page.errors.join("\n")}` : "no console errors");
   if (axe) console.log(findings.length ? `AXE VIOLATIONS:\n${findings.join("\n")}` : "no axe violations");
   console.log(wrong.length ? `RED SUCCESS MARKS:\n${wrong.join("\n")}` : "no red success marks");

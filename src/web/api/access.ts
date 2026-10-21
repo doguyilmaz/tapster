@@ -4,7 +4,7 @@ import type { GitHub } from "../../github";
 import { type FileChange, readHubFile } from "../../hubcommit";
 import type { Ctx, Session } from "../server";
 
-const HUB = /^[A-Za-z0-9-]+\/homebrew-[A-Za-z0-9._-]+$/;
+export const HUB = /^[A-Za-z0-9-]+\/homebrew-[A-Za-z0-9._-]+$/;
 
 export async function me(s: Session): Promise<{ gh: GitHub; login: string }> {
   const gh = await s.deps.github();

@@ -38,6 +38,7 @@ export type Session = {
   sparkle: Map<string, { seed: string; at: number }>;
   dispatched: Map<string, { at: number; known: number[] }>;
   memo: Map<string, unknown>;
+  warm: Map<string, { at: number; value: Promise<unknown> }>;
   touched: number;
   login: string | null;
   link(): string;
@@ -85,6 +86,7 @@ export function newSession(deps: Deps, port: number): Session {
     sparkle: new Map(),
     dispatched: new Map(),
     memo: new Map(),
+    warm: new Map(),
     touched: Date.now(),
     login: null,
     link: () => {
@@ -143,6 +145,7 @@ export function handler(s: Session, routes: Routes, callback: (c: Ctx) => Promis
     if (!path.startsWith("/api/")) return respond("Not found", 404, "text/plain; charset=utf-8");
     if (!tokenMatches(req.headers.get("authorization"), s.token)) return json({ error: { reason: "this page is not signed in to tapster setup", fix: "Press Enter in the terminal that runs tapster setup for a fresh link." } }, 401);
     s.touched = Date.now();
+    if (req.method !== "GET") s.warm.clear();
     const route = routes[`${req.method} ${path}`];
     if (!route) return json({ error: { reason: "unknown request", fix: "Reload the page." } }, 404);
     try {

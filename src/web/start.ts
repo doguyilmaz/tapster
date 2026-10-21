@@ -7,7 +7,9 @@ import { verifyNotary } from "../cli/apple";
 import { localStore, requireStore } from "../cli/keystore";
 import { findGpg } from "../cli/linuxkey";
 import { currentRepo, userGitHub } from "../cli/gh";
-import { hubRoutes, appCallback } from "./api/hub";
+import { readGit } from "../clone";
+import { HUB } from "./api/access";
+import { hubRoutes, appCallback, warmStart } from "./api/hub";
 import { doorbellRoutes } from "./api/doorbell";
 import { linuxRoutes } from "./api/linux";
 import { entryRoutes } from "./api/entry";
@@ -53,6 +55,11 @@ export function routes(s: Session, quit: () => void): Routes {
       return { stopping: true };
     },
   };
+}
+
+export async function knownHub(cwd: string): Promise<string | null> {
+  const [saved, here] = await Promise.all([readGit(cwd, ["config", "--get", "tapster.hub"]).then((r) => r.stdout.trim(), () => ""), currentRepo(cwd).catch(() => "")]);
+  return [saved, here].find((x) => HUB.test(x)) ?? null;
 }
 
 function openBrowser(url: string): void {
@@ -114,6 +121,7 @@ export async function setup(args: string[], deps?: Deps): Promise<void> {
   let done: () => void = () => {};
   const closed = new Promise<void>((resolve) => (done = resolve));
   const s = newSession(d, server.port!);
+  warmStart(s, knownHub(d.cwd));
   const stop = () => {
     clearInterval(idle);
     process.stdin.pause();

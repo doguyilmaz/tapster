@@ -1,9 +1,9 @@
 import type { ComponentChildren, JSX } from "preact";
-import { useEffect, useState } from "preact/hooks";
-import type { AppStart, Problem as ProblemView } from "../contract";
+import { useEffect, useRef, useState } from "preact/hooks";
+import type { AppStart, HubView, Problem as ProblemView } from "../contract";
 import { DIFF_MARK, capFirst, changedOnly, lineDiff } from "../steps";
 import { get } from "./api";
-import { problemOf } from "./state";
+import { freshHub, hub, hubCached, problemOf, say } from "./state";
 
 export function DiffBlock({ before, after, label }: { before: string; after: string; label?: string }) {
   return (
@@ -241,11 +241,37 @@ export function Field({ name, id = name, label, hint, value, placeholder, mono, 
   );
 }
 
-export function Busy({ busy, children, ...rest }: { busy: boolean; children: ComponentChildren } & JSX.ButtonHTMLAttributes<HTMLButtonElement>) {
+const MOVED = "GitHub shows changes here since your last visit. Look them over, then try again.";
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+// While the page shows the saved view, a click waits for GitHub's answer. Then it goes through only if the button is
+// still on the page and enabled, with the part of the view named by holds unchanged.
+export function Busy({ busy, holds, children, onClick, ...rest }: { busy: boolean; holds?: (h: HubView) => unknown; children: ComponentChildren } & JSX.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const [waiting, setWaiting] = useState(false);
+  const pass = useRef(false);
+  const click = (e: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
+    if (pass.current || !hubCached.value) {
+      pass.current = false;
+      return onClick?.(e);
+    }
+    e.preventDefault();
+    if (waiting) return;
+    const button = e.currentTarget;
+    const before = hub.value;
+    setWaiting(true);
+    void freshHub().then((after) => {
+      setWaiting(false);
+      if (!after) return;
+      if (!button.isConnected || button.disabled || (holds && before && !same(holds(before), holds(after)))) return say("info", MOVED);
+      pass.current = true;
+      button.click();
+    });
+  };
+  const shown = busy || waiting;
   return (
-    <button {...rest} disabled={busy || rest.disabled} aria-busy={busy}>
-      {busy && <Spinner />}
-      {children}
+    <button {...rest} onClick={click} disabled={busy || rest.disabled} aria-busy={shown}>
+      {shown && <Spinner />}
+      {waiting ? "Checking GitHub first" : children}
     </button>
   );
 }
@@ -344,7 +370,7 @@ export function useInstall<T>(path: string | null, settled: (v: T) => boolean): 
   return { view: path ? view : null, asked, ask: () => setAsked(true) };
 }
 
-export function ManifestForm({ start }: { start: AppStart }) {
+export function ManifestForm({ start, holds }: { start: AppStart; holds: (h: HubView) => unknown }) {
   const [leaving, setLeaving] = useState(false);
   useEffect(() => {
     const restored = (e: PageTransitionEvent) => {
@@ -357,7 +383,7 @@ export function ManifestForm({ start }: { start: AppStart }) {
     <form method="post" action={start.action} class="stack tight" onSubmit={() => setLeaving(true)}>
       <input type="hidden" name="manifest" value={start.manifest} />
       <div class="row">
-        <Busy busy={leaving} class="btn primary" type="submit">
+        <Busy busy={leaving} holds={holds} class="btn primary" type="submit">
           {leaving ? "Opening GitHub" : "Continue to GitHub"}
           {!leaving && <Icon name="arrow" />}
         </Busy>

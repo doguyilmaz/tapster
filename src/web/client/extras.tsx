@@ -83,7 +83,7 @@ function BellToken({ h }: { h: HubView }) {
         <Password name="token" label="The token" hint="tapster uses it for this setup only. It never stores or logs it." />
         <Problem problem={problem} />
         <div class="row">
-          <Busy busy={busy} class="btn primary" type="submit">
+          <Busy busy={busy} holds={(v) => v.extras.doorbell} class="btn primary" type="submit">
             Check the token
           </Busy>
         </div>
@@ -137,7 +137,7 @@ function BellApp({ h }: { h: HubView }) {
         <FileDrop name="pem" accept=".pem" label="The .pem file" file={file} onFile={setFile} hint="tapster checks that it belongs to the doorbell App. Once the doorbell runs, delete the file and every older key on that page." />
         <Problem problem={keyProblem} />
         <div class="row">
-          <Busy busy={busy} class="btn primary" onClick={drop}>
+          <Busy busy={busy} holds={(v) => v.extras.doorbell} class="btn primary" onClick={drop}>
             Use this key
           </Busy>
         </div>
@@ -164,7 +164,7 @@ function BellApp({ h }: { h: HubView }) {
       </Note>
       <Problem problem={problem} />
       {start ? (
-        <ManifestForm start={start} />
+        <ManifestForm start={start} holds={(v) => v.extras.doorbell} />
       ) : (
         !problem && (
           <p class="row muted">
@@ -284,7 +284,7 @@ function Doorbell({ h }: { h: HubView }) {
             <p class="muted">tapster bundles the Worker, uploads it to your Cloudflare account with the App's key as a secret and gives every project in tapster.yml its address.</p>
             <Problem problem={problem} />
             <div class="row">
-              <Busy busy={busy} class="btn primary" disabled={!ready} onClick={deploy}>
+              <Busy busy={busy} holds={(v) => v.extras.doorbell} class="btn primary" disabled={!ready} onClick={deploy}>
                 Deploy the doorbell
               </Busy>
             </div>
@@ -391,7 +391,7 @@ function LinuxTools({ h }: { h: HubView }) {
       )}
       <Problem problem={checkProblem ?? writeProblem} />
       <div class="row">
-        <Busy busy={writing} class="btn primary" type="submit" disabled={!changed || stale || !change || change.after === change.before}>
+        <Busy busy={writing} holds={(v) => v.extras.linux} class="btn primary" type="submit" disabled={!changed || stale || !change || change.after === change.before}>
           {linuxWrite(maintainerChanged, toolsChanged)}
         </Busy>
       </div>
@@ -456,7 +456,7 @@ function Linux({ h }: { h: HubView }) {
             </Note>
             <Problem problem={makeProblem} />
             <div class="row">
-              <Busy busy={making} class="btn primary" onClick={makeKey}>
+              <Busy busy={making} holds={(v) => v.extras.linux.stored} class="btn primary" onClick={makeKey}>
                 <Icon name="key" />
                 Make the signing key
               </Busy>
@@ -514,7 +514,7 @@ function SparkleKey({ h, label }: { h: HubView; label: string }) {
         <p class="muted small">tapster reads it from your login keychain, where Sparkle's generate_keys keeps it. macOS asks you first; choose Allow.</p>
         <div class="row" style="flex-wrap: nowrap; align-items: end">
           <Field name={`account-${label}`} label="Keychain account" value={account} mono onInput={setAccount} />
-          <Busy busy={busy} class="btn primary" type="submit">
+          <Busy busy={busy} holds={(v) => v.extras.sparkle} class="btn primary" type="submit">
             <Icon name="key" />
             Read it from my keychain
           </Busy>
@@ -556,7 +556,7 @@ function SparkleKey({ h, label }: { h: HubView; label: string }) {
         <Password name="password" label="Paste the key" hint="The key from the box above, pasted as it is." />
         <Problem problem={problem} />
         <div class="row">
-          <Busy busy={busy} class="btn primary" type="submit">
+          <Busy busy={busy} holds={(v) => v.extras.sparkle} class="btn primary" type="submit">
             Store in the hub
           </Busy>
         </div>

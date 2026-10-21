@@ -4,7 +4,7 @@ import { ApiError, post } from "./api";
 import { type Stop, type StopId, changedOnly, expiresSoon, firstOpen, installStep, lineDiff, macNeeded, stops } from "../steps";
 import { clonePaths, targetOf } from "./projects";
 import { type SheetTarget, ProjectSheet } from "./sheet";
-import { appResult, back, clones, go, hub, hubError, hubLoading, hubName, loadClones, loadHub, loadStatuses, mac, macChoice, openStop, problemOf, say, setMac, statusError, statuses } from "./state";
+import { appResult, back, clones, go, hub, hubCached, hubError, hubLoading, hubName, loadClones, loadHub, loadStatuses, mac, macChoice, openStop, problemOf, say, setMac, statusError, statuses } from "./state";
 import { StatusRows } from "./status";
 import { Extras } from "./extras";
 import { Badge, Busy, Cmd, Done, Field, FileDrop, Head, Icon, ManifestForm, Note, Out, Password, Problem, Spinner, savedFor, useAction, useInstall } from "./ui";
@@ -58,7 +58,7 @@ function Protect({ h }: { h: HubView }) {
         <Done text={`${h.name} is protected`} />
       ) : (
         <div class="row">
-          <Busy busy={busy} class="btn primary" onClick={() => run(async () => {
+          <Busy busy={busy} holds={(v) => v.protect} class="btn primary" onClick={() => run(async () => {
             await post("/api/hub/protect", { hub: h.name });
             await loadHub();
             say("ok", `${h.name} is protected.`);
@@ -155,6 +155,7 @@ function App({ h }: { h: HubView }) {
         <div class="row">
           <Busy
             busy={storing}
+            holds={(v) => v.app}
             class="btn primary"
             onClick={() =>
               store(async () => {
@@ -229,7 +230,7 @@ function App({ h }: { h: HubView }) {
       </Note>
       <Problem problem={problem} />
       {start ? (
-        <ManifestForm start={start} />
+        <ManifestForm start={start} holds={(v) => v.app} />
       ) : (
         !problem && (
           <p class="row muted">
@@ -347,7 +348,7 @@ function Certificate({ h }: { h: HubView }) {
             </Note>
             <Problem problem={problem} />
             <div class="row">
-              <Busy busy={busy} class="btn primary" type="submit">
+              <Busy busy={busy} holds={(v) => [v.apple, v.protect.environment]} class="btn primary" type="submit">
                 Check and store
               </Busy>
               {replacing && (
@@ -428,7 +429,7 @@ function Notary({ h }: { h: HubView }) {
             </Note>
             <Problem problem={problem} />
             <div class="row">
-              <Busy busy={busy} class="btn primary" type="submit">
+              <Busy busy={busy} holds={(v) => [v.apple, v.protect.environment]} class="btn primary" type="submit">
                 Check with Apple and store
               </Busy>
               {replacing && (
@@ -589,7 +590,7 @@ function Files({ h }: { h: HubView }) {
       )}
       {view && changes.length > 0 && view.foreign.length === 0 && (
         <div class="row">
-          <Busy busy={busy} class="btn primary" onClick={write}>
+          <Busy busy={busy} holds={(v) => [v.files, v.protect.others]} class="btn primary" onClick={write}>
             Write {changes.length === 1 ? "the change" : `the ${changes.length} changes`} to main
           </Busy>
         </div>
@@ -670,6 +671,7 @@ export function Setup() {
     return asked;
   });
   const panelRef = useRef<HTMLDivElement>(null);
+  const kept = useRef<StopId | null>(null);
   void macChoice.value;
   const ready = Boolean(h && h.name === hubName.value);
   const listing = ready && Boolean(h!.files.config);
@@ -705,7 +707,10 @@ export function Setup() {
   }
   const choice = mac(h.name);
   const list = stops(h, choice, Date.now(), statuses.value?.hub === h.name ? statuses.value.list : null);
-  const current = open ?? (appResult.value?.kind === "created" ? "app" : firstOpen(list));
+  const first = appResult.value?.kind === "created" ? "app" : firstOpen(list);
+  if (hubCached.value) kept.current = first;
+  else if (kept.current === first) kept.current = null;
+  const current = open ?? kept.current ?? first;
   const done = list.filter((s) => s.state === "done" || s.state === "skipped").length;
   const next = list.find((s) => s.state === "now" || s.state === "attention");
   const pick = (id: StopId | "extras") => {
@@ -729,7 +734,7 @@ export function Setup() {
         <div class="stack tight">
           <p class="eyebrow">
             {done} of {list.length} done{next ? `. Next: ${next.name}` : ""}
-            {hubLoading.value && <Spinner label="Checking GitHub" />}
+            {hubLoading.value && !hubCached.value && <Spinner label="Checking GitHub" />}
           </p>
           <h1 class="title">{next ? `Set up ${h.name}` : `${h.name} is set up`}</h1>
         </div>
