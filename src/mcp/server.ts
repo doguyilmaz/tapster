@@ -23,9 +23,16 @@ import { stops } from "../web/steps";
 
 const VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
+// Reads at a commit or of an archive by its digest, kept for the life of this server as the setup page keeps them.
+const MEMO = new Map<string, unknown>();
+const remembered = () => {
+  if (MEMO.size > 500) MEMO.clear();
+  return MEMO;
+};
+
 export const INSTRUCTIONS = `tapster turns the user's Homebrew tap into a release hub that signs, notarizes and publishes the releases of their projects.
 These tools read the hub and the projects through the user's GitHub CLI sign-in and can start a hub run. They cannot set up a hub: creating the GitHub App needs the user's click and the Apple files live on their computer. For setup, tell the user to run "bunx @doguyilmaz/tapster setup", which opens a local page that walks through it. In a project, "bunx @doguyilmaz/tapster add" does the same from a terminal. Docs: https://tapster.doguyilmaz.com/
-Releases start only from a version tag (or from the project's own tagging workflow); merging or pushing alone publishes nothing. GitHub runs no push workflow for a commit whose message holds [skip ci], [ci skip], [no ci], [skip actions] or [actions skip]. The same goes for a message that ends with the trailer skip-checks: true. A tag on such a commit may never start the release workflow, so never tag one. When merging several pull requests in a row, put [skip ci] in the merge commit message of all but the last, then tag the last one.
+Releases start only from a version tag (or from the project's own tagging workflow); merging or pushing alone publishes nothing. GitHub runs no push workflow for a commit whose message holds [skip ci], [ci skip], [no ci], [skip actions] or [actions skip]. The same goes for a message that ends with the trailer skip-checks: true. A tag on such a commit may never start the release workflow, so never tag one. When merging several pull requests in a row, put [skip ci] in the merge commit message of all but the last, then tag the last one. Merging docs never releases, so never add push or paths triggers on main to a release workflow. To keep docs-only pull requests off a project's full CI, suggest paths-ignore for the docs folder in its own CI workflow and paths in its docs workflow; tapster does not edit those files.
 A project's hub entry lives in the hub's tapster.yml because only the owner may change what the hub signs. release_status reports an update tapster can propose for it; the user proposes and merges it in tapster setup (Projects, the project's Configuration) or with bunx @doguyilmaz/tapster add.`;
 
 type Ctx = { deps: Deps; gh(): Promise<GitHub> };
@@ -110,7 +117,7 @@ export const TOOLS: Tool[] = [
       const state = parseState(await readHubFile(gh, hub, ".tapster/state.json", "main"));
       const branch = (await gh.getRepo(repo)).default_branch;
       const tip = await headOf(gh, repo, branch);
-      const head = tip?.skip ? await withParentTag(gh, repo, tip, await tagRefs(gh, repo).catch(() => [])) : tip;
+      const head = tip?.skip ? await withParentTag(gh, repo, tip, await tagRefs(gh, repo).catch(() => null)) : tip;
       const out: Record<string, unknown> = {
         hub,
         repo,
@@ -121,7 +128,7 @@ export const TOOLS: Tool[] = [
       if (head?.skip) out.tipSkipsWorkflows = { branch, commit: head.sha, marker: head.skip, commitBeforeWithoutMarker: releasableParent(head)?.sha ?? null, what: skipNote(branch, head) };
       if (pkg) {
         const apple = await hubFacts(gh, hub).then((f) => f.apple, () => false);
-        const c = await readConfig(gh, { hub, apple, hubText: config, name: pkg.name, repo: pkg.repo, kind: pkg.kind, ref: head?.sha ?? branch, workflowFile: pkg.workflow, releases: all }).catch((e) => (e instanceof GitHubError ? null : Promise.reject(e)));
+        const c = await readConfig(gh, { hub, apple, hubText: config, name: pkg.name, repo: pkg.repo, kind: pkg.kind, ref: head?.sha ?? branch, workflowFile: pkg.workflow, releases: all, memo: remembered() }).catch((e) => (e instanceof GitHubError ? null : Promise.reject(e)));
         if (c?.pending) out.entryUpdate = { waitsIn: c.pending.pr, change: c.pending.entry ? changeText(c.entry, c.pending.entry) : null, blocked: c.pending.blocked };
         else if (c && (c.update || c.manual.length)) {
           out.entryUpdate = { change: c.update ? changeText(c.entry, c.update) : null, readFrom: c.from, byHand: c.manual, how: "The user proposes it in tapster setup (Projects, the project's Configuration) or runs bunx @doguyilmaz/tapster add in the project's clone." };

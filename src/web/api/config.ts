@@ -87,7 +87,7 @@ export function remoteSources(gh: GitHub, o: ConfigInput): EntrySources {
     }),
     workflow: o.workflow,
     file: (path) => bytesAt(gh, o.repo, path, o.ref),
-    draft: (assets) => refusedDraftApp(gh, o.repo, assets, o.releases, o.memo),
+    draft: (assets, commands) => refusedDraftApp(gh, o.repo, assets, o.releases, commands, o.memo),
   };
 }
 

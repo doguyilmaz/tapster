@@ -1,5 +1,5 @@
 import { isMap, isSeq, parse, parseDocument } from "yaml";
-import { NAME, PLATFORMS, type Platform, parseHub } from "../config";
+import { NAME, PLATFORMS, type Platform, appName, parseHub, trashPath } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import type { GitHub } from "../github";
 import { readHubFile } from "../hubcommit";
@@ -167,9 +167,17 @@ const READ = ["name", "ids", "repository", "commit_msg_template", "commit_author
 const HOOK = /^system_command\s+"#\{HOMEBREW_PREFIX\}\/bin\/([A-Za-z0-9._-]+)"(?:,\s*args:\s*\[((?:\s*"[A-Za-z0-9._:=@%+,\/-]+"\s*,?)*)\])?,\s*must_succeed:\s*false$/;
 const REL = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
 
-export type CaskOptions = { mac?: boolean; bundleId?: (app: string) => string | null };
+// commands: the package's own command names; an app command named otherwise is not linked, only named.
+export type CaskOptions = { mac?: boolean; bundleId?: (app: string) => string | null; commands?: string[] };
+
+export const unlinkedNote = (app: string, path: string) =>
+  `app.binaries: ${app} runs ${path}, which is not a command this package ships. Linking it would put a second ${path.split("/").pop()} on PATH; add it under app.binaries by hand only if you mean that.`;
 
 const APP_LINE = /^app\s+"([A-Za-z0-9 ._-]+\.app)"$/;
+const appLine = (line: string) => {
+  const found = APP_LINE.exec(line)?.[1];
+  return found && appName(found) ? found : undefined;
+};
 const OPENS = /^(if|unless|case|begin|while|until|def|class|module)\b|\bdo(\s*\|[^|]*\|)?$/;
 type CustomLine = { line: string; os?: "macos" | "linux"; path?: string };
 
@@ -180,7 +188,7 @@ function readCustomBlock(lines: string[], blocks: boolean): { app: string | null
     let app: string | null = null;
     const rest: CustomLine[] = [];
     for (const line of lines) {
-      const found = APP_LINE.exec(line)?.[1];
+      const found = appLine(line);
       if (found && !app) app = found;
       else rest.push({ line });
     }
@@ -212,7 +220,7 @@ function readCustomBlock(lines: string[], blocks: boolean): { app: string | null
       continue;
     }
     const path = /^binary\s+"([^"]+)"$/.exec(line)?.[1];
-    const found = os !== "linux" ? APP_LINE.exec(line)?.[1] : undefined;
+    const found = os !== "linux" ? appLine(line) : undefined;
     if (depth > 1 || (depth === 1 && !os)) rest.push({ line });
     else if (found && !app) app = found;
     else if (path && os) rest.push({ line, os, path });
@@ -230,7 +238,7 @@ export const hasHomebrew = (text: string) => {
   }
 };
 
-export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { lines: string[]; description: string | null; carried: string[]; notes: string[] } {
+export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { lines: string[]; description: string | null; carried: string[]; notes: string[]; unlinked: string[] } {
   type Doc = { homebrew_casks?: GoCask[]; brews?: GoCask[] } | null;
   let cfg: Doc = null;
   try {
@@ -239,7 +247,7 @@ export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { l
     cfg = null;
   }
   const c = cfg?.homebrew_casks?.[0] ?? cfg?.brews?.[0];
-  if (!c) return { lines: [], description: null, carried: [], notes: [] };
+  if (!c) return { lines: [], description: null, carried: [], notes: [], unlinked: [] };
   const str = (v: unknown) => (typeof v === "string" && v.trim() && !v.includes("{{") ? v.trim() : null);
   const list = (v: unknown, ok: RegExp) => (Array.isArray(v) ? v.map(str).filter((x): x is string => x !== null && ok.test(x)) : []);
   const lines: string[] = [];
@@ -255,7 +263,10 @@ export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { l
   const fromMac = custom.lines.flatMap((l) => (l.os === "macos" ? [l.path!] : []));
   const listed = list(c.binaries, /^#\{appdir\}\//);
   const appBinaries = [...listed, ...fromMac.filter((b, i) => !listed.includes(b) && fromMac.indexOf(b) === i)].filter(inApp).map((b) => b.slice(inside.length));
-  const bare = new Set(appBinaries.map((b) => b.split("/").pop()));
+  const linkable = (b: string) => !opts.commands || opts.commands.includes(b.split("/").pop()!);
+  const linked = appBinaries.filter(linkable);
+  const unlinked = app && opts.mac !== false ? appBinaries.filter((b) => !linkable(b)) : [];
+  const bare = new Set(linked.map((b) => b.split("/").pop()));
   for (const l of custom.lines) if (l.os === undefined || (l.os === "macos" ? !inApp(l.path!) : !bare.has(l.path!))) skipped.push(`custom_block: ${l.line}`);
   let postflight: { binary: string; args: string[] } | null = null;
   for (const [when, hooks] of Object.entries(c.hooks ?? {})) {
@@ -282,14 +293,17 @@ export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { l
   }
   if (app && opts.mac !== false) {
     const id = opts.bundleId?.(app) ?? null;
-    lines.push("    app:", `      name: ${JSON.stringify(app)}`, `      bundle_id: ${id ?? "<bundle id>"}`, ...(appBinaries.length ? [`      binaries: ${JSON.stringify(appBinaries)}`] : []));
+    lines.push("    app:", `      name: ${JSON.stringify(app)}`, `      bundle_id: ${id ?? "<bundle id>"}`, ...(linked.length ? [`      binaries: ${JSON.stringify(linked)}`] : []));
     carried.push("app");
     notes.push(`the hub signs, notarizes and staples ${app}; a build hook must now sign it ad hoc only (codesign --force --sign -)`);
     if (!id) notes.push(`no Info.plist here names ${app}; set app.bundle_id in the hub entry`);
+    notes.push(...unlinked.map((b) => unlinkedNote(app, b)));
   }
   const launchctl = list(c.uninstall?.launchctl, /^[A-Za-z0-9.-]+$/);
   const quit = list(c.uninstall?.quit, /^[A-Za-z0-9.-]+$/);
-  const trash = list(c.zap?.trash, /^~\/[A-Za-z0-9 ._\/-]+$/);
+  const asked = Array.isArray(c.zap?.trash) ? c.zap.trash.map(str).filter((x): x is string => x !== null) : [];
+  const trash = asked.filter(trashPath);
+  skipped.push(...asked.filter((t) => !trashPath(t)).map((t) => `zap.trash: ${t.slice(0, 80)}`));
   const caveats = str(c.caveats);
   if (launchctl.length || quit.length || trash.length || postflight || caveats) {
     lines.push("    cask:");
@@ -301,7 +315,7 @@ export function goreleaserCask(text: string | null, opts: CaskOptions = {}): { l
   }
   if (postflight) notes.push(`Homebrew runs the post-install command in its sandbox, without network or your home folder; check that ${[postflight.binary, ...postflight.args].join(" ")} works there`);
   if (skipped.length) notes.push(`not carried from GoReleaser's Homebrew section: ${skipped.join(", ").replace(/[\u0000-\u001f\u007f-\u009f]/g, "")}`);
-  return { lines, description: str(c.description), carried, notes };
+  return { lines, description: str(c.description), carried, notes, unlinked };
 }
 
 export function entryExtras(entry: string, o: { kind: string; workflow: string; dependabot: boolean }): string {

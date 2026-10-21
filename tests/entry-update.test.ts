@@ -360,3 +360,37 @@ test("an entry that uses another entry's anchor shows no configuration and break
   expect(list.find((p) => p.name === "ebb")!.config).toBeNull();
   expect(list.find((p) => p.name === "aims")!.config?.entry).toContain("attestation: &att auto");
 });
+
+test("the update's merge waits while main holds someone else's change and stops when main moves under it", async () => {
+  const real = fake.fetch;
+  const write = async (path: string, text: string, actor = "octo") => {
+    fake.actor = actor;
+    await real(`https://api.github.com/repos/${HUB}/contents/${path}`, { method: "PUT", body: JSON.stringify({ message: `Write ${path}`, content: Buffer.from(text).toString("base64"), branch: "main" }) });
+    fake.actor = "octo";
+  };
+  const shown = entryText(now(), "aims")!;
+  const opened = (await propose(`${shown}\n  attestation: auto`)).data as { pr: string; head: string; entry: string };
+  const merge = () => call("POST", "/api/projects/entry/merge", { hub: HUB, name: "aims", repo: "octo/aims", entry: opened.entry, before: shown, sha: opened.head });
+  await write("README.md", "hi\n", "mallory");
+  expect(reason(await merge())).toStartWith("main changed in ways only you may change it: README.md changed after your last push");
+  hub().files!.delete("README.md");
+  await write(".keep", "");
+  let fired = false;
+  fake.fetch = async (input, init = {}) => {
+    if (!fired && (init.method ?? "GET").toUpperCase() === "POST" && new URL(String(input)).pathname === `/repos/${HUB}/git/trees`) {
+      fired = true;
+      await write(".github/workflows/tapster.yml", "jobs: { evil: {} }\n", "mallory");
+    }
+    return real(input, init);
+  };
+  const raced = await merge();
+  fake.fetch = real;
+  expect(reason(raced)).toMatch(/^main changed while tapster merged the entry: [0-9a-f]{7} Write \.github\/workflows\/tapster\.yml$/);
+  expect((raced.data.error as { fix: string }).fix).toBe("Nothing was merged. Review those commits on GitHub, then click Merge the update again.");
+  expect(now()).not.toContain("attestation: auto");
+  hub().files!.delete(".github/workflows/tapster.yml");
+  await write(".keep", "reviewed");
+  expect(await hubCheck()).toEqual([]);
+  expect((await merge()).data).toEqual({ merged: true, deleted: true });
+  expect(now()).toContain("attestation: auto");
+});

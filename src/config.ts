@@ -17,6 +17,9 @@ export const ENTITLEMENTS = [
   "com.apple.security.cs.disable-library-validation",
 ] as const;
 
+// A zap path under ~/ with no .. segment: brew zap deletes it, so it must not climb out of the home folder.
+export const trashPath = (p: string) => /^~\/[A-Za-z0-9 ._\/-]+$/.test(p) && !p.split("/").includes("..");
+
 const relPath = z
   .string()
   .regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/)
@@ -33,7 +36,7 @@ const caskFields = {
     .strict()
     .optional(),
   uninstall: z.object({ launchctl: z.array(label).optional(), quit: z.array(label).optional() }).strict().optional(),
-  zap: z.object({ trash: z.array(z.string().regex(/^~\/[A-Za-z0-9 ._\/-]+$/)) }).strict().optional(),
+  zap: z.object({ trash: z.array(z.string().refine(trashPath, "must stay inside your home folder")) }).strict().optional(),
   caveats: z.string().min(1).max(2000).optional(),
 };
 const common = {
@@ -49,6 +52,9 @@ const common = {
 };
 
 const APP = /^[A-Za-z0-9 ._-]+\.app$/;
+export const APP_MAX = 64;
+export const appName = (name: string) => APP.test(name) && name.length <= APP_MAX;
+const app = z.string().regex(APP).max(APP_MAX);
 export const BUNDLE_ID = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 
 const cliPkg = z
@@ -57,7 +63,7 @@ const cliPkg = z
     kind: z.enum(["go", "bun"]),
     binaries: z.array(relPath).min(1),
     app: z
-      .object({ name: z.string().regex(APP), bundle_id: z.string().regex(BUNDLE_ID), binaries: z.array(relPath).default([]), entitlements: z.array(z.enum(ENTITLEMENTS)).default([]) })
+      .object({ name: app, bundle_id: z.string().regex(BUNDLE_ID), binaries: z.array(relPath).default([]), entitlements: z.array(z.enum(ENTITLEMENTS)).default([]) })
       .strict()
       .optional(),
     completions: z.object({ bash: relPath.optional(), zsh: relPath.optional(), fish: relPath.optional() }).strict().optional(),
@@ -75,7 +81,7 @@ const appPkg = z
   .object({
     ...common,
     kind: z.literal("app"),
-    app: z.string().regex(APP),
+    app,
     bundle_id: z.string().regex(BUNDLE_ID),
     carry: z.record(z.string().regex(/^[A-Za-z0-9._-]+$/), z.string().regex(/^sha256:[0-9a-f]{64}$/)).default({}),
     dmg: z

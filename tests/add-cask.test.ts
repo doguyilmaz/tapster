@@ -171,7 +171,7 @@ test("a custom_block without on_macos or on_linux is read as before; so is any e
   const mac = goreleaserCask(flat, aimsIds);
   expect(mac.lines).toEqual(["    app:", '      name: "aims.app"', "      bundle_id: com.o.aims", '      binaries: ["Contents/MacOS/aimsctl"]']);
   expect(mac.notes.at(-1)).toBe(named);
-  expect(goreleaserCask(flat, { mac: false, ...aimsIds })).toEqual({ lines: [], description: null, carried: [], notes: [named] });
+  expect(goreleaserCask(flat, { mac: false, ...aimsIds })).toEqual({ lines: [], description: null, carried: [], notes: [named], unlinked: [] });
   const noMac = goreleaserCask(crossPlatform, { mac: false, ...aimsIds });
   expect(noMac.carried).toEqual(["uninstall"]);
   expect(noMac.notes).toEqual([
