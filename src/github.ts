@@ -115,8 +115,13 @@ export class GitHub {
     return out;
   }
 
-  getRelease = (repo: string, id: number) => this.json<Release>("GET", `/repos/${repo}/releases/${id}`);
-  getRepo = (repo: string) => this.json<Repo>("GET", `/repos/${repo}`);
+  getRelease(repo: string, id: number): Promise<Release> {
+    return this.json<Release>("GET", `/repos/${repo}/releases/${id}`);
+  }
+
+  getRepo(repo: string): Promise<Repo> {
+    return this.json<Repo>("GET", `/repos/${repo}`);
+  }
 
   async downloadAsset(repo: string, assetId: number): Promise<Buffer> {
     const res = await this.request("GET", `/repos/${repo}/releases/assets/${assetId}`, { accept: "application/octet-stream" });
@@ -135,8 +140,15 @@ export class GitHub {
     return (await res.json()) as Asset;
   }
 
-  deleteAsset = (repo: string, id: number) => this.request("DELETE", `/repos/${repo}/releases/assets/${id}`).then(() => undefined);
-  renameAsset = (repo: string, id: number, name: string) => this.json<Asset>("PATCH", `/repos/${repo}/releases/assets/${id}`, { name });
-  updateRelease = (repo: string, id: number, tag: string, patch: { draft?: boolean; make_latest?: "true" | "false" }) =>
-    this.json<Release>("PATCH", `/repos/${repo}/releases/${id}`, { ...patch, tag_name: tag });
+  async deleteAsset(repo: string, id: number): Promise<void> {
+    await this.request("DELETE", `/repos/${repo}/releases/assets/${id}`);
+  }
+
+  renameAsset(repo: string, id: number, name: string): Promise<Asset> {
+    return this.json<Asset>("PATCH", `/repos/${repo}/releases/assets/${id}`, { name });
+  }
+
+  updateRelease(repo: string, id: number, tag: string, patch: { draft?: boolean; make_latest?: "true" | "false" }): Promise<Release> {
+    return this.json<Release>("PATCH", `/repos/${repo}/releases/${id}`, { ...patch, tag_name: tag });
+  }
 }

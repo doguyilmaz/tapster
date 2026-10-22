@@ -170,53 +170,113 @@ async function list<T>(gh: GitHub, path: string, key?: string): Promise<T[]> {
   }
 }
 
-async function apiChecks(gh: GitHub, hub: string, owner: string, config: HubConfig | null, workflow: string): Promise<Check[]> {
+// Every call starts at once and is awaited in the order the checks print; the noop catch keeps an unawaited rejection quiet.
+const early = <T>(p: Promise<T>): Promise<T> => {
+  p.catch(() => undefined);
+  return p;
+};
+
+// At most `max` requests in flight, so a hub with many projects stays clear of GitHub's secondary rate limits.
+export function limited(gh: GitHub, max: number): GitHub {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  const g = Object.create(gh) as GitHub;
+  g.request = async (...args: Parameters<GitHub["request"]>) => {
+    if (active >= max) await new Promise<void>((go) => waiting.push(go));
+    else active++;
+    try {
+      return await gh.request(...args);
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
+    }
+  };
+  return g;
+}
+
+type Setup = { config: HubConfig | null; workflow: string };
+
+async function apiChecks(gh: GitHub, hub: string, owner: string, setup: Promise<Setup>): Promise<Check[]> {
+  const envP = early(gh.json<{ deployment_branch_policy: { custom_branch_policies: boolean } | null }>("GET", `/repos/${hub}/environments/tapster`).catch(() => null));
+  const policiesP = early(gh.json<{ branch_policies: { name: string; type?: string }[] }>("GET", `/repos/${hub}/environments/tapster/deployment-branch-policies`));
+  const secretsP = early(list<{ name: string }>(gh, `/repos/${hub}/environments/tapster/secrets?per_page=100`, "secrets").then((x) => x.map((s) => s.name)));
+  const varsP = early(list<{ name: string; value: string }>(gh, `/repos/${hub}/environments/tapster/variables?per_page=100`, "variables"));
+  const pagesP = early(setup.then(({ config }) => (config?.packages.some((p) => !isApp(p) && p.linux) ? gh.json<{ build_type: string; html_url: string }>("GET", `/repos/${hub}/pages`).catch(() => null) : null)));
+  const repoVarsP = early(list<{ name: string }>(gh, `/repos/${hub}/actions/variables?per_page=100`, "variables"));
+  const doorbellValuesP = early(
+    Promise.all([varsP, setup]).then(async ([vars, { config }]) => {
+      if (!vars.some((v) => v.name === "TAPSTER_DOORBELL") || !config) return null;
+      const values: Record<string, string | null> = {};
+      const got = await Promise.all(config.packages.map((p) => gh.json<{ value: string }>("GET", `/repos/${p.repo}/actions/variables/TAPSTER_DOORBELL`).then((v) => v.value).catch(() => null)));
+      config.packages.forEach((p, i) => (values[p.repo] = got[i]!));
+      return values;
+    }),
+  );
+  const permsP = early(gh.json<{ default_workflow_permissions: string }>("GET", `/repos/${hub}/actions/permissions/workflow`));
+  const rulesetsP = early(list<{ id: number }>(gh, `/repos/${hub}/rulesets`).then((ids) => Promise.all(ids.map((r) => gh.json<RulesetDetail>("GET", `/repos/${hub}/rulesets/${r.id}`)))));
+  const actionsP = early(gh.json<{ enabled?: boolean; allowed_actions?: string; sha_pinning_required?: boolean }>("GET", `/repos/${hub}/actions/permissions`));
+  const selectedP = early(actionsP.then((a) => (a.allowed_actions === "selected" ? gh.json<{ github_owned_allowed?: boolean; verified_allowed?: boolean; patterns_allowed?: string[] }>("GET", `/repos/${hub}/actions/permissions/selected-actions`) : null)));
+  const collaboratorsP = early(list<{ login: string }>(gh, `/repos/${hub}/collaborators?affiliation=direct&per_page=100`));
+  const keysP = early(list<{ title: string; read_only: boolean }>(gh, `/repos/${hub}/keys?per_page=100`));
+  const flowP = early(gh.json<{ state: string }>("GET", `/repos/${hub}/actions/workflows/tapster.yml`).catch(() => null));
+  const runsP = early(list<{ event: string; created_at: string }>(gh, `/repos/${hub}/actions/workflows/tapster.yml/runs?per_page=30`, "workflow_runs"));
+  const projectsP = early(
+    setup.then(({ config }) =>
+      (config?.packages ?? []).map((p) =>
+        early(
+          (async () => {
+            const r = await gh.getRepo(p.repo).catch((e) => (e instanceof GitHubError ? null : Promise.reject(e)));
+            if (!r) return { p, r: null, problems: null, names: [] as string[] };
+            const [problems, names] = await Promise.all([
+              p.protection === "off" ? null : protectionProblems(gh, p.repo, r.default_branch, "admin", p.protection === "dependabot"),
+              list<{ name: string }>(gh, `/repos/${p.repo}/actions/secrets?per_page=100`, "secrets").then((x) => x.map((s) => s.name)),
+            ]);
+            return { p, r, problems, names };
+          })(),
+        ),
+      ),
+    ),
+  );
+
   const checks: Check[] = [];
-  const env = await gh.json<{ deployment_branch_policy: { custom_branch_policies: boolean } | null }>("GET", `/repos/${hub}/environments/tapster`).catch(() => null);
+  const env = await envP;
   if (!env) return [bad("the tapster environment exists", "Run tapster init.")];
-  const policies = await gh.json<{ branch_policies: { name: string; type?: string }[] }>("GET", `/repos/${hub}/environments/tapster/deployment-branch-policies`);
+  const { config, workflow } = await setup;
+  const policies = await policiesP;
   checks.push(
     env.deployment_branch_policy?.custom_branch_policies && policies.branch_policies.length === 1 && policies.branch_policies[0]!.name === "main" && (policies.branch_policies[0]!.type ?? "branch") === "branch"
       ? ok("only main may open the tapster environment")
       : bad("only main may open the tapster environment", "Run tapster init to restore the branch rule."),
   );
-  const secrets = (await list<{ name: string }>(gh, `/repos/${hub}/environments/tapster/secrets?per_page=100`, "secrets")).map((x) => x.name);
-  const vars = await list<{ name: string; value: string }>(gh, `/repos/${hub}/environments/tapster/variables?per_page=100`, "variables");
+  const secrets = await secretsP;
+  const vars = await varsP;
   checks.push(credentialsCheck(config, secrets, vars.map((v) => v.name)));
   const expires = vars.find((v) => v.name === "TAPSTER_CERT_EXPIRES")?.value;
   if (expires && Date.parse(`${expires}T00:00:00Z`) - Date.now() < 30 * 86_400_000) checks.push(bad("the Developer ID certificate is valid for 30 more days", `It expires on ${expires}. Renew it at developer.apple.com, then run tapster init --rotate certificate.`));
   if (config && sparkleLabels(config).length) checks.push(sparkleCheck(config, secrets, workflow));
   if (config?.packages.some((p) => !isApp(p) && p.linux)) {
-    const pages = await gh.json<{ build_type: string; html_url: string }>("GET", `/repos/${hub}/pages`).catch(() => null);
-    checks.push(linuxCheck(config, hub, secrets, pages));
+    checks.push(linuxCheck(config, hub, secrets, await pagesP));
     if (secrets.includes("TAPSTER_LINUX_KEY_PREVIOUS")) checks.push(ok("the Linux key rotation is running", "the previous Linux key still signs; once apt and dnf users have the new key, run tapster init --rotate linux --finish"));
   }
-  const repoVars = await list<{ name: string }>(gh, `/repos/${hub}/actions/variables?per_page=100`, "variables");
-  const exposed = [...vars, ...repoVars].map((v) => v.name).filter((n) => SECRETS.includes(n) || /^SPARKLE_KEY_/.test(n) || n.startsWith("TAPSTER_LINUX_KEY"));
+  const exposed = [...vars, ...(await repoVarsP)].map((v) => v.name).filter((n) => SECRETS.includes(n) || /^SPARKLE_KEY_/.test(n) || n.startsWith("TAPSTER_LINUX_KEY"));
   checks.push(exposed.length ? bad("credentials are secrets, not variables", `Variables are readable by anyone with access; delete ${exposed.join(", ")} and store them with tapster init --rotate.`) : ok("credentials are secrets, not variables"));
   const doorbell = vars.find((v) => v.name === "TAPSTER_DOORBELL")?.value;
-  if (doorbell && config) {
-    const values: Record<string, string | null> = {};
-    for (const p of config.packages) {
-      values[p.repo] = await gh.json<{ value: string }>("GET", `/repos/${p.repo}/actions/variables/TAPSTER_DOORBELL`).then((v) => v.value).catch(() => null);
-    }
-    checks.push(doorbellCheck(doorbell, values));
+  const doorbellValues = await doorbellValuesP;
+  if (doorbell && config && doorbellValues) {
+    checks.push(doorbellCheck(doorbell, doorbellValues));
     checks.push(doorbellEveryCheck(vars.find((v) => v.name === "TAPSTER_DOORBELL_EVERY")?.value, everyFromFlow(workflow) ?? 10));
   }
-  const perms = await gh.json<{ default_workflow_permissions: string }>("GET", `/repos/${hub}/actions/permissions/workflow`);
+  const perms = await permsP;
   checks.push(perms.default_workflow_permissions === "read" ? ok("the default workflow token is read-only") : bad("the default workflow token is read-only", "Run tapster init."));
-  const rulesets = await Promise.all((await list<{ id: number }>(gh, `/repos/${hub}/rulesets`)).map((r) => gh.json<RulesetDetail>("GET", `/repos/${hub}/rulesets/${r.id}`)));
-  checks.push(hubRulesetCheck(rulesets));
-  const actions = await gh.json<{ enabled?: boolean; allowed_actions?: string; sha_pinning_required?: boolean }>("GET", `/repos/${hub}/actions/permissions`);
-  const selected = actions.allowed_actions === "selected" ? await gh.json<{ github_owned_allowed?: boolean; verified_allowed?: boolean; patterns_allowed?: string[] }>("GET", `/repos/${hub}/actions/permissions/selected-actions`) : null;
-  checks.push(policyCheck(actions, selected));
-  checks.push(accessCheck(await list<{ login: string }>(gh, `/repos/${hub}/collaborators?affiliation=direct&per_page=100`), await list<{ title: string; read_only: boolean }>(gh, `/repos/${hub}/keys?per_page=100`), owner));
-  const flow = await gh.json<{ state: string }>("GET", `/repos/${hub}/actions/workflows/tapster.yml`).catch(() => null);
+  checks.push(hubRulesetCheck(await rulesetsP));
+  checks.push(policyCheck(await actionsP, await selectedP));
+  checks.push(accessCheck(await collaboratorsP, await keysP, owner));
+  const flow = await flowP;
   checks.push(flow?.state === "active" ? ok("the hub workflow is enabled") : bad("the hub workflow is enabled", "Enable the tapster workflow in the hub's Actions tab (GitHub pauses it after 60 days without activity; the doorbell turns it back on)."));
-  const runs = await list<{ event: string; created_at: string }>(gh, `/repos/${hub}/actions/workflows/tapster.yml/runs?per_page=30`, "workflow_runs");
-  checks.push(scheduleCheck(runs, Date.now(), Boolean(doorbell)));
-  for (const p of config?.packages ?? []) {
-    const r = await gh.getRepo(p.repo).catch((e) => (e instanceof GitHubError ? null : Promise.reject(e)));
+  checks.push(scheduleCheck(await runsP, Date.now(), Boolean(doorbell)));
+  for (const pending of await projectsP) {
+    const { p, r, problems, names } = await pending;
     if (!r) {
       checks.push(bad(`${p.repo} exists`, "Fix the repo field in tapster.yml."));
       continue;
@@ -224,20 +284,17 @@ async function apiChecks(gh: GitHub, hub: string, owner: string, config: HubConf
     if (r.private) checks.push(ok(`${p.repo} is published by the hub`, `${p.repo} is private: the hub publishes its releases, but Homebrew, Scoop, apt and dnf users can only install from public projects`));
     if (p.protection === "off") checks.push(ok(`${p.repo} is protected`, `protection is off for ${p.name}: a stolen App key could tag code there that the hub would sign`));
     else {
-      const problems = await protectionProblems(gh, p.repo, r.default_branch, "admin", p.protection === "dependabot");
       const note = p.protection === "dependabot" ? `branches named dependabot/... are open on ${p.repo}, so a stolen App key could run its workflows on code of its own there` : undefined;
-      checks.push(problems.length ? bad(`${p.repo} is protected`, `${problems.join("; ")}. Run tapster add in a clone of ${p.repo}.`) : ok(`${p.repo} is protected`, note));
+      checks.push(problems!.length ? bad(`${p.repo} is protected`, `${problems!.join("; ")}. Run tapster add in a clone of ${p.repo}.`) : ok(`${p.repo} is protected`, note));
     }
-    const names = (await list<{ name: string }>(gh, `/repos/${p.repo}/actions/secrets?per_page=100`, "secrets")).map((x) => x.name);
     const leftovers = releaseSecrets(names);
     checks.push(leftovers.length ? bad(`${p.repo} holds no release secrets`, `Delete ${leftovers.join(", ")}: gh secret delete <name> --repo ${p.repo}`) : ok(`${p.repo} holds no release secrets`));
   }
   return checks;
 }
 
-async function appNote(gh: GitHub, hub: string, repos: string[]): Promise<string | null> {
-  const vars = await gh.json<{ variables: { name: string; value: string }[] }>("GET", `/repos/${hub}/environments/tapster/variables`).catch(() => null);
-  const slug = vars?.variables.find((v) => v.name === "TAPSTER_APP_SLUG")?.value;
+async function appNote(vars: Promise<{ variables: { name: string; value: string }[] } | null>, hub: string, repos: string[]): Promise<string | null> {
+  const slug = (await vars)?.variables.find((v) => v.name === "TAPSTER_APP_SLUG")?.value;
   if (!slug || repos.length === 0) return null;
   return `note: the App must be installed on ${repos.join(", ")} and not on ${hub}; GitHub shows its repositories only to the App itself, so check them at https://github.com/apps/${slug}/installations/new (the hub's check job also reports both)`;
 }
@@ -254,15 +311,20 @@ export function configChecks(text: string | null, owner: string): { checks: Chec
 }
 
 async function mainFiles(gh: GitHub, hub: string): Promise<{ config: string | null; flows: Record<string, string> }> {
+  const configP = early(readHubFile(gh, hub, "tapster.yml", "main"));
   const names = (await list<{ name: string; type: string }>(gh, `/repos/${hub}/contents/.github/workflows?ref=main`)).filter((f) => f.type === "file").map((f) => f.name);
-  const flows: Record<string, string> = {};
-  for (const n of names) flows[n] = (await readHubFile(gh, hub, `.github/workflows/${n}`, "main")) ?? "";
-  return { config: await readHubFile(gh, hub, "tapster.yml", "main"), flows };
+  const texts = await Promise.all(names.map((n) => readHubFile(gh, hub, `.github/workflows/${n}`, "main")));
+  return { config: await configP, flows: Object.fromEntries(names.map((n, i) => [n, texts[i] ?? ""])) };
 }
 
-export async function doctorChecks(gh: GitHub, hub: string): Promise<{ checks: Check[]; note: string | null }> {
+export async function doctorChecks(github: GitHub, hub: string): Promise<{ checks: Check[]; note: string | null }> {
+  const gh = limited(github, 8);
   const owner = hub.split("/")[0]!;
-  const files = await mainFiles(gh, hub);
+  const appVars = early(gh.json<{ variables: { name: string; value: string }[] }>("GET", `/repos/${hub}/environments/tapster/variables`).catch(() => null));
+  const filesP = early(mainFiles(gh, hub));
+  const setup = early(filesP.then((files) => ({ config: configChecks(files.config, owner).config, workflow: files.flows["tapster.yml"] ?? "" })));
+  const api = early(apiChecks(gh, hub, owner, setup));
+  const files = await filesP;
   const checks: Check[] = [];
   const parsed = configChecks(files.config, owner);
   const config = parsed.config;
@@ -272,8 +334,8 @@ export async function doctorChecks(gh: GitHub, hub: string): Promise<{ checks: C
   else checks.push(bad("the hub workflow exists", "Run tapster init, commit and push."));
   const { "tapster.yml": _, ...others } = files.flows;
   checks.push(otherWorkflowsCheck(others));
-  checks.push(...(await apiChecks(gh, hub, owner, config, flow ?? "")));
-  return { checks, note: await appNote(gh, hub, config?.packages.map((p) => p.repo) ?? []) };
+  checks.push(...(await api));
+  return { checks, note: await appNote(appVars, hub, config?.packages.map((p) => p.repo) ?? []) };
 }
 
 export async function doctor(_args: string[]): Promise<number> {
