@@ -117,8 +117,10 @@ function AppStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatu
       removeEventListener("focus", back);
     };
   }, [armed]);
+  const watching = asked === null && s.app.running;
   useEffect(() => {
-    if (asked === null) return;
+    if (asked === null && !watching) return;
+    const from = asked ?? 0;
     let timer = 0;
     let wait = 6000;
     let again = false;
@@ -128,14 +130,16 @@ function AppStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatu
         try {
           const v = await get<ReachView>(`/api/projects/reach?${q(s)}`);
           setLive({ running: v.running, run: v.run });
-          if (!v.running && v.since && Date.parse(v.since) >= asked - 15_000) {
+          if (!v.running && (asked === null || (v.since && Date.parse(v.since) >= from - 15_000))) {
             const next = await statusOf(s.repo);
             if (next) onStatus(next);
-            setAsked(null);
             setLive(null);
-            return;
+            if (asked !== null || !next?.app.running) {
+              setAsked(null);
+              return;
+            }
           }
-          if (!v.running && !again) {
+          if (!v.running && !again && asked !== null) {
             again = true;
             await post("/api/projects/check", { hub: hubName.value });
           }
@@ -152,7 +156,7 @@ function AppStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectStatu
     };
     timer = window.setTimeout(tick, 3000);
     return () => clearTimeout(timer);
-  }, [asked, s.repo]);
+  }, [asked, watching, s.repo]);
   const running = asked !== null || s.app.running;
   const run = live?.run ?? (s.app.running ? s.app.run : null);
   return (
