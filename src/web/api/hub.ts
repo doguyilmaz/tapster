@@ -225,7 +225,7 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
   const hasApple = Boolean(v("TAPSTER_TEAM_ID")) || names(secrets).includes("MACOS_NOTARY_KEY");
   const pinned = flow ? PIN.exec(flow) : null;
   const workflow = pinState(flow, TAPSTER, s.deps.pin);
-  const code = workflow === "older" ? await hubCode(gh, flow, s.deps.pin) : null;
+  const code = workflow === "older" ? await hubCode(gh, flow, s.deps.pin ?? TAPSTER.sha) : null;
   const issue = issues.find((i) => i.title === ISSUE_TITLE && i.user?.login === "github-actions[bot]");
   return {
     name: hub,
@@ -405,7 +405,7 @@ async function filePlan(c: Ctx, gh: GitHub, hub: string, every: number | null, r
     const before = await read(`.github/workflows/${r}`);
     if (before !== null) files.push({ path: `.github/workflows/${r}`, content: "", before, change: "remove" });
   }
-  return { files, kept: plan.kept, pin: newer ? "kept: the hub runs a newer tapster than this one" : plan.change, notes: newer ? [] : plan.notes, foreign: [], readme: current !== null && current !== ours.content, hubCode: newer ? null : await hubCode(gh, flow, c.s.deps.pin) };
+  return { files, kept: plan.kept, pin: newer ? "kept: the hub runs a newer tapster than this one" : plan.change, notes: newer ? [] : plan.notes, foreign: [], readme: current !== null && current !== ours.content, hubCode: newer ? null : await hubCode(gh, flow, c.s.deps.pin ?? TAPSTER.sha) };
 }
 
 async function filesPreview(c: Ctx): Promise<FilesView> {

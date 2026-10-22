@@ -369,7 +369,7 @@ function LinuxTools({ h }: { h: HubView }) {
               <label class="switch" key={t.name}>
                 <input type="checkbox" checked={now} aria-describedby={`tool-${t.name}`} onChange={(e) => setPicked((e.currentTarget as HTMLInputElement).checked ? [...picked, t.name] : picked.filter((x) => x !== t.name))} />
                 <span class="grow">
-                  <strong>Ship {t.name} to apt and dnf</strong>
+                  <strong>Ship <span class="repo">{t.name}</span> to apt and dnf</strong>
                   <span id={`tool-${t.name}`}>
                     <span class="mono repo">{t.repo}</span> · {KIND[t.kind] ?? t.kind} · {t.archives.join(", ")}
                   </span>
