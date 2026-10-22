@@ -561,14 +561,18 @@ function Files({ h }: { h: HubView }) {
             (view.hubCode.changed.length ? (
               <Note tone="warn" title={`The hub's code changed since ${view.hubCode.from}`}>
                 <span>
-                  The hub runs tapster {view.hubCode.from}. {view.hubCode.to} changes what runs there ({view.hubCode.changed.join(", ")}), so write the hub files to use it.{" "}
+                  The hub runs tapster {view.hubCode.from}. {view.hubCode.to} changes what runs there ({view.hubCode.changed.join(", ")}), so write the hub files to use it.
+                </span>
+                <span>
                   <Out href={view.hubCode.compare}>See every change</Out>
                 </span>
               </Note>
             ) : (
               <Note tone="info" title="Nothing changes in the hub">
                 <span>
-                  The hub runs tapster {view.hubCode.from}. {view.hubCode.to} changes only the setup page and the terminal, so moving the hub to it is optional.{" "}
+                  The hub runs tapster {view.hubCode.from}. {view.hubCode.to} changes only the setup page and the terminal, so moving the hub to it is optional.
+                </span>
+                <span>
                   <Out href={view.hubCode.compare}>See every change</Out>
                 </span>
               </Note>
