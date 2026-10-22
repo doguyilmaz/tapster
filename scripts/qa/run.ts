@@ -77,6 +77,16 @@ const reopen = async (lag: number, before = "") => {
   await page.send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
   return Math.round(await page.eval<number>("window.__painted"));
 };
+const LISTED = `window.__listed = 0; new MutationObserver(() => { if (!window.__listed && document.getElementById('in-hub')) window.__listed = performance.now(); }).observe(document, { subtree: true, childList: true });`;
+const relist = async (before = "") => {
+  if (before) await page.eval(before);
+  const { identifier } = await page.send<{ identifier: string }>("Page.addScriptToEvaluateOnNewDocument", { source: LISTED });
+  fake.lag = SLOW;
+  await page.eval("location.reload()");
+  await page.waitFor("window.__listed > 0", 60000);
+  await page.send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  return Math.round(await page.eval<number>("window.__listed"));
+};
 const flashed = async (name: string) => {
   const seen = await page.eval<string[]>("window.__seen");
   if (seen.length) throw new Error(`${name} flashed ${seen.join(", ")}`);
@@ -200,6 +210,16 @@ try {
   await page.clickText("Projects", "nav a");
   await page.waitFor("document.body.textContent.includes('Ready to add') && document.body.textContent.includes('In the hub')", 20000);
   await shot("11-projects");
+  const coldList = await relist("localStorage.removeItem('tapster.status')");
+  await page.waitFor("!document.querySelector('.checking:not(:empty)')", 60000);
+  const savedList = await relist();
+  paints.push(`project list with ${SLOW} ms per GitHub call: ${coldList} ms from GitHub, ${savedList} ms from the saved list`);
+  if (savedList >= SLOW) throw new Error("the saved project list waited for GitHub");
+  if (!(await page.eval<boolean>("document.querySelector('.checking').textContent.includes('Checking GitHub…')"))) throw new Error("the saved project list shows no Checking GitHub indicator");
+  await shot("11a-saved-projects-checking", false);
+  await audit("saved-projects-checking");
+  await page.waitFor("!document.querySelector('.checking:not(:empty)')", 60000);
+  fake.lag = 0;
   await page.clickText("octo/aims", ".item button.link");
   await page.waitFor("document.body.textContent.includes('Where aims stands')", 20000);
   await Bun.sleep(300);
@@ -223,7 +243,14 @@ try {
   fake.appKeyWorks = true;
   await page.waitFor("[...document.querySelectorAll('.sheet button')].some((b) => b.textContent.includes('Release v0.2.2'))");
   await shot("11c-aims-ready");
+  await relist();
+  await page.clickText("octo/aims", ".item button.link");
+  await page.waitFor("[...document.querySelectorAll('.sheet button')].some((b) => b.textContent.includes('Release v0.2.2'))", 5000);
   await page.clickText("Release v0.2.2", ".sheet button");
+  await page.waitFor(`[...document.querySelectorAll('.sheet button[aria-busy="true"]')].some((b) => b.textContent.includes('Checking GitHub first')) && document.querySelector('.checking:not(:empty)')`, 2000);
+  await shot("11c2-release-while-checking", false);
+  await audit("release-while-checking");
+  fake.lag = 0;
   await page.waitFor("document.body.textContent.includes('Tagged v0.2.2')", 15000);
   const aims = fake.get("octo/aims")!;
   Object.assign(aims.runs[0]!, { status: "completed", conclusion: "success" });

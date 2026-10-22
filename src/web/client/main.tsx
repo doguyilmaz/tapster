@@ -8,7 +8,7 @@ import { HubChooser } from "./hubs";
 import { Projects } from "./projects";
 import { Back, Setup } from "./setup";
 import { landing } from "../steps";
-import { account, accountError, appResult, back, chooseHub, doorbellResult, dropView, go, hubCached, hubName, loadAccount, loadHub, openStop, path, problemOf, restoreHub, say, session, toast } from "./state";
+import { account, accountError, appResult, back, chooseHub, doorbellResult, dropView, go, hubCached, hubName, loadAccount, loadHub, openStop, path, problemOf, restoreHub, say, session, statusCached, toast } from "./state";
 import { Icon, Note, Spinner } from "./ui";
 
 type Boot = { kind: "claiming" } | { kind: "ready" } | { kind: "no-session" } | { kind: "failed"; problem: ProblemView } | { kind: "stopped" };
@@ -114,7 +114,7 @@ function Header() {
             </button>
           )}
           <span class="checking" role="status" aria-live="polite">
-            {hubCached.value && (
+            {(hubCached.value || statusCached.value) && (
               <>
                 <Spinner label="" />
                 Checking GitHub…

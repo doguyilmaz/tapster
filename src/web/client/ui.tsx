@@ -1,9 +1,9 @@
 import type { ComponentChildren, JSX } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { AppStart, HubView, Problem as ProblemView } from "../contract";
+import type { AppStart, HubView, ProjectStatus, Problem as ProblemView } from "../contract";
 import { DIFF_MARK, capFirst, changedOnly, lineDiff } from "../steps";
 import { get } from "./api";
-import { freshHub, hub, hubCached, problemOf, say } from "./state";
+import { freshHub, freshStatuses, hub, hubCached, problemOf, say, statusCached, statuses } from "./state";
 
 export function DiffBlock({ before, after, label }: { before: string; after: string; label?: string }) {
   return (
@@ -244,13 +244,21 @@ export function Field({ name, id = name, label, hint, value, placeholder, mono, 
 const MOVED = "GitHub shows changes here since your last visit. Look them over, then try again.";
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-// While the page shows the saved view, a click waits for GitHub's answer. Then it goes through only if the button is
-// still on the page and enabled, with the part of the view named by holds unchanged.
-export function Busy({ busy, holds, children, onClick, ...rest }: { busy: boolean; holds?: (h: HubView) => unknown; children: ComponentChildren } & JSX.ButtonHTMLAttributes<HTMLButtonElement>) {
+// For holds: a part of one project's status.
+export const ofProject =
+  (repo: string, part: (p: ProjectStatus) => unknown) =>
+  (_: HubView, projects: ProjectStatus[] | null): unknown => {
+    const p = projects?.find((x) => x.repo === repo);
+    return p ? part(p) : null;
+  };
+
+// While the page shows a saved view, a click waits for GitHub's answer. Then it goes through only if the button is
+// still on the page and enabled, with the part of the views named by holds unchanged.
+export function Busy({ busy, holds, children, onClick, ...rest }: { busy: boolean; holds?: (h: HubView, projects: ProjectStatus[] | null) => unknown; children: ComponentChildren } & JSX.ButtonHTMLAttributes<HTMLButtonElement>) {
   const [waiting, setWaiting] = useState(false);
   const pass = useRef(false);
   const click = (e: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
-    if (pass.current || !hubCached.value) {
+    if (pass.current || !(hubCached.value || statusCached.value)) {
       pass.current = false;
       return onClick?.(e);
     }
@@ -258,11 +266,12 @@ export function Busy({ busy, holds, children, onClick, ...rest }: { busy: boolea
     if (waiting) return;
     const button = e.currentTarget;
     const before = hub.value;
+    const listed = statuses.value?.list ?? null;
     setWaiting(true);
-    void freshHub().then((after) => {
+    void Promise.all([freshHub(), freshStatuses()]).then(([after, projects]) => {
       setWaiting(false);
-      if (!after) return;
-      if (!button.isConnected || button.disabled || (holds && before && !same(holds(before), holds(after)))) return say("info", MOVED);
+      if (!after || (listed && !projects)) return;
+      if (!button.isConnected || button.disabled || (holds && before && !same(holds(before, listed), holds(after, projects)))) return say("info", MOVED);
       pass.current = true;
       button.click();
     });

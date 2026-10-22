@@ -1,10 +1,11 @@
 import { signal } from "@preact/signals";
-import { type AccountView, type BellCloud, type HubChoice, type HubView, type Problem, type ProjectStatus, type ScanView, type SessionView, type StatusView, HUB_VIEW_VERSION } from "../contract";
+import { type AccountView, type BellCloud, type HubChoice, type HubView, type Problem, type ProjectStatus, type ScanView, type SessionView, type StatusView, HUB_VIEW_VERSION, STATUS_VIEW_VERSION } from "../contract";
 import type { Answer, Landing } from "../steps";
 import { ApiError, get, post } from "./api";
 
 const HUB_KEY = "tapster.hub";
 const VIEW_KEY = "tapster.view";
+const STATUS_KEY = "tapster.status";
 
 const saved = (key: string) => {
   try {
@@ -48,7 +49,10 @@ function settle(view: HubView | null): void {
 
 export const freshHub = (): Promise<HubView | null> => (hubCached.value ? new Promise((resolve) => waiting.push(resolve)) : Promise.resolve(hub.value));
 
-export const dropView = () => remember(VIEW_KEY, null);
+export const dropView = () => {
+  remember(VIEW_KEY, null);
+  remember(STATUS_KEY, null);
+};
 
 // The saved view leaves out what only this setup's memory holds: an App key or a Cloudflare token waiting to be used.
 function saveView(view: HubView): void {
@@ -118,6 +122,7 @@ export function chooseHub(name: string | null, load = true): void {
   if (hubCached.value) settle(null);
   hubError.value = null;
   statuses.value = null;
+  if (statusCached.value) settleStatuses(null);
   statusError.value = null;
   clones.value = null;
   if (name && load) {
@@ -128,21 +133,60 @@ export function chooseHub(name: string | null, load = true): void {
 
 export const statuses = signal<{ hub: string; list: ProjectStatus[] } | null>(null);
 export const statusError = signal<Problem | null>(null);
+export const statusCached = signal(false);
+
+let statusWaiting: ((list: ProjectStatus[] | null) => void)[] = [];
+
+function settleStatuses(list: ProjectStatus[] | null): void {
+  statusCached.value = false;
+  const done = statusWaiting;
+  statusWaiting = [];
+  setTimeout(() => done.forEach((f) => f(list)));
+}
+
+export const freshStatuses = (): Promise<ProjectStatus[] | null> => (statusCached.value ? new Promise((resolve) => statusWaiting.push(resolve)) : Promise.resolve(statuses.value?.list ?? null));
+
+const saveStatuses = (hub: string, list: ProjectStatus[]) => remember(STATUS_KEY, JSON.stringify({ v: STATUS_VIEW_VERSION, hub, list }));
+
+function restoreStatuses(name: string): void {
+  if (statuses.value?.hub === name) return;
+  const saved = ((): { v?: unknown; hub?: unknown; list?: unknown } | null => {
+    try {
+      return JSON.parse(recall(STATUS_KEY) ?? "null");
+    } catch {
+      return null;
+    }
+  })();
+  if (saved?.v !== STATUS_VIEW_VERSION || saved.hub !== name || !Array.isArray(saved.list)) return;
+  statuses.value = { hub: name, list: saved.list as ProjectStatus[] };
+  statusCached.value = true;
+}
 
 let loading: { hub: string; done: Promise<void> } | null = null;
 
+// The last list paints at once while GitHub is asked again; a failed answer drops it, so nothing stale stays on the page.
 export function loadStatuses(): Promise<void> {
   const name = hubName.value;
   if (!name) return Promise.resolve();
   if (loading?.hub === name) return loading.done;
+  restoreStatuses(name);
   const done = (async () => {
     try {
       const view = await get<StatusView>(`/api/projects/status?hub=${encodeURIComponent(name)}`);
       if (hubName.value !== name) return;
       statuses.value = { hub: name, list: view.projects };
       statusError.value = null;
+      saveStatuses(name, view.projects);
+      if (statusCached.value) settleStatuses(view.projects);
     } catch (e) {
-      if (hubName.value === name) statusError.value = problemOf(e);
+      if (hubName.value === name) {
+        statusError.value = problemOf(e);
+        if (statusCached.value) {
+          statuses.value = null;
+          remember(STATUS_KEY, null);
+          settleStatuses(null);
+        }
+      }
     } finally {
       loading = null;
     }
@@ -159,6 +203,7 @@ export async function statusOf(repo: string): Promise<ProjectStatus | null> {
   if (s && now?.hub === name && s.entry.state !== "missing") {
     const known = now.list.some((x) => x.repo === s.repo);
     statuses.value = { hub: name, list: known ? now.list.map((x) => (x.repo === s.repo ? s : x)) : [...now.list, s] };
+    if (!statusCached.value) saveStatuses(name, statuses.value.list);
   }
   return s;
 }

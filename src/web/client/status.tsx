@@ -4,7 +4,7 @@ import type { FollowView, Problem as ProblemView, ProjectStatus, ReachView } fro
 import { type ProjectStep, type ProjectStepId, bumps, canRelease, followSteps, projectNext, projectSteps, releasableParent, tagCommand, tagProblem } from "../status";
 import { get, post } from "./api";
 import { hub, hubName, problemOf, say, statusOf, tilde } from "./state";
-import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner } from "./ui";
+import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner, ofProject } from "./ui";
 import { capFirst } from "../steps";
 import { Configuration } from "./config";
 
@@ -240,7 +240,7 @@ function EntryStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSta
       <Problem problem={problem} />
       <div class="row">
         {p && (
-          <Busy busy={busy} class="btn primary small" onClick={merge}>
+          <Busy busy={busy} holds={ofProject(s.repo, (p) => p.entry)} class="btn primary small" onClick={merge}>
             {!busy && <Icon name="pr" />}
             Merge the hub entry
           </Busy>
@@ -415,7 +415,7 @@ function ReleaseBox({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSt
       </p>
       <Problem problem={problem} />
       <div class="row">
-        <Busy busy={busy} class="btn primary" onClick={release} disabled={Boolean(bad)}>
+        <Busy busy={busy} holds={ofProject(s.repo, (p) => p.release)} class="btn primary" onClick={release} disabled={Boolean(bad)}>
           <Icon name="play" />
           Release {tag || "a version"}
         </Busy>
