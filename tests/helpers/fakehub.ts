@@ -336,7 +336,8 @@ export class FakeHub {
     if (tagObject) return r.annotated.has(tagObject[1]!) ? json({ sha: tagObject[1], object: { sha: r.annotated.get(tagObject[1]!), type: "commit" } }) : json({}, 404);
     const commit = /^\/commits\/([^/]+)$/.exec(rest);
     if (commit) {
-      const at = commit[1] === "main" ? r.head : commit[1]!;
+      if (commit[1] === "HEAD" && !r.files) return json({ message: "Git Repository is empty." }, 409);
+      const at = commit[1] === "main" || commit[1] === "HEAD" ? r.head : commit[1]!;
       const parent = r.commit.parent;
       const tip = !parent || at !== parent.sha;
       const parents = tip && parent ? [parent.sha, ...(r.commit.merge ? [r.commit.merge] : [])].map((p) => ({ sha: p })) : [];

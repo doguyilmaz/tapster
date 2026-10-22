@@ -55,6 +55,29 @@ test("rulesets that GitHub does not enforce are a problem", async () => {
   expect(problems.join("; ")).toMatch(/does not enforce/);
 });
 
+test("the tag rulesets, the branch rulesets and the branch's rules are read at once", async () => {
+  const slow = (sets: Set[], rulesFail = false) => {
+    const { gh } = fake(sets);
+    const seen = { started: [] as string[], now: 0, peak: 0 };
+    const json = async (method: string, path: string) => {
+      seen.started.push(path);
+      seen.peak = Math.max(seen.peak, ++seen.now);
+      await Bun.sleep(5);
+      seen.now--;
+      if (rulesFail && path.includes("/rules/branches/")) throw new GitHubError(`GitHub GET ${path} returned 500`, "", 500);
+      return gh.json(method, path);
+    };
+    return { gh: { json } as unknown as GitHub, seen };
+  };
+  const both = slow([tags(), branch()]);
+  expect(await protectionProblems(both.gh, "o/p", "main", "app")).toEqual([]);
+  expect(both.seen.started.slice(0, 3)).toEqual(["/repos/o/p/rulesets?targets=tag", "/repos/o/p/rulesets?targets=branch", "/repos/o/p/rules/branches/main"]);
+  expect(both.seen.peak).toBe(3);
+  const tagOnly = slow([tags()], true);
+  expect(await protectionProblems(tagOnly.gh, "o/p", "main", "app")).toEqual(["no active branch ruleset protects every branch"]);
+  await expect(protectionProblems(slow([tags(), branch()], true).gh, "o/p", "main", "app")).rejects.toThrow(/rules\/branches\/main returned 500/);
+});
+
 test("the owner's view checks the bypass list instead", async () => {
   const owner = { current_user_can_bypass: "always", bypass_actors: admin };
   expect(await protectionProblems(fake([tags(owner), branch(owner)]).gh, "o/p", "main", "admin")).toEqual([]);

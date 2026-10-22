@@ -2,7 +2,7 @@ import { parse } from "yaml";
 import { z } from "zod";
 import { noteIn } from "../../draftnote";
 import { GitHubError, TapsterError } from "../../errors";
-import type { GitHub, Release as GitHubRelease } from "../../github";
+import { type GitHub, type Release as GitHubRelease, type Repo, early, limited } from "../../github";
 import { readHubFile } from "../../hubcommit";
 import { protectionProblems } from "../../rulesets";
 import { TAG, compareSemver, parseTag } from "../../semver";
@@ -12,7 +12,7 @@ import type { CommitView, FollowView, ProjectStatus, StatusView } from "../contr
 import { type Ctx, type Routes, type Session, readJson } from "../server";
 import { changesRelease, highestTag, nextTag, skipFix, skipMarker, suggestBump, tagProblem } from "../status";
 import { configOf } from "./config";
-import { proposal } from "./entry";
+import { type Pull, proposal } from "./entry";
 import { checkHub, hubRunList, me, startHubRun } from "./hub";
 import { type HubChecks, hubChecks, reachOf, reachRoutes, stateOf } from "./reach";
 
@@ -75,18 +75,30 @@ export function setupProblems(o: { kind: string; branch: string; workflowName: s
   return out;
 }
 
-type Shared = { gh: GitHub; hub: string; slug: string | null; apple: boolean; ownerId: number; state: State; checks: HubChecks; hubText: string | null; memo: Map<string, unknown> };
+// The hub's reads, started together with the projects' own and awaited only where a value needs them. failed rejects
+// with the first of them that failed, which fails the whole answer.
+type Shared = {
+  gh: GitHub;
+  hub: string;
+  memo: Map<string, unknown>;
+  hubText: Promise<string | null>;
+  pulls: Promise<Pull[]>;
+  facts: Promise<{ slug: string; apple: boolean } | null>;
+  state: Promise<State>;
+  ownerId: Promise<number>;
+  checks: Promise<HubChecks>;
+  failed: Promise<unknown>;
+};
 
-async function shared(s: Session, gh: GitHub, hub: string, login: string): Promise<Shared> {
-  const [facts, stateText, owner, checks, hubText] = await Promise.all([
-    hubFacts(gh, hub).catch((e) => (e instanceof TapsterError ? null : Promise.reject(e))),
-    readHubFile(gh, hub, ".tapster/state.json", "main"),
-    gh.json<{ id: number }>("GET", `/users/${login}`),
-    hubChecks(s, gh, hub),
-    readHubFile(gh, hub, "tapster.yml", "main"),
-  ]);
+function shared(s: Session, gh: GitHub, hub: string, login: string): Shared {
   if (s.memo.size > 500) s.memo.clear();
-  return { gh, hub, slug: facts?.slug ?? null, apple: facts?.apple ?? false, ownerId: owner.id, state: stateOf(stateText), checks, hubText, memo: s.memo };
+  const hubText = early(readHubFile(gh, hub, "tapster.yml", "main"));
+  const pulls = early(gh.json<Pull[]>("GET", `/repos/${hub}/pulls?state=open&per_page=100`));
+  const facts = early(hubFacts(gh, hub).catch((e) => (e instanceof TapsterError ? null : Promise.reject(e))));
+  const state = early(readHubFile(gh, hub, ".tapster/state.json", "main").then(stateOf));
+  const ownerId = early(gh.json<{ id: number }>("GET", `/users/${login}`).then((o) => o.id));
+  const checks = early(hubChecks(s, gh, hub));
+  return { gh, hub, memo: s.memo, hubText, pulls, facts, state, ownerId, checks, failed: early(Promise.all([facts, state, ownerId, checks, hubText])) };
 }
 
 const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim();
@@ -106,9 +118,20 @@ export async function withParentTag(gh: GitHub, repo: string, head: CommitView |
 }
 
 export async function headOf(gh: GitHub, repo: string, branch: string): Promise<CommitView | null> {
+  let sha: string;
   try {
-    const sha = (await gh.json<{ object: { sha: string } }>("GET", `/repos/${repo}/git/ref/heads/${encodeURIComponent(branch)}`)).object.sha;
-    const c = await gh.json<Commit>("GET", `/repos/${repo}/commits/${sha}`);
+    sha = (await gh.json<{ object: { sha: string } }>("GET", `/repos/${repo}/git/ref/heads/${encodeURIComponent(branch)}`)).object.sha;
+  } catch (e) {
+    if (e instanceof GitHubError) return null;
+    throw e;
+  }
+  return commitAt(gh, repo, sha);
+}
+
+// ref: a commit's sha or HEAD, the latest commit on the default branch.
+async function commitAt(gh: GitHub, repo: string, ref: string): Promise<CommitView | null> {
+  try {
+    const c = await gh.json<Commit>("GET", `/repos/${repo}/commits/${ref}`);
     const head: CommitView = { sha: c.sha, subject: subjectOf(c), date: c.commit.committer?.date ?? "", url: c.html_url };
     const skip = skipMarker(c.commit.message);
     if (!skip) return head;
@@ -127,42 +150,54 @@ export async function headOf(gh: GitHub, repo: string, branch: string): Promise<
   }
 }
 
-async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
+// The two reads every later step waits on, started for all projects before the rest of their reads.
+type Start = { project: Promise<Repo>; tip: Promise<CommitView | null> };
+
+const begin = (gh: GitHub, repo: string, project = gh.getRepo(repo)): Start => ({ project: early(project), tip: early(commitAt(gh, repo, "HEAD")) });
+
+async function projectStatus(sh: Shared, e: Listed, start: Start): Promise<ProjectStatus> {
   const { gh } = sh;
-  const project = await gh.getRepo(e.repo);
+  // HEAD is the default branch, so these reads need not wait for the repository's details.
+  const read = (path: string) => readHubFile(gh, e.repo, path, "HEAD");
+  const reads = early(
+    Promise.all([
+      e.kind === "go" ? read(".goreleaser.yaml").then((t) => t ?? read(".goreleaser.yml")) : Promise.resolve(null),
+      read(`.github/workflows/${e.workflow}`),
+      gh.json<{ title: string }[]>("GET", `/repos/${e.repo}/keys`).catch(() => []),
+      gh.json<Release[]>("GET", `/repos/${e.repo}/releases?per_page=30`).catch(() => []),
+      tagRefs(gh, e.repo).catch(() => null),
+      gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${e.repo}/actions/secrets?per_page=100`).then((r) => releaseSecrets(r.secrets.map((x) => x.name)), () => []),
+      e.state === "proposed"
+        ? proposal(gh, sh.hub, e.name, "main", "add", sh.pulls).then(
+            (p) => ({ proposal: { head: p.head, entry: p.entry }, blocked: null }),
+            (err) => (err instanceof TapsterError ? { proposal: null, blocked: `${err.reason}. ${err.fix}` } : Promise.reject(err)),
+          )
+        : Promise.resolve({ proposal: null, blocked: null }),
+    ]),
+  );
+  const project = await start.project;
   const branch = project.default_branch;
-  const read = (path: string) => readHubFile(gh, e.repo, path, encodeURIComponent(branch));
-  const [goreleaser, workflow, problems, keys, releases, listed, tip, secrets, proposed] = await Promise.all([
-    e.kind === "go" ? read(".goreleaser.yaml").then((t) => t ?? read(".goreleaser.yml")) : Promise.resolve(null),
-    read(`.github/workflows/${e.workflow}`),
-    e.protection === "off" ? Promise.resolve([]) : protectionProblems(gh, e.repo, branch, "admin", e.protection === "dependabot").catch(() => ["GitHub did not show the repository's rulesets"]),
-    gh.json<{ title: string }[]>("GET", `/repos/${e.repo}/keys`).catch(() => []),
-    gh.json<Release[]>("GET", `/repos/${e.repo}/releases?per_page=30`).catch(() => []),
-    tagRefs(gh, e.repo).catch(() => null),
-    headOf(gh, e.repo, branch),
-    gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${e.repo}/actions/secrets?per_page=100`).then((r) => releaseSecrets(r.secrets.map((x) => x.name)), () => []),
-    e.state === "proposed"
-      ? proposal(gh, sh.hub, e.name).then(
-          (p) => ({ proposal: { head: p.head, entry: p.entry }, blocked: null }),
-          (err) => (err instanceof TapsterError ? { proposal: null, blocked: `${err.reason}. ${err.fix}` } : Promise.reject(err)),
-        )
-      : Promise.resolve({ proposal: null, blocked: null }),
-  ]);
-  const head = await withParentTag(gh, e.repo, tip, listed);
+  const problemsP = early(e.protection === "off" ? Promise.resolve([]) : protectionProblems(gh, e.repo, branch, "admin", e.protection === "dependabot").catch(() => ["GitHub did not show the repository's rulesets"]));
+  const [[goreleaser, workflow, keys, releases, listed, secrets, proposed], tip] = await Promise.all([reads, start.tip]);
   const refs = listed ?? [];
-  const published = sh.state.packages[e.name] ?? [];
   const latest = newest(releases.filter((r) => !r.draft));
   const draft = newest(releases.filter((r) => r.draft && TAG.test(r.tag_name) && (!latest || compareSemver(parseTag(r.tag_name)!, parseTag(latest.tag_name)!) > 0)));
   const highest = highestTag([...refs.map((r) => r.name), ...releases.map((r) => r.tag_name)]);
-  const atHead = head ? await tagAt(gh, e.repo, refs, head.sha) : null;
-  const suggest = head && highest && !atHead ? await sinceTag(gh, e.repo, highest, head.sha).then((m) => suggestBump(m, highest), () => null) : null;
-  const setup = setupProblems({ kind: e.kind, branch, workflowName: e.workflow, goreleaser, workflow });
-  const config =
+  const headP = early(withParentTag(gh, e.repo, tip, listed));
+  const atHeadP = early(tip ? tagAt(gh, e.repo, refs, tip.sha) : Promise.resolve(null));
+  const suggestP = early(atHeadP.then((atHead) => (tip && highest && !atHead ? sinceTag(gh, e.repo, highest, tip.sha).then((m) => suggestBump(m, highest), () => null) : null)));
+  const configP = early(
     e.state === "merged"
-      ? await configOf(gh, { hub: sh.hub, apple: sh.apple, hubText: sh.hubText, name: e.name, repo: e.repo, kind: e.kind, ref: head?.sha ?? branch, goreleaser, workflow: workflow === null ? null : { name: `.github/workflows/${e.workflow}`, text: workflow }, releases, memo: sh.memo }).catch((err) =>
-          err instanceof TapsterError || err instanceof GitHubError ? null : Promise.reject(err),
+      ? Promise.all([sh.hubText, sh.facts]).then(([hubText, facts]) =>
+          configOf(gh, { hub: sh.hub, apple: facts?.apple ?? false, hubText, name: e.name, repo: e.repo, kind: e.kind, ref: tip?.sha ?? branch, goreleaser, workflow: workflow === null ? null : { name: `.github/workflows/${e.workflow}`, text: workflow }, releases, memo: sh.memo, pulls: sh.pulls }).catch((err) =>
+            err instanceof TapsterError || err instanceof GitHubError ? null : Promise.reject(err),
+          ),
         )
-      : null;
+      : Promise.resolve(null),
+  );
+  const [head, atHead, suggest, config, problems, state, facts, ownerId, checks] = await Promise.all([headP, atHeadP, suggestP, configP, problemsP, sh.state, sh.facts, sh.ownerId, sh.checks]);
+  const published = state.packages[e.name] ?? [];
+  const setup = setupProblems({ kind: e.kind, branch, workflowName: e.workflow, goreleaser, workflow });
   return {
     name: e.name,
     repo: e.repo,
@@ -172,7 +207,7 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
     setup: { ok: setup.length === 0, problems: setup, triggers: workflow ? releaseTriggers(workflow) : [] },
     protection: { ok: problems.length === 0, off: e.protection === "off", problems },
     entry: { state: e.state, pr: e.pr, ...proposed },
-    app: { ...reachOf(sh.checks, e.name, e.repo, sh.state), installUrl: sh.slug ? installLink(sh.slug, sh.ownerId, project.id) : "" },
+    app: { ...reachOf(checks, e.name, e.repo, state), installUrl: facts?.slug ? installLink(facts.slug, ownerId, project.id) : "" },
     release: {
       latest: latest ? { tag: latest.tag_name, url: latest.html_url, byHub: published.some((p) => p.tag === latest.tag_name && p.status === "published") } : null,
       draft: draft ? { tag: draft.tag_name, url: draft.html_url, note: noteIn(draft.body) } : null,
@@ -191,10 +226,11 @@ async function projectStatus(sh: Shared, e: Listed): Promise<ProjectStatus> {
 
 type Listed = HubEntry | (Omit<HubEntry, "state" | "pr"> & { state: "missing"; pr: null });
 
-async function statusOrReason(sh: Shared, e: Listed): Promise<ProjectStatus> {
+async function statusOrReason(sh: Shared, e: Listed, start: Start): Promise<ProjectStatus> {
   try {
-    return await projectStatus(sh, e);
+    return await projectStatus(sh, e, start);
   } catch (err) {
+    await sh.failed;
     if (!(err instanceof TapsterError)) throw err;
     return {
       name: e.name,
@@ -221,21 +257,26 @@ async function guessKind(gh: GitHub, repo: string, branch: string): Promise<"go"
 
 const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 
+async function statuses(sh: Shared, list: Listed[], started = list.map((e) => begin(sh.gh, e.repo))): Promise<StatusView> {
+  const [, projects] = await Promise.all([sh.failed, Promise.all(list.map((e, i) => statusOrReason(sh, e, started[i]!)))]);
+  return { projects };
+}
+
 async function status(c: Ctx): Promise<StatusView> {
-  const { gh, login } = await me(c.s);
+  const { gh: direct, login } = await me(c.s);
   const hub = checkHub(c.url.searchParams.get("hub"), login);
   const only = c.url.searchParams.get("repo");
   if (only !== null && (!REPO.test(only) || only.split("/")[0]!.toLowerCase() !== login.toLowerCase())) throw new TapsterError(`${only} is not one of your repositories`, "Reload the page and try again.");
-  const entries = await hubEntries(gh, hub);
-  const sh = await shared(c.s, gh, hub, login);
-  if (only !== null) {
-    const found = entries.find((e) => e.repo.toLowerCase() === only.toLowerCase());
-    if (found) return { projects: [await statusOrReason(sh, found)] };
-    const name = only.split("/")[1]!.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-    const kind = await guessKind(gh, only, (await gh.getRepo(only)).default_branch);
-    return { projects: [await statusOrReason(sh, { name, repo: only, kind, workflow: "release.yml", protection: "on", description: null, state: "missing", pr: null })] };
-  }
-  return { projects: await Promise.all(entries.map((e) => statusOrReason(sh, e))) };
+  const gh = limited(direct, 8);
+  const sh = shared(c.s, gh, hub, login);
+  const entries = await hubEntries(gh, hub, { text: sh.hubText, pulls: sh.pulls });
+  if (only === null) return statuses(sh, entries);
+  const found = entries.find((e) => e.repo.toLowerCase() === only.toLowerCase());
+  if (found) return statuses(sh, [found]);
+  const name = only.split("/")[1]!.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const project = early(gh.getRepo(only));
+  const kind = await guessKind(gh, only, (await project).default_branch);
+  return statuses(sh, [{ name, repo: only, kind, workflow: "release.yml", protection: "on", description: null, state: "missing", pr: null }], [begin(gh, only, project)]);
 }
 
 const releaseBody = z.object({ hub: z.string(), repo: z.string().regex(REPO), tag: z.string().max(100), sha: z.string().regex(/^[0-9a-f]{40,64}$/) }).strict();

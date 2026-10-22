@@ -35,17 +35,20 @@ type Job = { id: number; name: string; conclusion: string | null; completed_at: 
 
 export async function hubChecks(s: Session, gh: GitHub, hub: string): Promise<HubChecks> {
   const held = s.apps.get(hub);
-  const direct = held ? await installationRepos(held.id, held.pem, hub.split("/")[0]!, s.deps.fetch).then((r) => new Set((r ?? []).map((x) => x.toLowerCase())), () => null) : null;
+  const directP = held ? installationRepos(held.id, held.pem, hub.split("/")[0]!, s.deps.fetch).then((r) => new Set((r ?? []).map((x) => x.toLowerCase())), () => null) : Promise.resolve(null);
+  const issuesP = gh.json<{ title: string; body: string | null; updated_at: string; user: { login: string } | null }[]>("GET", `/repos/${hub}/issues?state=open&creator=${encodeURIComponent("github-actions[bot]")}&per_page=20`).catch(() => []);
   const runs = await hubRunList(gh, hub);
   const running = runs.find((r) => r.status !== "completed")?.html_url ?? null;
   const last = runs.find((r) => r.status === "completed" && r.conclusion !== "cancelled" && r.conclusion !== "skipped");
-  if (!last) return { done: null, running, direct };
+  if (!last) return { done: null, running, direct: await directP };
+  const configP = readHubFile(gh, hub, "tapster.yml", last.head_sha).catch(() => null);
   const jobs = await gh.json<{ jobs: Job[] }>("GET", `/repos/${hub}/actions/runs/${last.id}/jobs?per_page=50`).then((r) => r.jobs, () => [] as Job[]);
   const job = jobs.find((j) => j.name === "check");
-  const [notes, config, issues] = await Promise.all([
+  const [notes, config, issues, direct] = await Promise.all([
     job ? gh.json<{ annotation_level: string; title: string | null; message: string }[]>("GET", `/repos/${hub}/check-runs/${job.id}/annotations?per_page=100`).catch(() => []) : Promise.resolve([]),
-    readHubFile(gh, hub, "tapster.yml", last.head_sha).catch(() => null),
-    gh.json<{ title: string; body: string | null; updated_at: string; user: { login: string } | null }[]>("GET", `/repos/${hub}/issues?state=open&creator=${encodeURIComponent("github-actions[bot]")}&per_page=20`).catch(() => []),
+    configP,
+    issuesP,
+    directP,
   ]);
   const issue = issues.find((i) => i.title === "tapster: the hub needs attention" && i.user?.login === "github-actions[bot]" && i.updated_at >= last.created_at);
   const lines = (issue?.body ?? "").split("\n").filter((l) => /^[a-z0-9][a-z0-9-]*: /.test(l) && NOT_INSTALLED.test(l));

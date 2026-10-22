@@ -152,3 +152,28 @@ export class GitHub {
     return this.json<Release>("PATCH", `/repos/${repo}/releases/${id}`, { ...patch, tag_name: tag });
   }
 }
+
+// A call started now and awaited later, maybe in another order; the noop catch keeps an unawaited rejection quiet.
+export const early = <T>(p: Promise<T>): Promise<T> => {
+  p.catch(() => undefined);
+  return p;
+};
+
+// At most `max` requests in flight, so a hub with many projects stays clear of GitHub's secondary rate limits.
+export function limited(gh: GitHub, max: number): GitHub {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  const g = Object.create(gh) as GitHub;
+  g.request = async (...args: Parameters<GitHub["request"]>) => {
+    if (active >= max) await new Promise<void>((go) => waiting.push(go));
+    else active++;
+    try {
+      return await gh.request(...args);
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
+    }
+  };
+  return g;
+}

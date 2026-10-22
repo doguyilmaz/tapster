@@ -460,10 +460,13 @@ export function entriesIn(text: string | null, owner: string): Omit<HubEntry, "s
   });
 }
 
-export async function hubEntries(gh: GitHub, hub: string): Promise<HubEntry[]> {
+// read: the hub's tapster.yml on main and its open pull requests, when the caller has asked GitHub for them already.
+export async function hubEntries(gh: GitHub, hub: string, read?: { text: Promise<string | null>; pulls: Promise<{ html_url: string; head: { ref: string } }[]> }): Promise<HubEntry[]> {
   const owner = hub.split("/")[0]!;
-  const out: HubEntry[] = entriesIn(await readHubFile(gh, hub, "tapster.yml", "main"), owner).map((e) => ({ ...e, state: "merged", pr: null }));
-  const pulls = await gh.json<{ html_url: string; head: { ref: string } }[]>("GET", `/repos/${hub}/pulls?state=open&per_page=100`).catch(() => []);
+  const text = read?.text ?? readHubFile(gh, hub, "tapster.yml", "main");
+  const listed = (read?.pulls ?? gh.json<{ html_url: string; head: { ref: string } }[]>("GET", `/repos/${hub}/pulls?state=open&per_page=100`)).catch(() => []);
+  const out: HubEntry[] = entriesIn(await text, owner).map((e) => ({ ...e, state: "merged", pr: null }));
+  const pulls = await listed;
   for (const p of pulls) {
     const name = /^tapster-add-([a-z0-9][a-z0-9-]*)$/.exec(p.head?.ref ?? "")?.[1];
     if (!name || out.some((e) => e.name === name)) continue;

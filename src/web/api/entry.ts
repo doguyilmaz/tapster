@@ -34,17 +34,19 @@ const WORDS: Record<PullKind, { none: string; more: string; differs: string; mes
   },
 };
 
-type Pull = { number: number; html_url: string; head: { ref: string; sha: string; repo: { full_name: string } | null }; base: { ref: string } };
+export type Pull = { number: number; html_url: string; head: { ref: string; sha: string; repo: { full_name: string } | null }; base: { ref: string } };
 
-export async function openPull(gh: GitHub, hub: string, kind: PullKind, name: string): Promise<Pull | null> {
+// open: the hub's open pull requests when the caller has listed them already. A full page may leave the one wanted out.
+export async function openPull(gh: GitHub, hub: string, kind: PullKind, name: string, open?: Promise<Pull[]>): Promise<Pull | null> {
   const branch = pullBranch(kind, name);
-  const pulls = await gh.json<Pull[]>("GET", `/repos/${hub}/pulls?state=open&head=${encodeURIComponent(`${hub.split("/")[0]}:${branch}`)}&per_page=10`);
+  const listed = open ? await open : null;
+  const pulls = listed && listed.length < 100 ? listed : await gh.json<Pull[]>("GET", `/repos/${hub}/pulls?state=open&head=${encodeURIComponent(`${hub.split("/")[0]}:${branch}`)}&per_page=10`);
   return pulls.find((p) => p.head.ref === branch && p.head.repo?.full_name.toLowerCase() === hub.toLowerCase()) ?? null;
 }
 
-export async function proposal(gh: GitHub, hub: string, name: string, main = "main", kind: PullKind = "add"): Promise<Proposal> {
+export async function proposal(gh: GitHub, hub: string, name: string, main = "main", kind: PullKind = "add", open?: Promise<Pull[]>): Promise<Proposal> {
   const owner = hub.split("/")[0]!;
-  const pr = await openPull(gh, hub, kind, name);
+  const pr = await openPull(gh, hub, kind, name, open);
   if (!pr) throw new TapsterError(`${hub} has no open pull request from ${pullBranch(kind, name)}`, WORDS[kind].none);
   if (pr.base.ref !== "main") throw new TapsterError(`the pull request merges into ${pr.base.ref}, not main`, REVIEW);
   const files = await gh.json<{ filename: string; status: string }[]>("GET", `/repos/${hub}/pulls/${pr.number}/files?per_page=100`);
