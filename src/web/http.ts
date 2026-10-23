@@ -1,6 +1,6 @@
 import { GitHubError, TapsterError } from "../errors";
 
-export const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self' https://github.com; frame-ancestors 'none'; base-uri 'none'";
+export const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; form-action 'self' https://github.com; frame-ancestors 'none'; base-uri 'none'";
 
 const BASE: Record<string, string> = {
   "content-security-policy": CSP,

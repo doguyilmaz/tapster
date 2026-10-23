@@ -163,7 +163,7 @@ test("keys held in memory are forgotten after an hour", async () => {
 });
 
 test("the page keeps a strict CSP: no inline script, no eval and nothing from another origin", async () => {
-  expect(CSP).toBe("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self' https://github.com; frame-ancestors 'none'; base-uri 'none'");
+  expect(CSP).toBe("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; form-action 'self' https://github.com; frame-ancestors 'none'; base-uri 'none'");
   expect(PAGE).not.toMatch(/<script(?![^>]*\ssrc="\/app\.js")/);
   expect(PAGE).not.toMatch(/\son\w+=/);
   const script = await webScript();
@@ -242,4 +242,18 @@ test("setup options", () => {
   expect(setupOptions(["--no-open", "--port", "9000", "--tapster", "a".repeat(40)])).toEqual({ open: false, port: 9000, pin: "a".repeat(40), service: false });
   expect(() => setupOptions(["--port", "80"])).toThrow(TapsterError);
   expect(() => setupOptions(["--tapster", "main"])).toThrow(TapsterError);
+});
+
+test("the always-on service can be installed as an app; the one-shot session cannot", async () => {
+  const service = app({}, "service");
+  expect(await (await service.call("/")).text()).toContain('<link rel="manifest" href="/app.webmanifest">');
+  const res = await service.call("/app.webmanifest");
+  expect(res.headers.get("content-type")).toBe("application/manifest+json");
+  expect(await res.json()).toMatchObject({ name: "tapster", start_url: "/", scope: "/", display: "standalone", icons: [{ src: "/icon.png", sizes: "512x512", type: "image/png" }] });
+  const icon = await service.call("/icon.png");
+  expect(icon.headers.get("content-type")).toBe("image/png");
+  expect(icon.headers.get("content-disposition")).toBeNull();
+  const once = app();
+  expect(await (await once.call("/")).text()).not.toContain("manifest");
+  expect((await once.call("/app.webmanifest")).status).toBe(404);
 });
