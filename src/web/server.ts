@@ -76,7 +76,7 @@ const PAGES = new Set(["/", "/setup", "/projects", "/health"]);
 const image = (uri: string) => Buffer.from(uri.slice(uri.indexOf(",") + 1), "base64");
 const IMAGES: Record<string, Buffer> = { "/logo.webp": image(LOGO_URI), "/courier.webp": image(COURIER_URI) };
 
-export const PAGE = `<!doctype html>
+const html = (extra: string) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -84,7 +84,7 @@ export const PAGE = `<!doctype html>
 <meta name="color-scheme" content="light dark">
 <title>tapster setup</title>
 <link rel="icon" href="/logo.webp">
-<link rel="stylesheet" href="/app.css">
+${extra}<link rel="stylesheet" href="/app.css">
 <script type="module" src="/app.js"></script>
 </head>
 <body>
@@ -93,6 +93,21 @@ export const PAGE = `<!doctype html>
 </body>
 </html>
 `;
+
+export const PAGE = html("");
+const SERVICE_PAGE = html('<link rel="manifest" href="/app.webmanifest">\n');
+
+const MANIFEST = JSON.stringify({
+  name: "tapster",
+  short_name: "tapster",
+  id: "/",
+  start_url: "/",
+  scope: "/",
+  display: "standalone",
+  background_color: "#f3f4f6",
+  theme_color: "#f3f4f6",
+  icons: [{ src: "/icon.png", sizes: "512x512", type: "image/png" }],
+});
 
 export function newSession(deps: Deps, port: number, mode: Mode = "once"): Session {
   const s: Session = {
@@ -194,7 +209,9 @@ export function handler(s: Session, routes: Routes, callback: (c: Ctx) => Promis
     if (!hostAllowed(req.headers.get("host"), s.port)) return respond("Misdirected request", 421, "text/plain; charset=utf-8");
     const url = new URL(req.url);
     const path = url.pathname;
-    if (req.method === "GET" && PAGES.has(path)) return respond(PAGE, 200, "text/html; charset=utf-8");
+    if (req.method === "GET" && PAGES.has(path)) return respond(s.mode === "service" ? SERVICE_PAGE : PAGE, 200, "text/html; charset=utf-8");
+    if (req.method === "GET" && s.mode === "service" && path === "/app.webmanifest") return respond(MANIFEST, 200, "application/manifest+json");
+    if (req.method === "GET" && s.mode === "service" && path === "/icon.png") return respond(await logoPng(), 200, "image/png");
     if (req.method === "GET" && path === "/app.css") return respond(css, 200, "text/css; charset=utf-8");
     if (req.method === "GET" && path === "/app.js") return respond(await webScript(), 200, "text/javascript; charset=utf-8");
     if (req.method === "GET" && IMAGES[path]) return respond(new Uint8Array(IMAGES[path]), 200, "image/webp");

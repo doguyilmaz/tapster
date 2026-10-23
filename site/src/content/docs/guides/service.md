@@ -45,6 +45,16 @@ tapster setup
 With the service running, `tapster setup` asks it for a link that works once and opens it. The page then stays signed in
 in that browser for up to 30 days. After 12 hours without a click it locks. Then run `tapster setup` again.
 
+## Open it as an app
+
+The service's page can be installed as an app, so it opens in its own window from the Dock or Launchpad. In Chrome or
+Edge, open the page, then click the install icon at the right of the address bar and choose **Install**. The app is the same page from your computer, with the same checks; nothing is loaded from the
+internet. It shares the browser's sign-in, so a link from `tapster setup` that opened in the browser signs the app in
+too.
+
+Safari's **Add to Dock** keeps a separate store for the app, so the link `tapster setup` opens in Safari does not sign
+it in. Use Chrome or Edge for the app.
+
 ## Update tapster
 
 When a new release is out, the page says `tapster 1.7.5 is available`. Click **Update**, then confirm. tapster:
