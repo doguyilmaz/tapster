@@ -21,6 +21,7 @@ const deps: Deps = {
   keychain: async () => null,
   gpg: async () => null,
   store: () => null,
+  platform: "darwin",
   where: { exec: "/opt/homebrew/Caskroom/tapster/1.0.0/tapster", script: "", sha: "a" },
   run: async (argv) => {
     throw new Error(`no command may run in this test: ${argv[0]}`);

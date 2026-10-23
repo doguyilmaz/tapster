@@ -10,6 +10,8 @@ import { Back, Setup } from "./setup";
 import { landing } from "../steps";
 import { account, accountError, appResult, back, chooseHub, doorbellResult, dropView, go, hubCached, hubName, loadAccount, loadHub, openStop, path, problemOf, restoreHub, say, session, statusCached, toast } from "./state";
 import { Icon, Note, Spinner } from "./ui";
+import { Confirm } from "./confirm";
+import { Banners, watchTapster } from "./update";
 
 type Boot = { kind: "claiming" } | { kind: "ready" } | { kind: "no-session" } | { kind: "failed"; problem: ProblemView } | { kind: "stopped" };
 const boot = signal<Boot>({ kind: "claiming" });
@@ -49,6 +51,7 @@ async function start(): Promise<void> {
   const here = session.value.here.hub;
   if (!hubName.value && here) chooseHub(here);
   else if (hubName.value) void loadHub();
+  watchTapster();
   await loadAccount();
 }
 
@@ -187,9 +190,11 @@ function App() {
     <>
       <Header />
       <main id="main">
+        <Banners />
         <Page />
       </main>
       <Toast />
+      <Confirm />
     </>
   );
 }

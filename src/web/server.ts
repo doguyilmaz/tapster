@@ -25,6 +25,7 @@ export type Deps = {
   keychain(account: string): Promise<string | null>;
   gpg(): Promise<string | null>;
   store(): Store | null;
+  platform: NodeJS.Platform;
   where: Where;
   run: Runner;
   exit(code: number): void;

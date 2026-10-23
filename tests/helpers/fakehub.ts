@@ -54,6 +54,7 @@ export class FakeHub {
   appKeyWorks = true;
   failWrites = false;
   calls: string[] = [];
+  tapsterLatest: string | null = null;
   readonly blobs = new Map<number, Buffer>();
   downloads = 0;
   actor: string;
@@ -301,6 +302,7 @@ export class FakeHub {
     if (p === "/installation/repositories") return json({ repositories: (this.installation?.repos ?? []).map((full_name) => ({ full_name })) });
     if (p === "/installation/token") return json({}, 204);
     if (p.startsWith("/user/installations")) return json({ message: "You must authenticate with an access token authorized to a GitHub App in order to list installations" }, 403);
+    if (p === "/repos/doguyilmaz/tapster/releases/latest") return this.tapsterLatest ? json({ tag_name: this.tapsterLatest, html_url: `https://github.com/doguyilmaz/tapster/releases/tag/${this.tapsterLatest}` }) : json({ message: "Not Found" }, 404);
     if (p.startsWith("/repos/doguyilmaz/tapster/compare/")) return json(this.tapsterCompare ?? { status: "identical" });
     const m = /^\/repos\/([^/]+\/[^/]+)(\/.*)?$/.exec(p);
     if (!m) return json({ message: "not found" }, 404);

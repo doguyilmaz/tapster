@@ -121,6 +121,7 @@ export async function demo(port: number, log: (line: string) => void): Promise<{
     keychain: async (account) => (account === "ed25519" ? sparkle.seed : null),
     gpg: () => findGpg(),
     store: () => store,
+    platform: process.platform,
     where: { exec: "", script: "", sha: null },
     run: async (argv) => {
       throw new Error(`the demo runs no ${argv[0]}`);
