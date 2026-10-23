@@ -5,6 +5,8 @@ import type { GitHub } from "../github";
 import type { NotaryKey } from "../cli/apple";
 import type { CloudflareAccount, CloudflareTarget } from "../cli/cloudflare";
 import type { Store } from "../cli/keystore";
+import type { Runner } from "../cli/runner";
+import type { Where } from "../cli/upgrade";
 import { scrub } from "../mask";
 import { COURIER_URI, LOGO_URI } from "../ui/images";
 import { logoPng, webScript } from "./assets";
@@ -23,6 +25,9 @@ export type Deps = {
   keychain(account: string): Promise<string | null>;
   gpg(): Promise<string | null>;
   store(): Store | null;
+  where: Where;
+  run: Runner;
+  exit(code: number): void;
 };
 
 export type Mode = "once" | "service";

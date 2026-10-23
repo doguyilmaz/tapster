@@ -21,6 +21,11 @@ const deps: Deps = {
   keychain: async () => null,
   gpg: async () => null,
   store: () => null,
+  where: { exec: "/opt/homebrew/Caskroom/tapster/1.0.0/tapster", script: "", sha: "a" },
+  run: async (argv) => {
+    throw new Error(`no command may run in this test: ${argv[0]}`);
+  },
+  exit: () => {},
 };
 
 function app(routes: Routes = {}, mode: "once" | "service" = "once") {
@@ -208,8 +213,8 @@ test("the GitHub App callback needs the state the app created and uses it once",
 });
 
 test("setup options", () => {
-  expect(setupOptions([])).toEqual({ open: true, port: null, pin: null });
-  expect(setupOptions(["--no-open", "--port", "9000", "--tapster", "a".repeat(40)])).toEqual({ open: false, port: 9000, pin: "a".repeat(40) });
+  expect(setupOptions([])).toEqual({ open: true, port: null, pin: null, service: false });
+  expect(setupOptions(["--no-open", "--port", "9000", "--tapster", "a".repeat(40)])).toEqual({ open: false, port: 9000, pin: "a".repeat(40), service: false });
   expect(() => setupOptions(["--port", "80"])).toThrow(TapsterError);
   expect(() => setupOptions(["--tapster", "main"])).toThrow(TapsterError);
 });

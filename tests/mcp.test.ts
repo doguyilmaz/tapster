@@ -23,7 +23,7 @@ beforeAll(async () => {
   ];
   const gh = new GitHub("t", (url, init) => fake.fetch(url, init), async () => {}, "user");
   ctx = {
-    deps: { github: async () => gh, fetch: fake.fetch as typeof fetch, home, cwd: home, pin: null, log: () => {}, open: () => {}, notary: async () => false, keychain: async () => null, gpg: async () => null, store: () => null },
+    deps: { github: async () => gh, fetch: fake.fetch as typeof fetch, home, cwd: home, pin: null, log: () => {}, open: () => {}, notary: async () => false, keychain: async () => null, gpg: async () => null, store: () => null, where: { exec: "", script: "", sha: null }, run: async () => ({ code: 1, stdout: "", stderr: "" }), exit: () => {} },
     gh: async () => gh,
   };
 });
