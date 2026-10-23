@@ -14,7 +14,7 @@ on:
         default: false
 permissions: {}
 concurrency:
-  group: tapster
+  group: tapster-hub
   cancel-in-progress: false
 jobs:
   check:
