@@ -30,6 +30,9 @@ const help: Record<string, string> = {
     --port       listen on this port instead of ${PORT}
     --tapster    pin the hub workflow to this commit (for a tapster built from a checkout)
 
+  tapster setup --service
+    what the tapster service runs: no browser, no printed link, no stop after two hours of no use
+
   The page runs on this computer only and works until you stop tapster setup with Ctrl+C.
   When the tapster service runs, tapster setup opens its page instead.`,
   service: `tapster service: keep tapster setup running on this computer

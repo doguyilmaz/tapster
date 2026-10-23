@@ -140,6 +140,14 @@ test("the service locks after 12 hours without a request; the one-shot session d
   }
 });
 
+test("the page's own release check does not keep an idle session open", async () => {
+  const { s, claim, call } = app({ "GET /api/tapster": async () => ({}) }, "service");
+  const cookie = cookieOf(await claim())!;
+  s.touched = Date.now() - 11 * 3_600_000;
+  await call("/api/tapster", { headers: { ...HEADER, cookie } });
+  expect(Date.now() - s.touched).toBeGreaterThan(10 * 3_600_000);
+});
+
 test("the service's pairing ends after 30 days", async () => {
   const { s, claim, call } = app({ "GET /api/ping": async () => ({ pong: true }) }, "service");
   const cookie = cookieOf(await claim())!;

@@ -213,9 +213,12 @@ export function handler(s: Session, routes: Routes, callback: (c: Ctx) => Promis
       return claim(s, body?.code);
     }
     if (!signedIn(s, req)) return json({ error: { reason: "this page is not signed in to tapster setup", fix: fresh(s) } }, 401);
-    const before = s.touched;
-    s.touched = Date.now();
-    if (s.touched - before > 600_000) s.kept();
+    // The page asks for the latest release by itself every six hours; that alone does not keep an idle session open.
+    if (path !== "/api/tapster") {
+      const before = s.touched;
+      s.touched = Date.now();
+      if (s.touched - before > 600_000) s.kept();
+    }
     if (req.method !== "GET") s.warm.clear();
     const route = routes[`${req.method} ${path}`];
     if (!route) return json({ error: { reason: "unknown request", fix: "Reload the page." } }, 404);
