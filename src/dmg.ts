@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { type DmgLayout, dsStore } from "./dsstore";
 import { TapsterError } from "./errors";
 import type { Keychain } from "./keychain";
-import { type NotaryKey, notarize } from "./sign";
+import { type NotaryKey, notarize, staple } from "./sign";
 import { run } from "./run";
 
 const temp = () => mkdtemp(join(process.env.RUNNER_TEMP ?? tmpdir(), "dmg-"));
@@ -57,8 +57,7 @@ export async function buildDmg(appDir: string, out: string, opts: DmgOptions): P
 export async function sealDmg(kc: Keychain, dmg: string, key: NotaryKey): Promise<void> {
   await run("codesign", ["--force", "--timestamp", ...(kc.path ? ["--keychain", kc.path] : []), "--sign", kc.identity, dmg]);
   await notarize(dmg, key);
-  await run("xcrun", ["stapler", "staple", dmg]);
-  await run("xcrun", ["stapler", "validate", dmg]);
+  await staple(dmg);
   const assessed = await run("spctl", ["-a", "-t", "open", "--context", "context:primary-signature", "-v", dmg], { allowFail: true });
   if (assessed.code !== 0 || !assessed.stderr.includes("Notarized Developer ID")) {
     throw new TapsterError(`${basename(dmg)} is not accepted by Gatekeeper after notarization`, "Check the notarization log in App Store Connect.");

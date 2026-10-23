@@ -2,7 +2,7 @@ import { basename } from "node:path";
 import { TapsterError } from "./errors";
 import type { Keychain } from "./keychain";
 import { register, scrub } from "./mask";
-import { run } from "./run";
+import { excerpt, run } from "./run";
 
 export const PRESETS: Record<"go" | "bun", string[]> = {
   go: [],
@@ -110,4 +110,14 @@ export async function notarize(zip: string, key: NotaryKey): Promise<NotaryResul
 
 export async function zipForNotary(dir: string, out: string): Promise<void> {
   await run("ditto", ["-c", "-k", "--keepParent", dir, out]);
+}
+
+export async function staple(path: string, exec = run, wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)), tries = 5): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    const res = await exec("xcrun", ["stapler", "staple", path], { allowFail: true });
+    if (res.code === 0) break;
+    if (attempt >= tries) throw new TapsterError(`stapler could not staple ${basename(path)} (exit ${res.code})`, excerpt(res.stdout + res.stderr) || "Re-run the workflow; Apple's ticket can take a few minutes to appear.");
+    await wait(15000 * attempt);
+  }
+  await exec("xcrun", ["stapler", "validate", path]);
 }

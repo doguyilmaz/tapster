@@ -206,3 +206,25 @@ test.skipIf(process.platform !== "darwin")("the signed app goes back into the ar
   await writeTree(entries, again);
   sh(["/usr/bin/codesign", "--verify", "--strict", "--deep", join(again, "ebb.app")]);
 }, 60_000);
+
+test("stapling waits for Apple's ticket and tries again", async () => {
+  const calls: string[] = [];
+  const waits: number[] = [];
+  let staples = 0;
+  const exec = async (cmd: string, args: string[]) => {
+    calls.push(`${cmd} ${args.slice(0, 2).join(" ")}`);
+    const late = cmd === "xcrun" && args[1] === "staple" && ++staples < 3;
+    return { code: late ? 68 : 0, stdout: late ? "CloudKit query failed\n" : "", stderr: cmd === "spctl" ? "source=Notarized Developer ID\n" : "", bytes: Buffer.alloc(0) };
+  };
+  await stapleApp("/w/a/ebb.app", exec, async (ms) => void waits.push(ms));
+  expect(calls.filter((c) => c === "xcrun stapler staple")).toHaveLength(3);
+  expect(calls).toContain("xcrun stapler validate");
+  expect(waits).toHaveLength(2);
+});
+
+test("stapling gives up after its tries and says what stapler printed", async () => {
+  const exec = async () => ({ code: 68, stdout: "CloudKit query failed\n", stderr: "", bytes: Buffer.alloc(0) });
+  const err = await stapleApp("/w/a/ebb.app", exec, async () => {}).catch((e) => e);
+  expect(String(err.message)).toMatch(/ebb\.app/);
+  expect(err.fix).toMatch(/CloudKit query failed/);
+});
