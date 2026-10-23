@@ -45,8 +45,8 @@ export type Session = {
   codes: Map<string, number>;
   claimed: Set<string>;
   pending: Map<string, { hub: string; owner: string; at: number; kind?: "doorbell" }>;
-  apps: Map<string, { id: string; pem: string; slug: string }>;
-  bells: Map<string, { id: string; pem: string; slug: string }>;
+  apps: Map<string, { id: string; pem: string; slug: string; at: number }>;
+  bells: Map<string, { id: string; pem: string; slug: string; at: number }>;
   cloudflare: Map<string, { token: string; accounts: CloudflareAccount[]; target: CloudflareTarget | null; at: number }>;
   sparkle: Map<string, { seed: string; at: number }>;
   dispatched: Map<string, { at: number; known: number[] }>;
@@ -64,6 +64,12 @@ export type Routes = Record<string, Handler>;
 const CODE_TTL = 10 * 60_000;
 export const PAIRED_DAYS = 30;
 export const IDLE_LOCK = 12 * 3_600_000;
+const HELD = 3_600_000;
+
+// An App key GitHub handed over and a Sparkle key read from the keychain stay in memory for an hour at most.
+function forgetHeld(s: Session): void {
+  for (const held of [s.apps, s.bells, s.sparkle] as Map<string, { at: number }>[]) for (const [k, v] of held) if (Date.now() - v.at > HELD) held.delete(k);
+}
 const PAGES = new Set(["/", "/setup", "/projects", "/health"]);
 
 const image = (uri: string) => Buffer.from(uri.slice(uri.indexOf(",") + 1), "base64");
@@ -200,6 +206,7 @@ export function handler(s: Session, routes: Routes, callback: (c: Ctx) => Promis
     if (req.method === "GET" && path === "/logo.png") return respond(await logoPng(), 200, "image/png", { "content-disposition": 'attachment; filename="tapster-logo.png"' });
     if (req.method === "GET" && path === "/app/callback") return callback({ s, req, url });
     if (!path.startsWith("/api/")) return respond("Not found", 404, "text/plain; charset=utf-8");
+    forgetHeld(s);
     if (!fromPage(req)) return json({ error: { reason: "this request did not come from the tapster setup page", fix: "Open tapster setup from your terminal." } }, 403);
     if (req.method === "POST" && path === "/api/claim") {
       const body = (await req.json().catch(() => null)) as { code?: unknown } | null;

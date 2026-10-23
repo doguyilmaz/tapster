@@ -174,6 +174,20 @@ test("the service never writes a pairing link to its log", async () => {
 });
 
 
+test("keys held in memory are forgotten after an hour", async () => {
+  const { s, claim, call } = app({ "GET /api/ping": async () => ({ pong: true }) }, "service");
+  const cookie = cookieOf(await claim())!;
+  const old = Date.now() - 3_600_001;
+  s.apps.set("me/homebrew-old", { id: "1", pem: "pem", slug: "a", at: old });
+  s.apps.set("me/homebrew-new", { id: "2", pem: "pem", slug: "b", at: Date.now() });
+  s.bells.set("me/homebrew-old", { id: "3", pem: "pem", slug: "c", at: old });
+  s.sparkle.set("me/homebrew-old x", { seed: "seed", at: old });
+  await call("/api/ping", { headers: { ...HEADER, cookie } });
+  expect([...s.apps.keys()]).toEqual(["me/homebrew-new"]);
+  expect(s.bells.size).toBe(0);
+  expect(s.sparkle.size).toBe(0);
+});
+
 test("expired or made-up codes are refused", async () => {
   const { s, claim } = app();
   const link = s.link();
