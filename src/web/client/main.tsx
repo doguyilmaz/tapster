@@ -1,7 +1,7 @@
 import { signal } from "@preact/signals";
 import { render } from "preact";
 import type { Problem as ProblemView, SessionView } from "../contract";
-import { claim, get, hasSession, post, whenSignedOut } from "./api";
+import { ApiError, claim, get, post, whenSignedOut } from "./api";
 import { AccountGate, Stopped, Waiting, NoSession } from "./gates";
 import { Health } from "./health";
 import { HubChooser } from "./hubs";
@@ -10,6 +10,8 @@ import { Back, Setup } from "./setup";
 import { landing } from "../steps";
 import { account, accountError, appResult, back, chooseHub, doorbellResult, dropView, go, hubCached, hubName, loadAccount, loadHub, openStop, path, problemOf, restoreHub, say, session, statusCached, toast } from "./state";
 import { Icon, Note, Spinner } from "./ui";
+import { Confirm } from "./confirm";
+import { Banners, watchTapster } from "./update";
 
 type Boot = { kind: "claiming" } | { kind: "ready" } | { kind: "no-session" } | { kind: "failed"; problem: ProblemView } | { kind: "stopped" };
 const boot = signal<Boot>({ kind: "claiming" });
@@ -37,18 +39,21 @@ async function start(): Promise<void> {
       return;
     }
   }
-  if (!hasSession()) {
-    boot.value = { kind: "no-session" };
+  try {
+    session.value = await get<SessionView>("/api/session");
+  } catch (e) {
+    boot.value = e instanceof ApiError && e.status === 401 ? { kind: "no-session" } : { kind: "failed", problem: problemOf(e) };
     return;
   }
   readReturn();
   if (!back.value) restoreHub();
   boot.value = { kind: "ready" };
-  void get<SessionView>("/api/session").then((s) => {
-    session.value = s;
-    if (!hubName.value && s.here.hub) chooseHub(s.here.hub);
-  });
-  await Promise.all([loadAccount(), hubName.value ? loadHub() : null]);
+  const signedIn = loadAccount();
+  const here = session.value.here.hub;
+  if (!hubName.value && here) chooseHub(here);
+  else if (hubName.value) void loadHub();
+  await signedIn;
+  watchTapster();
 }
 
 whenSignedOut(() => {
@@ -122,10 +127,12 @@ function Header() {
             )}
           </span>
           {acc?.state === "ok" && <span class="who">@{acc.login}</span>}
-          <button type="button" class="btn quiet small" onClick={quit} title="Stop tapster setup">
-            <Icon name="power" />
-            Close
-          </button>
+          {session.value?.service === false && (
+            <button type="button" class="btn quiet small" onClick={quit} title="Stop tapster setup">
+              <Icon name="power" />
+              Close
+            </button>
+          )}
         </div>
       </div>
     </header>
@@ -184,9 +191,11 @@ function App() {
     <>
       <Header />
       <main id="main">
+        <Banners />
         <Page />
       </main>
       <Toast />
+      <Confirm />
     </>
   );
 }

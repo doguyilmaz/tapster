@@ -4,6 +4,7 @@ import { installStep, linuxWrite, toolState } from "../steps";
 import { ApiError, post } from "./api";
 import { doorbellResult, loadHub, problemOf, say, setCloud } from "./state";
 import { KIND } from "./status";
+import { confirm } from "./confirm";
 import { Badge, Busy, Cmd, Copy, DiffBlock, Done, Field, FileDrop, Head, Icon, ManifestForm, Note, Out, Password, Problem, Spinner, savedFor, useAction, useInstall } from "./ui";
 
 const GUIDE = "https://tapster.doguyilmaz.com/guides/";
@@ -226,7 +227,8 @@ function Doorbell({ h }: { h: HubView }) {
   const [done, setDone] = useState<DoorbellDone | null>(null);
   const installed = d.key && bellStep(h, watch) === "done";
   const ready = Boolean(d.cloudflare && installed);
-  const deploy = () =>
+  const deploy = async () =>
+    (await confirm("Deploy the doorbell to Cloudflare?", <p>tapster deploys the Worker to your Cloudflare account and stores the doorbell App's key there as the Worker's secret.</p>, "Deploy")) &&
     run(async () => {
       const res = await post<DoorbellDone>("/api/hub/doorbell/deploy", { hub: h.name });
       setDone(res);
@@ -403,7 +405,8 @@ function Linux({ h }: { h: HubView }) {
   const l = h.extras.linux;
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [making, makeProblem, make] = useAction();
-  const makeKey = () =>
+  const makeKey = async () =>
+    (await confirm(`Make the Linux signing key for ${h.name}?`, <p>tapster makes a key, stores it as a secret of the hub's tapster environment and keeps a copy on this computer, because GitHub never gives a secret back.</p>, "Make and store the key")) &&
     make(async () => {
       const res = await post<{ fingerprint: string; keychain: boolean }>("/api/hub/linux/key", { hub: h.name });
       setFingerprint(res.fingerprint);
@@ -526,12 +529,12 @@ function SparkleKey({ h, label }: { h: HubView; label: string }) {
   const submit = (e: Event) => {
     e.preventDefault();
     const pasted = String(new FormData(e.currentTarget as HTMLFormElement).get("password") ?? "");
-    void run(async () => {
+    void confirm(`Store the Sparkle key ${label} in ${h.name}?`, <p>tapster stores it as a secret of the hub's tapster environment. Only the step that signs the feed can use it.</p>, "Store the key").then((ok) => void (ok && run(async () => {
       await post("/api/hub/sparkle/store", { hub: h.name, label, pasted });
       savedFor(`sparkle-${label}`);
       await loadHub();
       say("ok", `Stored the Sparkle key ${label} in the hub.`);
-    });
+    })));
   };
   return (
     <div class="card pad stack tight">

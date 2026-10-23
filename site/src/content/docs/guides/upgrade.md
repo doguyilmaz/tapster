@@ -9,6 +9,9 @@ Your hub's workflow pins the exact tapster commit that wrote it. A new tapster r
 you move it there yourself. To hear about new releases, open
 [tapster on GitHub](https://github.com/doguyilmaz/tapster) and choose **Watch**, **Custom**, **Releases**.
 
+With the [tapster service](/guides/service/), the setup page offers each new release and then the hub's update, each
+with one click. The steps below do the same from a terminal.
+
 ## Move the hub
 
 In a clone of your hub:

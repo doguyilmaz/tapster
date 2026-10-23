@@ -34,7 +34,7 @@ export function NoSession({ problem }: { problem: ProblemView | null }) {
     <Frame title={problem ? "This link did not open tapster setup" : "Open tapster setup from your terminal"}>
       {problem && <Problem problem={problem} />}
       <p class="lead">
-        Each link from the terminal works once, so a copy of it in your history or someone else's hands is worthless. To get a fresh one, press Enter in the terminal where tapster setup runs.
+        Each link from the terminal works once, so a copy of it in your history or someone else's hands is worthless. To get a fresh one, press Enter in the terminal where tapster setup runs. If tapster runs as a service on this computer, run tapster setup instead: it asks the service for a link.
       </p>
       <p class="muted">If tapster setup is not running, start it again:</p>
       <Cmd text="bunx @doguyilmaz/tapster setup" />

@@ -5,41 +5,16 @@ import { type OneGo, addInOneGo, oneGoRefusal } from "../oneclick";
 import type { ProjectStepId } from "../status";
 import { notes } from "../steps";
 import { post } from "./api";
+import { confirm } from "./confirm";
 import { loadClones, loadHub, problemOf, recall, remember, say, statusCached, statusError, statuses, statusOf, tilde } from "./state";
 import { KIND, Mark, StatusCard } from "./status";
-import { Badge, Busy, Cmd, DiffBlock, Icon, Note, Problem, Spinner } from "./ui";
+import { Badge, Busy, Cmd, DiffBlock, Icon, Note, Problem, Spinner, useTrap } from "./ui";
 
 export type SheetTarget = { repo: string; path: string | null; others: string[]; listed: boolean };
 
 function Frame({ title, sub, onClose, children }: { title: string; sub: ComponentChildren; onClose: () => void; children: ComponentChildren }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    ref.current?.querySelector<HTMLElement>("button")?.focus();
-    const keys = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      if (e.key !== "Tab" || !ref.current) return;
-      const items = [...ref.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex='-1'])")];
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (!first || !last) return;
-      if (!ref.current.contains(document.activeElement)) {
-        e.preventDefault();
-        first.focus();
-      } else if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    addEventListener("keydown", keys);
-    return () => {
-      removeEventListener("keydown", keys);
-      before?.focus();
-    };
-  }, []);
+  useTrap(ref, onClose);
   return (
     <>
       <div class="sheet-back" onClick={onClose} />
@@ -453,6 +428,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
   };
   const oneGo = async (options: AddOptionsView) => {
     if (!info) return;
+    if (!(await confirm(`Add ${target.repo} and merge its hub entry?`, <p>tapster commits its own files, pushes {info.defaultBranch} and merges the hub entry into the hub's main.</p>, "Add and merge"))) return;
     setEditing(false);
     const done = await addInOneGo(post, { hub: hubName, info, options }, (r) => {
       setRun(r);

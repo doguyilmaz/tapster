@@ -1,4 +1,4 @@
-import type { ComponentChildren, JSX } from "preact";
+import type { ComponentChildren, JSX, RefObject } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { AppStart, HubView, ProjectStatus, Problem as ProblemView } from "../contract";
 import { DIFF_MARK, capFirst, changedOnly, lineDiff } from "../steps";
@@ -415,4 +415,40 @@ export function ManifestForm({ start, holds }: { start: AppStart; holds: (h: Hub
 export function savedFor(text: string): void {
   history.pushState(null, "", `/setup?saved=${encodeURIComponent(text)}`);
   setTimeout(() => history.replaceState(null, "", "/setup"), 1500);
+}
+
+const open: RefObject<HTMLElement>[] = [];
+
+// Keeps focus inside a modal dialog, closes it on Escape and gives focus back to where it was. Only the dialog opened last listens.
+export function useTrap(ref: RefObject<HTMLElement>, onClose: () => void): void {
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    open.push(ref);
+    ref.current?.querySelector<HTMLElement>("button")?.focus();
+    const keys = (e: KeyboardEvent) => {
+      if (open[open.length - 1] !== ref) return;
+      if (e.key === "Escape") onClose();
+      if (e.key !== "Tab" || !ref.current) return;
+      const items = [...ref.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex='-1'])")];
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) return;
+      if (!ref.current.contains(document.activeElement)) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    addEventListener("keydown", keys);
+    return () => {
+      removeEventListener("keydown", keys);
+      open.splice(open.indexOf(ref), 1);
+      before?.focus();
+    };
+  }, []);
 }

@@ -1,6 +1,9 @@
 export type Problem = { reason: string; fix: string };
 
-export type SessionView = { version: string; dev: boolean; platform: string; home: string; here: { hub: string | null; repo: string | null; path: string } };
+export type SessionView = { version: string; dev: boolean; service: boolean; platform: string; home: string; here: { hub: string | null; repo: string | null; path: string } };
+
+// update: "here" when this setup can update itself (the service of an installed tapster), "command" when the user runs the command.
+export type TapsterView = { running: string; latest: string | null; update: "here" | "command"; command: string | null };
 
 export type AccountView = { state: "no-gh" } | { state: "signed-out" } | { state: "ok"; login: string; missing: string[] };
 

@@ -61,7 +61,7 @@ export async function bellCallback(c: Ctx, pending: { hub: string; owner: string
     return back({ doorbell: "failed", hub: pending.hub, reason: p.reason, fix: p.fix });
   }
   register(created.pem);
-  const app = { id: String(created.id), pem: created.pem, slug: created.slug };
+  const app = { id: String(created.id), pem: created.pem, slug: created.slug, at: Date.now() };
   c.s.bells.set(pending.hub, app);
   try {
     await storeBell(pending.hub, app);
@@ -128,7 +128,7 @@ async function key(c: Ctx) {
   const slug = v.variables.find((x) => x.name === "TAPSTER_DOORBELL_APP_SLUG")!.value;
   const pem = await file.text();
   await checkDoorbellKey(id, slug, pem, c.s.deps.fetch);
-  c.s.bells.set(hub, { id, pem, slug });
+  c.s.bells.set(hub, { id, pem, slug, at: Date.now() });
   return { held: true };
 }
 

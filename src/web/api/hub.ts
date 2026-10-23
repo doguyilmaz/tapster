@@ -307,7 +307,7 @@ export async function appCallback(c: Ctx): Promise<Response> {
     const p = e instanceof TapsterError ? e : new TapsterError("GitHub did not hand over the new App", "Try again from Setup.");
     return back({ app: "failed", hub: pending.hub, reason: p.reason, fix: p.fix });
   }
-  c.s.apps.set(pending.hub, { id: String(created.id), pem: created.pem, slug: created.slug });
+  c.s.apps.set(pending.hub, { id: String(created.id), pem: created.pem, slug: created.slug, at: Date.now() });
   try {
     await locked;
     await storeApp(pending.hub, created);

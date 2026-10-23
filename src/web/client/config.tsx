@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { ConfigView, EntryCheck, Problem as ProblemView, ProjectStatus } from "../contract";
 import { capFirst } from "../steps";
 import { post } from "./api";
+import { confirm } from "./confirm";
 import { hubName, problemOf, say, statusOf } from "./state";
 import { Busy, DiffBlock, Icon, Note, Out, Problem, ofProject } from "./ui";
 
@@ -40,6 +41,7 @@ function Editor({ s, c, onDone, onCancel }: { s: ProjectStatus; c: ConfigView; o
   const bad = !checking && check.problem;
   const ready = !checking && !check.problem && !check.same;
   const land = async () => {
+    if (!(await confirm(`Merge the entry of ${s.name} into the hub?`, <p>tapster merges the change to the entry of {s.name} into the hub's main. The hub publishes from main on its next run.</p>, "Merge"))) return;
     setBusy(true);
     try {
       const opened = await post<Opened>("/api/projects/entry/propose", { ...target(s), entry: text, before: check.before });
@@ -116,7 +118,8 @@ export function Configuration({ s, onStatus }: { s: ProjectStatus; onStatus: (s:
       await post("/api/projects/entry/propose", { ...target(s), entry: c.update, before: c.entry });
       say("ok", `Proposed the update of ${s.name}.`);
     });
-  const merge = () =>
+  const merge = async () =>
+    (await confirm(`Merge the update of ${s.name} into the hub?`, <p>tapster merges the change to the entry of {s.name} into the hub's main. The hub publishes from main on its next run.</p>, "Merge")) &&
     act(async () => {
       await post("/api/projects/entry/merge", { ...target(s), entry: c.pending!.entry, before: c.entry, sha: c.pending!.head });
       say("ok", `Merged the update of ${s.name}.`);

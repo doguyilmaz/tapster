@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { FollowView, Problem as ProblemView, ProjectStatus, ReachView } from "../contract";
 import { type ProjectStep, type ProjectStepId, bumps, canRelease, followSteps, projectNext, projectSteps, releasableParent, tagCommand, tagProblem } from "../status";
 import { get, post } from "./api";
+import { confirm } from "./confirm";
 import { hub, hubName, problemOf, say, statusOf, tilde } from "./state";
 import { Badge, Busy, Cmd, Icon, Note, Out, Problem, Spinner, ofProject } from "./ui";
 import { capFirst } from "../steps";
@@ -209,6 +210,7 @@ function EntryStep({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSta
   const p = s.entry.proposal;
   const merge = async () => {
     if (!p) return;
+    if (!(await confirm(`Merge the hub entry of ${s.name}?`, <p>tapster merges the change to the entry of {s.name} into the hub's main. The hub publishes from main on its next run.</p>, "Merge"))) return;
     setBusy(true);
     setProblem(null);
     try {
@@ -364,6 +366,7 @@ function ReleaseBox({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSt
   const bad = tagProblem(tag, s.release.highest);
   const id = `version-${s.name}`;
   const release = async () => {
+    if (!(await confirm(`Tag ${tag} on ${s.repo}?`, <p>tapster creates the tag {tag} at {head.sha.slice(0, 7)}. The project's release workflow builds it, then the hub signs and publishes it.</p>, `Tag ${tag}`))) return;
     setBusy(true);
     setProblem(null);
     try {

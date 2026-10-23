@@ -74,11 +74,24 @@ you.
 
 `tapster setup` serves its page from your computer, on `127.0.0.1` only.
 
-- The link it opens holds a code that works once. The page trades it for a session token that lives in that browser tab.
-  A copy of the link in your browser history, your terminal or another program's view of the command line is worthless
-  once used. If a link is used twice, tapster ends every session and prints a fresh link.
-- Every request needs that token in a header. Another site open in your browser cannot send it. The page answers only
-  requests addressed to `127.0.0.1` or `localhost` on its port.
+- The link it opens holds a code that works once. The page trades it for a session token. A copy of the link in your
+  browser history, your terminal or another program's view of the command line is worthless once used. If a link is
+  used twice, tapster ends every session. A new link replaces the token of the one before.
+- The page keeps the token in its own browser storage: for one `tapster setup` in the tab only, with the
+  [service](/guides/service/) in that browser. Browsers scope that storage to the exact address, port included, so
+  no other site and no other program served on another port of `127.0.0.1` can read it. The browser sends no cookie.
+- Every request needs the token in its `Authorization` header. Another site cannot send that header to the page without
+  the browser asking the page first. The page never allows it. A request whose `Origin` is not the page itself is
+  refused. The page answers only requests addressed to `127.0.0.1` or `localhost` on its port, which stops DNS
+  rebinding.
+- The page loads no script from elsewhere and runs no inline script. Its content security policy forbids both, so text
+  from GitHub that shows on the page cannot run as code and read the token.
+- Without the service, the session ends with `tapster setup`. With the service, it lasts up to 30 days and locks after
+  12 hours without a request. Only an update hands the session to the next process: a hash of the token in a private
+  file in `~/.config/tapster` that works once and for ten minutes. Any other restart needs a new link.
+- Before the page sends its token to a server it did not just pair with, it asks that server to sign a fresh random
+  value with a second key from the pairing. A program that took the port while tapster was down cannot sign it, so it
+  gets nothing and the page says another program answers there.
 - So the page opens at once, your browser keeps the last view of your hub and its projects: names and settings, never a
   secret's value.
   The page shows it while it asks GitHub again and every change waits for GitHub's answer. Choosing another hub or
@@ -89,6 +102,28 @@ you.
   typed the commands.
 - Before it writes to the hub's `main`, tapster runs the hub's own check: if someone else changed `main` since your last
   push, it stops, because a write from you would mark their commits as reviewed.
+
+## The service
+
+- `tapster setup` gets its link from the service over a Unix socket, `~/.config/tapster/service.sock`. The socket and its
+  folder are open to your user only, so other users on the computer cannot ask for a link. The service never prints a
+  link or writes one to its log.
+- **What a program on your computer cannot do:** a website, another user or a program that only reaches the network
+  cannot use the page. Apart from the page's own session token, no answer holds a token or a secret's value. The one key it shows is a Sparkle key
+  you ask it to read from your keychain, so you can keep a copy in your password manager. macOS asks you first.
+- **What it can do:** a program that runs as you can ask the socket for a link, as `tapster setup` does. It could just
+  as well run `gh auth token` itself, so the service opens no door that was closed before. A program that serves
+  another port cannot read the page's token, even when your browser opens it. `tapster service uninstall` ends all of
+  it.
+- The GitHub token comes from `gh auth token` for each request and stays in memory for at most a minute. An App key that
+  GitHub hands over and a Cloudflare token stay in memory for an hour at most. Your other keys stay in memory only for
+  the request that sends them to GitHub or Cloudflare.
+- Writing a key, merging into the hub's `main`, tagging a release and updating tapster or the hub each wait for a
+  confirm click on the page.
+- An update runs your install's own upgrade. Before it restarts, the service checks that the new `tapster --version`
+  reports the expected version and, on macOS, that the new binary's signature is valid and carries the Apple Team ID
+  the running one had when the service started. If a check fails, the running version stays. If the new binary is
+  already in place, tapster also turns the service off so the unchecked binary does not start by itself.
 
 ## How tapster checks itself
 

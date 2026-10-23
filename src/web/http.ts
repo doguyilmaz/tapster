@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import { GitHubError, TapsterError } from "../errors";
 
 export const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self' https://github.com; frame-ancestors 'none'; base-uri 'none'";
@@ -28,12 +27,4 @@ export function problem(e: unknown): { status: number; body: { error: Problem } 
 
 export function hostAllowed(host: string | null, port: number): boolean {
   return host === `127.0.0.1:${port}` || host === `localhost:${port}`;
-}
-
-export function tokenMatches(header: string | null, token: string): boolean {
-  const given = /^Bearer ([0-9a-f]{64})$/.exec(header ?? "")?.[1];
-  if (!given) return false;
-  const a = Buffer.from(given);
-  const b = Buffer.from(token);
-  return a.length === b.length && timingSafeEqual(a, b);
 }

@@ -163,7 +163,7 @@ test("two requests at once start one hub run, and so does a second click before 
 });
 
 test("right after creating the App, the session's key answers at once", async () => {
-  app.s.apps.set(HUB, { id: "777", pem: fake.pem, slug: "tapster-octo-tap" });
+  app.s.apps.set(HUB, { id: "777", pem: fake.pem, slug: "tapster-octo-tap", at: Date.now() });
   fake.installation = { id: 9, repos: ["octo/ebb"] };
   expect((await aims()).app).toMatchObject({ reaches: false, how: "key" });
   fake.installation = { id: 9, repos: ["octo/ebb", "octo/aims"] };

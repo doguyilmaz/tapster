@@ -7,6 +7,7 @@ import { type SheetTarget, ProjectSheet } from "./sheet";
 import { appResult, back, clones, go, hub, hubCached, hubError, hubLoading, hubName, loadClones, loadHub, loadStatuses, mac, macChoice, openStop, problemOf, say, setMac, statusCached, statusError, statuses } from "./state";
 import { StatusRows } from "./status";
 import { Extras } from "./extras";
+import { confirm } from "./confirm";
 import { Badge, Busy, Cmd, Done, Field, FileDrop, Head, Icon, ManifestForm, Note, Out, Password, Problem, Spinner, savedFor, useAction, useInstall } from "./ui";
 
 function Dot({ stop, index }: { stop: Stop; index: number }) {
@@ -157,7 +158,8 @@ function App({ h }: { h: HubView }) {
             busy={storing}
             holds={(v) => v.app}
             class="btn primary"
-            onClick={() =>
+            onClick={async () =>
+              (await confirm(`Store the App's key in ${h.name}?`, <p>tapster stores the tapster App's private key as a secret of the hub's tapster environment. Only hub workflows on main can use it.</p>, "Store the key")) &&
               store(async () => {
                 await post("/api/hub/app/store", { hub: h.name });
                 await loadHub();
@@ -279,9 +281,10 @@ function Certificate({ h }: { h: HubView }) {
   const [busy, problem, run] = useAction();
   const cert = h.apple.certificate;
   const showForm = !cert || !h.apple.certificateStored || replacing;
-  const submit = (e: Event) => {
+  const submit = async (e: Event) => {
     e.preventDefault();
     const form = e.currentTarget as HTMLFormElement;
+    if (!(await confirm(`Store the certificate in ${h.name}?`, <p>tapster stores the .p12 and its password as secrets of the hub's tapster environment. Only hub workflows on main can use them.</p>, "Store the certificate"))) return;
     void run(async () => {
       if (!file) throw new ApiError({ reason: "no .p12 file is chosen", fix: "Drop the .p12 you exported from Keychain Access." }, 0);
       const data = new FormData(form);
@@ -369,9 +372,10 @@ function Notary({ h }: { h: HubView }) {
   const [replacing, setReplacing] = useState(false);
   const [busy, problem, run] = useAction();
   const showForm = !h.apple.notary || replacing;
-  const submit = (e: Event) => {
+  const submit = async (e: Event) => {
     e.preventDefault();
     const form = e.currentTarget as HTMLFormElement;
+    if (!(await confirm(`Store the notarization key in ${h.name}?`, <p>tapster stores the .p8 key, its ID and the issuer ID as secrets of the hub's tapster environment. Only hub workflows on main can use them.</p>, "Store the key"))) return;
     void run(async () => {
       if (!file) throw new ApiError({ reason: "no .p8 file is chosen", fix: "Drop the AuthKey_….p8 you downloaded from App Store Connect." }, 0);
       const data = new FormData(form);
@@ -489,8 +493,10 @@ function Files({ h }: { h: HubView }) {
     void load(async () => setView(await post<FilesView>("/api/hub/files/preview", { hub: h.name, every, remove, readme })));
   }, [h.name, every, remove.join(","), readme]);
   const changes = view?.files.filter((f) => f.change !== "same") ?? [];
-  const write = () =>
-    run(async () => {
+  const write = async () => {
+    const n = changes.length;
+    if (!(await confirm(`Write ${n === 1 ? "the change" : `the ${n} changes`} to main?`, <p>tapster writes them to {h.name}'s main in one commit.</p>, "Write to main"))) return;
+    await run(async () => {
       const res = await post<{ result: string }>("/api/hub/files", { hub: h.name, every, remove, readme });
       setWritten(true);
       await loadHub();
@@ -499,6 +505,7 @@ function Files({ h }: { h: HubView }) {
       setReadme(false);
       say("ok", res.result === "committed" ? `Wrote the hub files to ${h.name}.` : "The hub files were already up to date.");
     });
+  };
   return (
     <div class="panel">
       <Head title="Hub files" lead="The hub's settings, its record of published releases, a README for your users and the workflow that does the work. tapster writes them to main in one commit." />

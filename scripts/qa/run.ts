@@ -6,6 +6,9 @@ import { writeTarGz } from "../../src/archive";
 import { sha256 } from "../../src/checksums";
 import { withNote } from "../../src/draftnote";
 import { run } from "../../src/run";
+import { TAPSTER } from "../../src/version";
+import { askService, serviceFiles } from "../../src/web/service";
+import { setup } from "../../src/web/start";
 import { demo, listAims } from "../demo";
 import { launch } from "./cdp";
 
@@ -13,7 +16,7 @@ const out = process.argv[2] ?? join(process.cwd(), "qa-shots");
 const only = process.argv[3] ?? "";
 mkdirSync(out, { recursive: true });
 const links: string[] = [];
-const { fake, cf, sparkle, home } = await demo(8299, (line) => {
+const { fake, cf, sparkle, home, deps } = await demo(8299, (line) => {
   const m = /http:\/\/127\.0\.0\.1:\d+\/#c=[0-9a-f]+/.exec(line);
   if (m) links.push(m[0]);
 });
@@ -93,6 +96,15 @@ const flashed = async (name: string) => {
 };
 const clickOut = (text: string) =>
   page.eval<string>(`(() => { const a = [...document.querySelectorAll('a')].find((e) => e.textContent.includes(${JSON.stringify(text)})); a.addEventListener('click', (e) => e.preventDefault(), { once: true }); a.click(); return a.getAttribute('href'); })()`);
+const confirmWith = async (action: string, name = "") => {
+  await page.waitFor("document.querySelector('.confirm')", 20000);
+  if (name) {
+    await shot(name, false);
+    await audit(name);
+  }
+  await page.clickText(action, ".confirm button");
+  await page.waitFor("!document.querySelector('.confirm')");
+};
 const toLinux = "(() => { const h = [...document.querySelectorAll('h3')].find((e) => e.textContent === 'apt and dnf repositories'); scrollTo(0, h.getBoundingClientRect().top + scrollY - 90); })()";
 const cfFetch = cf.fetch;
 let cfLag = 0;
@@ -132,7 +144,7 @@ try {
   await reopen(SLOW);
   await page.clickText("Restore the protection");
   await page.waitFor(`[...document.querySelectorAll('button[aria-busy="true"]')].some((b) => b.textContent.includes('Checking GitHub first'))`, 2000);
-  await page.waitFor("document.body.textContent.includes('is protected')", 20000);
+  await page.waitFor("document.querySelector('form[action^=\"https://github.com/settings/apps/new\"]')", 30000);
   fake.lag = 0;
   await page.waitFor("document.querySelector('form[action^=\"https://github.com/settings/apps/new\"]')");
   await shot("03-app");
@@ -166,6 +178,7 @@ try {
   await page.upload("input[name=p12]", join(dir, "cert.p12"));
   await page.type("input[name=password]", "qa-secret");
   await page.clickText("Check and store");
+  await confirmWith("Store the certificate", "07a-confirm-certificate");
   await page.waitFor("document.body.textContent.includes('Replace the certificate')", 15000);
   await shot("07b-certificate-stored");
   await page.waitFor("[...document.querySelectorAll('.route li')].some((li) => /^Team ABCDE12345\\|Expires \\d{4}-\\d{2}-\\d{2}$/.test([...li.querySelectorAll('.stop-state')].map((s) => s.textContent).join('|')))");
@@ -176,6 +189,7 @@ try {
   await page.type("input[name=keyId]", "ABCDE12345");
   await page.type("input[name=issuerId]", "00000000-0000-4000-8000-000000000000");
   await page.clickText("Check with Apple and store");
+  await confirmWith("Store the key");
   await page.waitFor("document.body.textContent.includes('The notarization key is stored')", 15000);
   await page.clickText("Hub files", ".route button");
   await page.waitFor("document.body.textContent.includes('changes for main')");
@@ -183,6 +197,7 @@ try {
   await Bun.sleep(600);
   await shot("09-files");
   await page.clickText("to main", "button");
+  await confirmWith("Write to main");
   await page.waitFor("document.body.textContent.includes('git pull')");
   await shot("10-files-written");
   await page.waitFor("document.body.textContent.includes('The hub files are up to date')");
@@ -200,6 +215,7 @@ try {
   await shot("10c-sparkle");
   await page.eval(`(() => { const i = document.querySelector('input[name=password]'); i.value = ${JSON.stringify(sparkle.seed)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await page.clickText("Store in the hub");
+  await confirmWith("Store the key");
   await page.waitFor("document.body.textContent.includes('All stored')", 15000);
   await shot("10d-sparkle-stored");
   listAims(fake);
@@ -251,6 +267,7 @@ try {
   await shot("11c2-release-while-checking", false);
   await audit("release-while-checking");
   fake.lag = 0;
+  await confirmWith("Tag v0.2.2", "11c3-confirm-tag");
   await page.waitFor("document.body.textContent.includes('Tagged v0.2.2')", 15000);
   const aims = fake.get("octo/aims")!;
   Object.assign(aims.runs[0]!, { status: "completed", conclusion: "success" });
@@ -286,6 +303,7 @@ try {
   await shot("13a-merge-entry");
   await audit("merge-entry");
   await page.clickText("Merge the hub entry", ".sheet button");
+  await confirmWith("Merge");
   await page.waitFor("document.body.textContent.includes(\"In octo/homebrew-tap's tapster.yml\")", 20000);
   await shot("13b-entry-merged");
   await page.eval("document.querySelector('.sheet-back').click()");
@@ -301,6 +319,7 @@ try {
   await shot("13c-one-go-check");
   await audit("one-go-check");
   await page.clickText("Add, commit, push and merge", ".sheet button");
+  await confirmWith("Add and merge");
   await page.waitFor("document.body.textContent.includes('Install the App on hafifpix')", 30000);
   await shot("13d-one-go-done");
   await audit("one-go-done");
@@ -347,10 +366,12 @@ try {
   fake.bell.installation = { id: 56, repos: ["octo/homebrew-tap"] };
   await page.waitFor("document.body.textContent.includes('Installed on octo/homebrew-tap only')", 15000);
   await page.clickText("Deploy the doorbell");
+  await confirmWith("Deploy");
   await page.waitFor("document.body.textContent.includes('Address') && document.body.textContent.includes('tapster-doorbell.octo.workers.dev')", 20000);
   await shot("13g-doorbell-on");
   await audit("doorbell-on");
   await page.clickText("Make the signing key");
+  await confirmWith("Make and store the key");
   await page.waitFor("document.body.textContent.includes('Fingerprint')", 60000);
   await shot("13h-linux-key");
   await page.type("input[name=maintainer]", "Octo Cat <octo@example.com>");
@@ -451,6 +472,7 @@ try {
   await shot("18b-update-proposed");
   await audit("update-proposed");
   await page.clickText("Merge the update", ".sheet button");
+  await confirmWith("Merge");
   await page.waitFor("!document.body.textContent.includes('An update waits in a pull request') && document.querySelector('.sheet .config pre').textContent.includes('aims.app')", 20000);
   await page.eval(toConfig);
   await shot("18c-update-merged");
@@ -469,6 +491,7 @@ try {
   await shot("18e-edit-change");
   await audit("edit-change");
   await page.clickText("Propose and merge", ".sheet button");
+  await confirmWith("Merge");
   await page.waitFor("!document.querySelector('.sheet textarea') && document.querySelector('.sheet .config pre').textContent.includes('keepalive')", 20000);
   await page.eval(toConfig);
   await shot("18f-edit-merged");
@@ -479,6 +502,93 @@ try {
   await page.eval("(() => { const s = document.querySelector('.sheet'); const h = [...s.querySelectorAll('strong')].find((e) => e.textContent === 'Releases'); s.scrollTop = h.getBoundingClientRect().top + s.scrollTop - 90; })()");
   await shot("18g-skip-marker");
   await audit("skip-marker");
+  // The service on port 8298: its token stays in its own origin's storage, which the page on another port never sees,
+  // a link from another site finds it signed in, then the update banners, their confirm dialogs and a restart that keeps the route.
+  Object.assign(TAPSTER, { version: "1.7.4", sha: "1".repeat(40) });
+  fake.tapsterLatest = "v1.7.5";
+  const tap = fake.get("octo/homebrew-tap")!;
+  const flow = tap.files!.get(".github/workflows/tapster.yml")!;
+  tap.files!.set(".github/workflows/tapster.yml", flow.replace(/doguyilmaz\/tapster@[0-9a-f]{40} # \S+/g, `doguyilmaz/tapster@${"a".repeat(40)} # v1.7.3`));
+  fake.tapsterCompare = { status: "ahead", files: [{ filename: "dist/index.js" }, { filename: "src/web/client/main.tsx" }] };
+  const svc = serviceFiles(home);
+  mkdirSync(svc.dir, { recursive: true, mode: 0o700 });
+  writeFileSync(svc.json, JSON.stringify({ port: 8298 }));
+  const svcRan: string[] = [];
+  const service = setup(["--service"], {
+    ...deps,
+    pin: null,
+    cwd: home,
+    platform: "darwin",
+    where: { exec: "/opt/homebrew/Caskroom/tapster/1.7.4/tapster", script: "/$bunfs/root/tapster", sha: TAPSTER.sha },
+    run: async (argv) => {
+      svcRan.push(argv.join(" "));
+      if (argv[1] === "--version") return { code: 0, stdout: "tapster 1.7.5 (111111111111)\n", stderr: "" };
+      if (argv[1] === "-dv") return { code: 0, stdout: "", stderr: "TeamIdentifier=ABCDE12345\n" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+    exit: () => void (TAPSTER.version = "1.7.5"),
+  });
+  let pair: { link: string } | null = null;
+  for (let i = 0; i < 100 && !pair; i++) {
+    pair = (await askService(svc.sock, "pair")) as { link: string } | null;
+    if (!pair) await Bun.sleep(50);
+  }
+  await page.size(1280, 860);
+  await page.scheme(false);
+  await page.goto(pair!.link);
+  await page.waitFor("document.body.textContent.includes('Choose your hub')", 20000);
+  const held = await page.eval<{ local: string | null; session: string | null; cookie: string }>("({ local: localStorage.getItem('tapster.session'), session: sessionStorage.getItem('tapster.session'), cookie: document.cookie })");
+  if (!held.local || held.session || held.cookie) throw new Error(`the service page keeps its token wrong: ${JSON.stringify({ local: Boolean(held.local), session: Boolean(held.session), cookie: held.cookie })}`);
+  await page.goto("http://127.0.0.1:8299/setup");
+  await page.waitFor("document.readyState === 'complete'");
+  if (await page.eval<boolean>(`[localStorage, sessionStorage].some((s) => s.getItem('tapster.session') === ${JSON.stringify(held.local)}) || document.cookie !== ''`)) throw new Error("the page on another port can read the service's token");
+  await page.goto(`data:text/html,<a id="x" href="http://127.0.0.1:8298/setup">tapster</a>`);
+  await page.click("#x");
+  await page.waitFor("location.port === '8298' && document.readyState === 'complete'");
+  await page.waitFor("document.body.textContent.includes('Choose your hub') || document.body.textContent.includes('Open tapster setup from your terminal')", 20000);
+  if (!(await page.eval<boolean>("document.body.textContent.includes('Choose your hub')"))) throw new Error("a link from another site signed the page out");
+  await page.clickText("octo/homebrew-tap", ".choice");
+  await page.waitFor("document.body.textContent.includes('tapster 1.7.5 is available') && document.body.textContent.includes('The hub runs tapster 1.7.3')", 20000);
+  await page.clickText("Health", "nav a");
+  await page.waitFor("location.pathname === '/health'");
+  await page.eval("scrollTo(0, 0)");
+  await shot("19-update-banners", false);
+  await audit("update-banners");
+  await page.scheme(true);
+  await shot("19a-update-banners-dark", false);
+  await audit("update-banners-dark");
+  await page.size(390, 844, true);
+  await shot("19b-update-banners-phone-dark", false);
+  await audit("update-banners-phone-dark");
+  await page.clickText("Update", ".banner button");
+  await page.waitFor("document.querySelector('.confirm')");
+  await shot("19c-confirm-update-phone-dark", false);
+  await audit("confirm-update-phone-dark");
+  await page.scheme(false);
+  await shot("19d-confirm-update-phone", false);
+  await audit("confirm-update-phone");
+  await page.size(1280, 860);
+  await shot("19e-confirm-update", false);
+  await audit("confirm-update");
+  await page.scheme(true);
+  await shot("19f-confirm-update-dark", false);
+  await audit("confirm-update-dark");
+  await page.scheme(false);
+  if (!(await page.eval<boolean>("document.activeElement?.textContent === 'Cancel'"))) throw new Error("the confirm dialog did not focus Cancel");
+  await page.clickText("Update tapster", ".confirm button");
+  await page.waitFor("!document.body.textContent.includes('is available') && !document.body.textContent.includes('Updating tapster') && document.body.textContent.includes('The hub runs tapster 1.7.3')", 30000);
+  if ((await page.eval<string>("location.pathname")) !== "/health") throw new Error("the reload after the update lost the route");
+  const expected = ["/usr/bin/codesign -dv --verbose=2 /opt/homebrew/Caskroom/tapster/1.7.4/tapster", "brew update", "brew upgrade --cask tapster", "/opt/homebrew/bin/tapster --version", "/usr/bin/codesign --verify --strict /opt/homebrew/bin/tapster", "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/bin/tapster"];
+  if (svcRan.join("\n") !== expected.join("\n")) throw new Error(`the update ran ${svcRan.join(", ")}`);
+  await page.eval("scrollTo(0, 0)");
+  await shot("19g-updated", false);
+  await page.clickText("Update the hub", ".banner button");
+  await confirmWith("Update the hub", "19h-confirm-hub");
+  await page.waitFor("!document.body.textContent.includes('The hub runs tapster 1.7.3')", 20000);
+  if (!tap.files!.get(".github/workflows/tapster.yml")!.includes(`doguyilmaz/tapster@${"1".repeat(40)} # v1.7.5`)) throw new Error("the hub update did not move the pin");
+  await shot("19i-hub-updated", false);
+  await askService(svc.sock, "stop");
+  await service;
 } catch (e) {
   if ((e as Error).message !== "stop") {
     console.error("QA FAILED:", (e as Error).message);
