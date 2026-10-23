@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TapsterError } from "../src/errors";
 import { type Deps, handler, newSession } from "../src/web/server";
-import { askService, keepPairing, privateDir, readPort, serveSocket, serviceFiles } from "../src/web/service";
+import { askService, handOff, privateDir, readPort, serveSocket, serviceFiles, takeHandoff } from "../src/web/service";
 import { routes, setup, setupOptions } from "../src/web/start";
 import { appCallback } from "../src/web/api/hub";
 
@@ -107,23 +107,44 @@ test("no service answers when the socket is missing", async () => {
   expect(await askService(join(newHome(), "nothing.sock"), "pair")).toBeNull();
 });
 
-test("a pairing survives a restart as a hash in a private file, never the token", async () => {
-  const home = newHome();
+async function paired(home: string) {
   const first = newSession(deps(home), 8292, "service");
-  keepPairing(first);
   const handle = handler(first, routes(first, () => {}), (c) => appCallback(c));
   const code = first.link().split("#c=")[1]!;
   const claimed = await handle(new Request("http://127.0.0.1:8292/api/claim", { method: "POST", headers: { host: "127.0.0.1:8292" }, body: JSON.stringify({ code }) }));
-  const { token } = (await claimed.json()) as { token: string };
+  const { token, proof } = (await claimed.json()) as { token: string; proof: string };
+  return { first, token, proof };
+}
+
+const restart = async (home: string, token: string) => {
+  const next = newSession(deps(home), 8292, "service");
+  takeHandoff(next);
+  const h = handler(next, routes(next, () => {}), (c) => appCallback(c));
+  return (await h(new Request("http://127.0.0.1:8292/api/session", { headers: { host: "127.0.0.1:8292", authorization: `Bearer ${token}` } }))).status;
+};
+
+test("a plain restart needs a new pairing: nothing about the session is written to disk", async () => {
+  const home = newHome();
+  const { token } = await paired(home);
+  expect(existsSync(serviceFiles(home).session)).toBe(false);
+  expect(await restart(home, token)).toBe(401);
+});
+
+test("an update hands the pairing to the next process once, within ten minutes, as a hash in a private file", async () => {
+  const home = newHome();
+  const { first, token, proof } = await paired(home);
+  handOff(first);
   const file = serviceFiles(home).session;
   expect(mode(file)).toBe(0o600);
   expect(readFileSync(file, "utf8")).not.toContain(token);
-  const second = newSession(deps(home), 8292, "service");
-  keepPairing(second);
-  const again = handler(second, routes(second, () => {}), (c) => appCallback(c));
-  const res = await again(new Request("http://127.0.0.1:8292/api/session", { headers: { host: "127.0.0.1:8292", authorization: `Bearer ${token}` } }));
-  expect(res.status).toBe(200);
-  expect(((await res.json()) as { service: boolean }).service).toBe(true);
+  expect(await restart(home, token)).toBe(200);
+  expect(existsSync(file)).toBe(false);
+  expect(await restart(home, token)).toBe(401);
+  handOff(first);
+  const saved = JSON.parse(readFileSync(file, "utf8")) as { until: number };
+  writeFileSync(file, JSON.stringify({ ...saved, until: Date.now() - 1 }));
+  expect(await restart(home, token)).toBe(401);
+  expect(proof).toMatch(/^[0-9a-f]{64}$/);
 });
 
 test("setup --service opens no browser, prints no link, pairs over the socket and stops when asked", async () => {

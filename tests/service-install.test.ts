@@ -98,7 +98,7 @@ test("service install on macOS writes the agent, the port and a private log fold
   const agent = parsePlist(readFileSync(PLIST(t.home))) as Record<string, unknown>;
   expect(agent.ProgramArguments).toEqual(["/opt/homebrew/bin/tapster", "setup", "--service"]);
   expect((agent.EnvironmentVariables as { PATH: string }).PATH).toBe("/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin");
-  expect(t.ran).toEqual([`launchctl bootout gui/501/${LABEL}`, `launchctl bootstrap gui/501 ${PLIST(t.home)}`]);
+  expect(t.ran).toEqual([`launchctl bootout gui/501/${LABEL}`, `launchctl enable gui/501/${LABEL}`, `launchctl bootstrap gui/501 ${PLIST(t.home)}`]);
   expect(t.said.join("\n")).toContain("http://127.0.0.1:8278");
 });
 

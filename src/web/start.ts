@@ -21,7 +21,8 @@ import { updateRoutes } from "./api/update";
 import type { SessionView } from "./contract";
 import { respond } from "./http";
 import { type Deps, type Routes, type Session, handler, newSession } from "./server";
-import { PORT, askService, keepPairing, privateDir, readPort, serveSocket, serviceFiles } from "./service";
+import { PORT, askService, privateDir, readPort, serveSocket, serviceFiles, takeHandoff } from "./service";
+import { rememberTeam } from "./api/update";
 
 export { PORT };
 const IDLE = 2 * 3_600_000;
@@ -142,10 +143,11 @@ async function service(d: Deps): Promise<void> {
   try {
     server = listen(port, (req) => handle(req));
   } catch {
-    throw new TapsterError(`port ${port} is in use`, "Close the program that uses it. Or run tapster service install again to pick a free port.");
+    throw new TapsterError(`port ${port} is held by another program`, "The service does not start and no page gets your session. Close that program. Or run tapster service install again to pick a free port.");
   }
   const s = newSession(d, port, "service");
-  keepPairing(s);
+  takeHandoff(s);
+  void rememberTeam(s);
   warmStart(s, knownHub(d.cwd));
   let done: () => void = () => {};
   const closed = new Promise<void>((resolve) => (done = resolve));

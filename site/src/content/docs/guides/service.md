@@ -52,10 +52,12 @@ When a new release is out, the page says `tapster 1.7.5 is available`. Click **U
 1. runs the upgrade of your install: `brew update` and `brew upgrade --cask tapster` for Homebrew,
    `bun add -g @doguyilmaz/tapster@<version>` for Bun, `npm install -g @doguyilmaz/tapster@<version>` for npm;
 2. checks that the new `tapster --version` reports that version;
-3. on macOS, checks that the new binary's signature is valid and comes from the same Apple Team ID as the running one;
+3. on macOS, checks that the new binary's signature is valid and comes from the Apple Team ID of the running one;
 4. restarts. The page waits for the new version and reloads where you were.
 
-If a check fails, the running version stays. The page shows the reason and the command to run yourself.
+If a check fails, the running version stays. The page shows the reason and the command to run yourself. If the new
+binary was already in place, tapster also turns the service off, so the unchecked binary does not start by itself. After
+you update by hand, `tapster service install` turns it on again.
 
 ## Update the hub
 

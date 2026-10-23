@@ -6,6 +6,7 @@ import { TAPSTER } from "../version";
 import type { Session } from "./server";
 
 export const PORT = 8277;
+export const LABEL = "com.doguyilmaz.tapster";
 export const LAST_PORT = 8299;
 
 export const serviceFiles = (home: string) => {
@@ -43,21 +44,26 @@ export function readPort(home: string): number {
   return parsed.data.port;
 }
 
-const pairingSchema = z.object({ hash: z.string().regex(/^[0-9a-f]{64}$/), at: z.number(), touched: z.number() });
+const handoffSchema = z.object({ hash: z.string().regex(/^[0-9a-f]{64}$/), proof: z.string().regex(/^[0-9a-f]{64}$/), at: z.number(), touched: z.number(), until: z.number() });
+const HANDOFF = 10 * 60_000;
 
-// The service keeps its pairing across restarts, such as an update, as a hash: the token itself stays in the browser.
-export function keepPairing(s: Session): void {
+// An update hands the pairing to the next process: a hash of the token and the proof key, in a private file that works
+// once and for ten minutes. Any other restart needs a new pairing.
+export function handOff(s: Session): void {
+  if (!s.pairing) return;
   const f = serviceFiles(s.deps.home);
-  const saved = pairingSchema.safeParse(readJson(f.session));
-  if (saved.success) {
-    s.pairing = { hash: saved.data.hash, at: saved.data.at };
-    s.touched = saved.data.touched;
-  }
-  s.kept = () => {
-    privateDir(f.dir);
-    if (s.pairing) writePrivate(f.session, JSON.stringify({ ...s.pairing, touched: s.touched }));
-    else if (existsSync(f.session)) unlinkSync(f.session);
-  };
+  privateDir(f.dir);
+  writePrivate(f.session, JSON.stringify({ ...s.pairing, touched: s.touched, until: Date.now() + HANDOFF }));
+}
+
+export function takeHandoff(s: Session): void {
+  const f = serviceFiles(s.deps.home);
+  if (!existsSync(f.session)) return;
+  const saved = handoffSchema.safeParse(readJson(f.session));
+  unlinkSync(f.session);
+  if (!saved.success || saved.data.until < Date.now()) return;
+  s.pairing = { hash: saved.data.hash, proof: saved.data.proof, at: saved.data.at };
+  s.touched = saved.data.touched;
 }
 
 export type Ask = "pair" | "status" | "stop";

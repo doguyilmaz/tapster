@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Ran } from "../src/cli/runner";
 import type { Where } from "../src/cli/upgrade";
-import { applyUpdate } from "../src/web/api/update";
+import { existsSync, rmSync } from "node:fs";
+import { applyUpdate, rememberTeam } from "../src/web/api/update";
+import { serviceFiles } from "../src/web/service";
 import type { TapsterView } from "../src/web/contract";
 import { FakeHub } from "./helpers/fakehub";
 import { webApp } from "./helpers/web";
@@ -38,7 +40,7 @@ function setupWith(o: { where?: Where; answers?: Record<string, Ran>; mode?: "on
     },
     o.mode ?? "service",
   );
-  return { ...app, fake, ran, exits };
+  return { ...app, fake, ran, exits, answers };
 }
 
 const latestCalls = (fake: FakeHub) => fake.calls.filter((c) => c === "GET /repos/doguyilmaz/tapster/releases/latest").length;
@@ -79,16 +81,31 @@ test("an update runs Homebrew, checks the new version and its Team ID, answers a
   const res = await call("POST", "/api/tapster/update", { version: "1.7.5" });
   expect(res.data).toEqual({ restarting: true, version: "1.7.5" });
   expect(ran).toEqual([
+    "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/Caskroom/tapster/1.7.4/tapster",
     "brew update",
     "brew upgrade --cask tapster",
     "/opt/homebrew/bin/tapster --version",
-    "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/Caskroom/tapster/1.7.4/tapster",
     "/usr/bin/codesign --verify --strict /opt/homebrew/bin/tapster",
     "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/bin/tapster",
   ]);
+  expect(existsSync(serviceFiles(home).session)).toBe(true);
   expect(exits).toEqual([]);
   await Bun.sleep(400);
   expect(exits).toEqual([0]);
+  rmSync(serviceFiles(home).session);
+});
+
+test("the running Team ID is read at start, before Homebrew removes the running binary's folder", async () => {
+  const { s, call, ran, answers, exits } = setupWith();
+  await rememberTeam(s);
+  delete (answers as Record<string, Ran>)["/usr/bin/codesign -dv --verbose=2 /opt/homebrew/Caskroom/tapster/1.7.4/tapster"];
+  await call("GET", "/api/tapster");
+  ran.length = 0;
+  expect((await call("POST", "/api/tapster/update", { version: "1.7.5" })).status).toBe(200);
+  expect(ran[0]).toBe("brew update");
+  await Bun.sleep(400);
+  expect(exits).toEqual([0]);
+  rmSync(serviceFiles(home).session, { force: true });
 });
 
 test("a Bun install gets the exact version and no codesign check", async () => {
@@ -99,20 +116,44 @@ test("a Bun install gets the exact version and no codesign check", async () => {
 });
 
 test.each([
-  ["the upgrade fails", { "brew upgrade --cask tapster": { code: 1, stdout: "", stderr: "Error: Download failed" } }, "Download failed"],
-  ["the new command reports another version", { "/opt/homebrew/bin/tapster --version": { code: 0, stdout: "tapster 1.7.4 (0123456789ab)\n", stderr: "" } }, "1.7.4"],
-  ["the new binary's signature does not verify", { "/usr/bin/codesign --verify --strict /opt/homebrew/bin/tapster": { code: 1, stdout: "", stderr: "invalid signature" } }, "signature"],
-  ["the new binary has another Team ID", { "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/bin/tapster": { code: 0, stdout: "", stderr: "TeamIdentifier=OTHER99999\n" } }, "Team ID"],
-] as const)("the old service keeps running when %s", async (_, answers, said) => {
-  const { call, exits } = setupWith({ answers });
+  ["the upgrade fails", { "brew upgrade --cask tapster": { code: 1, stdout: "", stderr: "Error: Download failed" } }, "Download failed", true],
+  ["the running binary has no Team ID", { "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/Caskroom/tapster/1.7.4/tapster": { code: 1, stdout: "", stderr: "No such file or directory" } }, "Team ID", false],
+  ["the new binary has no Team ID", { "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/bin/tapster": { code: 0, stdout: "", stderr: "TeamIdentifier=not set\n" } }, "Team ID", true],
+  ["the new command reports another version", { "/opt/homebrew/bin/tapster --version": { code: 0, stdout: "tapster 1.7.4 (0123456789ab)\n", stderr: "" } }, "1.7.4", true],
+  ["the new binary's signature does not verify", { "/usr/bin/codesign --verify --strict /opt/homebrew/bin/tapster": { code: 1, stdout: "", stderr: "invalid signature" } }, "signature", true],
+  ["the new binary has another Team ID", { "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/bin/tapster": { code: 0, stdout: "", stderr: "TeamIdentifier=OTHER99999\n" } }, "Team ID", true],
+] as const)("the old service keeps running and turns the service off when %s", async (_, answers, said, off) => {
+  rmSync(serviceFiles(home).session, { force: true });
+  const { call, exits, ran } = setupWith({ answers });
   await call("GET", "/api/tapster");
   const res = await call("POST", "/api/tapster/update", { version: "1.7.5" });
   expect(res.status).toBe(400);
   const text = JSON.stringify(res.data);
   expect(text).toContain(said);
   expect(text).toContain("brew update && brew upgrade --cask tapster");
+  expect(text.includes("tapster service install")).toBe(off);
+  expect(ran.includes(`launchctl disable gui/${process.getuid!()}/com.doguyilmaz.tapster`)).toBe(off);
   await Bun.sleep(400);
   expect(exits).toEqual([]);
+  expect(existsSync(serviceFiles(home).session)).toBe(false);
+});
+
+test("a failed brew update changes nothing, so the service stays on", async () => {
+  const { call, ran, exits } = setupWith({ answers: { "brew update": { code: 1, stdout: "", stderr: "network down" } } });
+  await call("GET", "/api/tapster");
+  const res = await call("POST", "/api/tapster/update", { version: "1.7.5" });
+  expect(res.status).toBe(400);
+  expect(ran.some((r) => r.startsWith("launchctl"))).toBe(false);
+  await Bun.sleep(400);
+  expect(exits).toEqual([]);
+});
+
+test("on Linux a failed check turns the systemd unit off", async () => {
+  const linux = setupWith({ where: BUN, answers: { "/Users/me/.bun/bin/tapster --version": { code: 0, stdout: "tapster 1.7.4 (x)\n", stderr: "" } } });
+  linux.s.deps.platform = "linux";
+  await linux.call("GET", "/api/tapster");
+  expect((await linux.call("POST", "/api/tapster/update", { version: "1.7.5" })).status).toBe(400);
+  expect(linux.ran).toContain("systemctl --user disable tapster.service");
 });
 
 test("only the release GitHub named can be installed", async () => {
@@ -123,17 +164,14 @@ test("only the release GitHub named can be installed", async () => {
   expect(ran).toEqual([]);
 });
 
-test("an unsigned running binary skips the Team ID comparison; Linux skips codesign", async () => {
+test("Linux skips codesign; a Homebrew binary on macOS without a Team ID fails", async () => {
   const ran: string[] = [];
   const run = async (argv: string[]): Promise<Ran> => {
     ran.push(argv.join(" "));
     if (argv[1] === "--version") return { code: 0, stdout: "tapster 1.7.5 (0123456789ab)\n", stderr: "" };
-    if (argv[1] === "-dv") return { code: 0, stdout: "", stderr: "TeamIdentifier=not set\n" };
-    return { code: 0, stdout: "", stderr: "" };
+    return { code: 0, stdout: "", stderr: "TeamIdentifier=not set\n" };
   };
-  await applyUpdate({ where: BREW, run }, "1.7.5", "darwin");
-  expect(ran.filter((r) => r.includes("--verify"))).toEqual([]);
-  ran.length = 0;
-  await applyUpdate({ where: BREW, run }, "1.7.5", "linux");
+  expect(await applyUpdate({ where: BREW, run }, "1.7.5", "linux", null)).toEqual({ ok: true });
   expect(ran.filter((r) => r.includes("codesign"))).toEqual([]);
+  expect(await applyUpdate({ where: BREW, run }, "1.7.5", "darwin", null)).toMatchObject({ ok: false, changed: false });
 });

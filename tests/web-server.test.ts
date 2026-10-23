@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { createHmac } from "node:crypto";
+import { TAPSTER } from "../src/version";
 import { join } from "node:path";
 import { TapsterError } from "../src/errors";
 import { appCallback } from "../src/web/api/hub";
@@ -166,6 +168,34 @@ test("the page keeps a strict CSP: no inline script, no eval and nothing from an
   expect(PAGE).not.toMatch(/\son\w+=/);
   const script = await webScript();
   expect(script).not.toMatch(/\beval\(|new Function\(/);
+});
+
+test("the page can check that this server is the one it paired with before it sends its token", async () => {
+  const { s, claim, call } = app();
+  const nonce = "ab".repeat(16);
+  expect((await call(`/api/hello?nonce=${nonce}`)).status).toBe(401);
+  const first = (await (await claim()).json()) as { token: string; proof: string };
+  expect(first.proof).toMatch(/^[0-9a-f]{64}$/);
+  expect(first.proof).not.toBe(first.token);
+  const mac = (proof: string) => createHmac("sha256", proof).update(`tapster ${nonce} ${TAPSTER.version}`).digest("hex");
+  const hello = await call(`/api/hello?nonce=${nonce}`);
+  expect(hello.status).toBe(200);
+  expect(await hello.json()).toEqual({ version: expect.any(String), mac: mac(first.proof) });
+  expect(JSON.stringify(s.pairing)).not.toContain(first.token);
+  expect((await call("/api/hello?nonce=short")).status).toBe(400);
+  expect((await call(`/api/hello?nonce=${nonce}`, { headers: { origin: "http://127.0.0.1:5173" } })).status).toBe(403);
+  const second = (await (await claim()).json()) as { proof: string };
+  expect(((await (await call(`/api/hello?nonce=${nonce}`)).json()) as { mac: string }).mac).toBe(mac(second.proof));
+});
+
+test("expired pairing codes are dropped when a new one is made", () => {
+  const { s } = app();
+  s.codes.set("a".repeat(32), Date.now() - 1);
+  s.codes.set("b".repeat(32), Date.now() + 60_000);
+  s.link();
+  expect(s.codes.has("a".repeat(32))).toBe(false);
+  expect(s.codes.has("b".repeat(32))).toBe(true);
+  expect(s.codes.size).toBe(2);
 });
 
 test("expired or made-up codes are refused", async () => {

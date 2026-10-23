@@ -87,8 +87,11 @@ you.
 - The page loads no script from elsewhere and runs no inline script. Its content security policy forbids both, so text
   from GitHub that shows on the page cannot run as code and read the token.
 - Without the service, the session ends with `tapster setup`. With the service, it lasts up to 30 days and locks after
-  12 hours without a request. The service keeps only a hash of the token, in `~/.config/tapster`, so it survives an
-  update.
+  12 hours without a request. Only an update hands the session to the next process: a hash of the token in a private
+  file in `~/.config/tapster` that works once and for ten minutes. Any other restart needs a new link.
+- Before the page sends its token to a server it did not just pair with, it asks that server to sign a fresh random
+  value with a second key from the pairing. A program that took the port while tapster was down cannot sign it, so it
+  gets nothing and the page says another program answers there.
 - So the page opens at once, your browser keeps the last view of your hub and its projects: names and settings, never a
   secret's value.
   The page shows it while it asks GitHub again and every change waits for GitHub's answer. Choosing another hub or
@@ -118,8 +121,9 @@ you.
 - Writing a key, merging into the hub's `main`, tagging a release and updating tapster or the hub each wait for a
   confirm click on the page.
 - An update runs your install's own upgrade. Before it restarts, the service checks that the new `tapster --version`
-  reports the expected version and, on macOS, that the new binary's signature is valid and carries the same Apple Team
-  ID as the running one. If a check fails, the running version stays.
+  reports the expected version and, on macOS, that the new binary's signature is valid and carries the Apple Team ID
+  the running one had when the service started. If a check fails, the running version stays. If the new binary is
+  already in place, tapster also turns the service off so the unchecked binary does not start by itself.
 
 ## How tapster checks itself
 

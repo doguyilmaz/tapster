@@ -1,13 +1,13 @@
 import { signal } from "@preact/signals";
-import type { FilesView, HubView, SessionView, TapsterView } from "../contract";
-import { ApiError, get, post } from "./api";
+import type { FilesView, HubView, Problem as ProblemView, TapsterView } from "../contract";
+import { ApiError, FOREIGN, get, hello, post } from "./api";
 import { confirm } from "./confirm";
 import { hub, loadHub, say, session } from "./state";
 import { Busy, Cmd, Note, Out, Problem, Spinner, useAction } from "./ui";
 
 const CHECK_EVERY = 6 * 3_600_000;
 const tapster = signal<TapsterView | null>(null);
-const restarting = signal<{ version: string; lost: boolean } | null>(null);
+const restarting = signal<{ version: string; lost: ProblemView | null } | null>(null);
 
 async function loadTapster(): Promise<void> {
   try {
@@ -24,14 +24,17 @@ export function watchTapster(): void {
   timer = window.setInterval(loadTapster, CHECK_EVERY);
 }
 
-// The service exits after a checked update and launchd or systemd starts the new one. The page waits for it, then reloads where it is.
+// The service exits after a checked update and launchd or systemd starts the new one. The page waits for it without
+// sending its token and reloads where it is only once the new process proves it holds this page's pairing.
 async function waitFor(version: string): Promise<void> {
   for (let i = 0; i < 120; i++) {
     await new Promise((r) => setTimeout(r, 1500));
-    const now = await get<SessionView>("/api/session").catch(() => null);
-    if (now?.version === version) return location.reload();
+    const h = await hello();
+    if (h.state === "ok" && h.version === version) return location.reload();
+    if (h.state === "foreign") return void (restarting.value = { version, lost: FOREIGN });
+    if (h.state === "unpaired") return void (restarting.value = { version, lost: { reason: `tapster ${version} runs but no longer knows this page`, fix: "Run tapster setup in a terminal for a fresh link." } });
   }
-  restarting.value = { version, lost: true };
+  restarting.value = { version, lost: { reason: `tapster ${version} did not come back`, fix: "Run tapster service status in a terminal. tapster service logs shows why it stopped." } };
 }
 
 function TapsterBanner({ t }: { t: TapsterView & { latest: string } }) {
@@ -50,7 +53,7 @@ function TapsterBanner({ t }: { t: TapsterView & { latest: string } }) {
     if (!ok) return;
     void run(async () => {
       await post("/api/tapster/update", { version: t.latest });
-      restarting.value = { version: t.latest, lost: false };
+      restarting.value = { version: t.latest, lost: null };
       void waitFor(t.latest);
     });
   };
@@ -79,11 +82,11 @@ function TapsterBanner({ t }: { t: TapsterView & { latest: string } }) {
   );
 }
 
-function Restarting({ r }: { r: { version: string; lost: boolean } }) {
+function Restarting({ r }: { r: { version: string; lost: ProblemView | null } }) {
   if (r.lost)
     return (
       <div class="banner">
-        <Problem problem={{ reason: `tapster ${r.version} did not come back`, fix: "Run tapster service status in a terminal. tapster service logs shows why it stopped." }} />
+        <Problem problem={r.lost} />
       </div>
     );
   return (

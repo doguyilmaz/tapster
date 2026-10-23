@@ -2,11 +2,12 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { TapsterError } from "../errors";
 import { excerpt } from "../run";
-import { type Ask, LAST_PORT, PORT, askService, privateDir, serviceFiles, writePrivate } from "../web/service";
+import { type Ask, LABEL, LAST_PORT, PORT, askService, privateDir, serviceFiles, writePrivate } from "../web/service";
+
+export { LABEL };
 import { type Runner, realRunner } from "./runner";
 import { type Where, here, installKind, stableCommand } from "./upgrade";
 
-export const LABEL = "com.doguyilmaz.tapster";
 const UNIT = "tapster.service";
 
 export type ServiceIo = {
@@ -122,6 +123,8 @@ async function install(io: ServiceIo): Promise<void> {
     privateDir(dirname(logFile(io.home)));
     mkdirSync(dirname(agentFile(io.home)), { recursive: true });
     writeFileSync(agentFile(io.home), launchAgent({ home: io.home, command, path }));
+    // An update whose check failed turns the service off with launchctl disable; installing again turns it back on.
+    await must(io, ["launchctl", "enable", `gui/${io.uid}/${LABEL}`]);
     await must(io, ["launchctl", "bootstrap", `gui/${io.uid}`, agentFile(io.home)]);
   } else {
     mkdirSync(dirname(unitFile(io.home)), { recursive: true });

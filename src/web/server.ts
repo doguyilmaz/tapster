@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { z } from "zod";
 import { TapsterError } from "../errors";
 import type { GitHub } from "../github";
@@ -8,6 +8,7 @@ import type { Store } from "../cli/keystore";
 import type { Runner } from "../cli/runner";
 import type { Where } from "../cli/upgrade";
 import { scrub } from "../mask";
+import { TAPSTER } from "../version";
 import { COURIER_URI, LOGO_URI } from "../ui/images";
 import { logoPng, webScript } from "./assets";
 import { hostAllowed, json, problem, respond } from "./http";
@@ -33,15 +34,15 @@ export type Deps = {
 
 export type Mode = "once" | "service";
 
-// Only a hash of the session token stays in memory, so the service can keep a pairing across a restart without the token itself.
-export type Pairing = { hash: string; at: number };
+// Only a hash of the session token stays in memory. The proof key lets the page check, before it sends the token, that
+// it talks to this server and not to another program that took the port.
+export type Pairing = { hash: string; proof: string; at: number };
 
 export type Session = {
   deps: Deps;
   port: number;
   mode: Mode;
   pairing: Pairing | null;
-  kept(): void;
   codes: Map<string, number>;
   claimed: Set<string>;
   pending: Map<string, { hub: string; owner: string; at: number; kind?: "doorbell" }>;
@@ -99,7 +100,6 @@ export function newSession(deps: Deps, port: number, mode: Mode = "once"): Sessi
     port,
     mode,
     pairing: null,
-    kept: () => {},
     codes: new Map(),
     claimed: new Set(),
     pending: new Map(),
@@ -113,6 +113,7 @@ export function newSession(deps: Deps, port: number, mode: Mode = "once"): Sessi
     touched: Date.now(),
     login: null,
     link: () => {
+      for (const [c, until] of s.codes) if (until < Date.now()) s.codes.delete(c);
       const code = randomBytes(16).toString("hex");
       s.codes.set(code, Date.now() + CODE_TTL);
       return `http://127.0.0.1:${s.port}/#c=${code}`;
@@ -141,18 +142,13 @@ function bearer(header: string | null): string | null {
   return /^Bearer ([0-9a-f]{64})$/.exec(header ?? "")?.[1] ?? null;
 }
 
-function endPairing(s: Session): void {
-  s.pairing = null;
-  s.kept();
-}
-
 function signedIn(s: Session, req: Request): boolean {
   const p = s.pairing;
   const given = bearer(req.headers.get("authorization"));
   if (!p || !given) return false;
   if (!timingSafeEqual(Buffer.from(hash(given)), Buffer.from(p.hash))) return false;
   if (s.mode === "service" && (Date.now() - s.touched > IDLE_LOCK || Date.now() - p.at > PAIRED_DAYS * 86_400_000)) {
-    endPairing(s);
+    s.pairing = null;
     return false;
   }
   return true;
@@ -162,7 +158,7 @@ function claim(s: Session, code: unknown): Response {
   if (typeof code !== "string" || !/^[0-9a-f]{32}$/.test(code)) return json({ error: { reason: "this link is not a tapster setup link", fix: fresh(s) } }, 400);
   if (s.claimed.has(code)) {
     s.codes.clear();
-    endPairing(s);
+    s.pairing = null;
     s.deps.log("tapster setup: the same link was opened twice, so tapster ended every session for safety.");
     if (s.mode === "service") s.deps.log("Run tapster setup in a terminal for a fresh link.");
     else s.deps.log(`Open this fresh link in your browser: ${s.link()}`);
@@ -173,10 +169,18 @@ function claim(s: Session, code: unknown): Response {
   s.codes.delete(code);
   s.claimed.add(code);
   const value = randomBytes(32).toString("hex");
-  s.pairing = { hash: hash(value), at: Date.now() };
+  const proof = randomBytes(32).toString("hex");
+  s.pairing = { hash: hash(value), proof, at: Date.now() };
   s.touched = Date.now();
-  s.kept();
-  return json({ token: value, service: s.mode === "service" });
+  return json({ token: value, proof, service: s.mode === "service" });
+}
+
+// Answers without the token: the page sends a fresh nonce and checks the HMAC with the proof key it got at the claim.
+function hello(s: Session, url: URL): Response {
+  const nonce = url.searchParams.get("nonce") ?? "";
+  if (!/^[0-9a-f]{32}$/.test(nonce)) return json({ error: { reason: "the check had no nonce", fix: "Reload the page." } }, 400);
+  if (!s.pairing) return json({ error: { reason: "this page is not signed in to tapster setup", fix: fresh(s) } }, 401);
+  return json({ version: TAPSTER.version, mac: createHmac("sha256", s.pairing.proof).update(`tapster ${nonce} ${TAPSTER.version}`).digest("hex") });
 }
 
 // The bearer token lives in this origin's storage only. An Authorization header needs a CORS preflight that this server never grants. Origin, when the browser sends one, must be this page.
@@ -203,13 +207,10 @@ export function handler(s: Session, routes: Routes, callback: (c: Ctx) => Promis
       const body = (await req.json().catch(() => null)) as { code?: unknown } | null;
       return claim(s, body?.code);
     }
+    if (req.method === "GET" && path === "/api/hello") return hello(s, url);
     if (!signedIn(s, req)) return json({ error: { reason: "this page is not signed in to tapster setup", fix: fresh(s) } }, 401);
     // The page asks for the latest release by itself every six hours; that alone does not keep an idle session open.
-    if (path !== "/api/tapster") {
-      const before = s.touched;
-      s.touched = Date.now();
-      if (s.touched - before > 600_000) s.kept();
-    }
+    if (path !== "/api/tapster") s.touched = Date.now();
     if (req.method !== "GET") s.warm.clear();
     const route = routes[`${req.method} ${path}`];
     if (!route) return json({ error: { reason: "unknown request", fix: "Reload the page." } }, 404);

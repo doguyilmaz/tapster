@@ -578,7 +578,7 @@ try {
   await page.clickText("Update tapster", ".confirm button");
   await page.waitFor("!document.body.textContent.includes('is available') && !document.body.textContent.includes('Updating tapster') && document.body.textContent.includes('The hub runs tapster 1.7.3')", 30000);
   if ((await page.eval<string>("location.pathname")) !== "/health") throw new Error("the reload after the update lost the route");
-  const expected = ["brew update", "brew upgrade --cask tapster", "/opt/homebrew/bin/tapster --version", "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/Caskroom/tapster/1.7.4/tapster", "/usr/bin/codesign --verify --strict /opt/homebrew/bin/tapster", "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/bin/tapster"];
+  const expected = ["/usr/bin/codesign -dv --verbose=2 /opt/homebrew/Caskroom/tapster/1.7.4/tapster", "brew update", "brew upgrade --cask tapster", "/opt/homebrew/bin/tapster --version", "/usr/bin/codesign --verify --strict /opt/homebrew/bin/tapster", "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/bin/tapster"];
   if (svcRan.join("\n") !== expected.join("\n")) throw new Error(`the update ran ${svcRan.join(", ")}`);
   await page.eval("scrollTo(0, 0)");
   await shot("19g-updated", false);
