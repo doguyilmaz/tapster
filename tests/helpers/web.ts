@@ -24,8 +24,15 @@ export function webApp(fake: FakeHub, home: string, o: Partial<Deps> = {}) {
   };
   const s = newSession(deps, 8277);
   const handle = handler(s, routes(s, () => {}), (c) => appCallback(c));
+  let cookie: Promise<string> | null = null;
+  const pair = async () => {
+    const code = s.link().split("#c=")[1]!;
+    const res = await handle(new Request("http://127.0.0.1:8277/api/claim", { method: "POST", headers: { host: "127.0.0.1:8277", "x-tapster": "1" }, body: JSON.stringify({ code }) }));
+    return res.headers.get("set-cookie")!.split(";")[0]!;
+  };
   const call: Call = async (method, path, body) => {
-    const headers: Record<string, string> = { host: "127.0.0.1:8277", authorization: `Bearer ${s.token}` };
+    cookie ??= pair();
+    const headers: Record<string, string> = { host: "127.0.0.1:8277", "x-tapster": "1", cookie: await cookie };
     let payload: FormData | string | undefined;
     if (body instanceof FormData) payload = body;
     else if (body !== undefined) {

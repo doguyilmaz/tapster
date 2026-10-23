@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { z } from "zod";
 import { TapsterError } from "../errors";
 import type { GitHub } from "../github";
@@ -8,7 +8,7 @@ import type { Store } from "../cli/keystore";
 import { scrub } from "../mask";
 import { COURIER_URI, LOGO_URI } from "../ui/images";
 import { logoPng, webScript } from "./assets";
-import { hostAllowed, json, problem, respond, tokenMatches } from "./http";
+import { hostAllowed, json, problem, respond } from "./http";
 import css from "./client/app.css" with { type: "text" };
 
 export type Deps = {
@@ -25,10 +25,17 @@ export type Deps = {
   store(): Store | null;
 };
 
+export type Mode = "once" | "service";
+
+// Only a hash of the cookie stays in memory, so the service can keep a pairing across a restart without the cookie itself.
+export type Pairing = { hash: string; at: number };
+
 export type Session = {
   deps: Deps;
   port: number;
-  token: string;
+  mode: Mode;
+  pairing: Pairing | null;
+  kept(): void;
   codes: Map<string, number>;
   claimed: Set<string>;
   pending: Map<string, { hub: string; owner: string; at: number; kind?: "doorbell" }>;
@@ -49,6 +56,8 @@ export type Handler = (c: Ctx) => Promise<unknown>;
 export type Routes = Record<string, Handler>;
 
 const CODE_TTL = 10 * 60_000;
+export const PAIRED_DAYS = 30;
+export const IDLE_LOCK = 12 * 3_600_000;
 const PAGES = new Set(["/", "/setup", "/projects", "/health"]);
 
 const image = (uri: string) => Buffer.from(uri.slice(uri.indexOf(",") + 1), "base64");
@@ -72,11 +81,13 @@ export const PAGE = `<!doctype html>
 </html>
 `;
 
-export function newSession(deps: Deps, port: number): Session {
+export function newSession(deps: Deps, port: number, mode: Mode = "once"): Session {
   const s: Session = {
     deps,
     port,
-    token: randomBytes(32).toString("hex"),
+    mode,
+    pairing: null,
+    kept: () => {},
     codes: new Map(),
     claimed: new Set(),
     pending: new Map(),
@@ -110,21 +121,65 @@ export async function readJson<T>(req: Request, schema: z.ZodType<T>): Promise<T
   return parsed.data;
 }
 
+const fresh = (s: Session) => (s.mode === "service" ? "Run tapster setup in a terminal for a fresh link." : "Press Enter in the terminal that runs tapster setup for a fresh link.");
+
+const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+
+export const cookieName = (s: Session) => `tapster_${s.port}`;
+
+function cookieValue(s: Session, header: string | null): string | null {
+  const name = `${cookieName(s)}=`;
+  for (const part of (header ?? "").split(";")) {
+    const p = part.trim();
+    if (p.startsWith(name)) return /^[0-9a-f]{64}$/.test(p.slice(name.length)) ? p.slice(name.length) : null;
+  }
+  return null;
+}
+
+function endPairing(s: Session): void {
+  s.pairing = null;
+  s.kept();
+}
+
+function signedIn(s: Session, req: Request): boolean {
+  const p = s.pairing;
+  const given = cookieValue(s, req.headers.get("cookie"));
+  if (!p || !given) return false;
+  if (!timingSafeEqual(Buffer.from(hash(given)), Buffer.from(p.hash))) return false;
+  if (s.mode === "service" && (Date.now() - s.touched > IDLE_LOCK || Date.now() - p.at > PAIRED_DAYS * 86_400_000)) {
+    endPairing(s);
+    return false;
+  }
+  return true;
+}
+
 function claim(s: Session, code: unknown): Response {
-  if (typeof code !== "string" || !/^[0-9a-f]{32}$/.test(code)) return json({ error: { reason: "this link is not a tapster setup link", fix: "Press Enter in the terminal that runs tapster setup for a fresh link." } }, 400);
+  if (typeof code !== "string" || !/^[0-9a-f]{32}$/.test(code)) return json({ error: { reason: "this link is not a tapster setup link", fix: fresh(s) } }, 400);
   if (s.claimed.has(code)) {
-    s.token = randomBytes(32).toString("hex");
     s.codes.clear();
+    endPairing(s);
     s.deps.log("tapster setup: the same link was opened twice, so tapster ended every session for safety.");
-    s.deps.log(`Open this fresh link in your browser: ${s.link()}`);
-    return json({ error: { reason: "this link was already used", fix: "tapster ended every session for safety. Open the fresh link the terminal printed." } }, 409);
+    if (s.mode === "service") s.deps.log("Run tapster setup in a terminal for a fresh link.");
+    else s.deps.log(`Open this fresh link in your browser: ${s.link()}`);
+    return json({ error: { reason: "this link was already used", fix: s.mode === "service" ? "tapster ended every session for safety. Run tapster setup in a terminal for a fresh link." : "tapster ended every session for safety. Open the fresh link the terminal printed." } }, 409);
   }
   const expires = s.codes.get(code);
-  if (expires === undefined || expires < Date.now()) return json({ error: { reason: "this link has expired", fix: "Press Enter in the terminal that runs tapster setup for a fresh link." } }, 410);
+  if (expires === undefined || expires < Date.now()) return json({ error: { reason: "this link has expired", fix: fresh(s) } }, 410);
   s.codes.delete(code);
   s.claimed.add(code);
+  const value = randomBytes(32).toString("hex");
+  s.pairing = { hash: hash(value), at: Date.now() };
   s.touched = Date.now();
-  return json({ token: s.token });
+  s.kept();
+  const age = s.mode === "service" ? `; Max-Age=${PAIRED_DAYS * 86_400}` : "";
+  return respond(JSON.stringify({ paired: true }), 200, "application/json; charset=utf-8", { "set-cookie": `${cookieName(s)}=${value}; HttpOnly; SameSite=Strict; Path=/${age}` });
+}
+
+// A custom header needs a CORS preflight that this server never grants, so other sites cannot send it; Origin, when the browser sends one, must be this page.
+function fromPage(req: Request): boolean {
+  if (req.headers.get("x-tapster") !== "1") return false;
+  const origin = req.headers.get("origin");
+  return origin === null || origin === `http://${req.headers.get("host")}`;
 }
 
 export function handler(s: Session, routes: Routes, callback: (c: Ctx) => Promise<Response>): (req: Request) => Promise<Response> {
@@ -138,13 +193,16 @@ export function handler(s: Session, routes: Routes, callback: (c: Ctx) => Promis
     if (req.method === "GET" && IMAGES[path]) return respond(new Uint8Array(IMAGES[path]), 200, "image/webp");
     if (req.method === "GET" && path === "/logo.png") return respond(await logoPng(), 200, "image/png", { "content-disposition": 'attachment; filename="tapster-logo.png"' });
     if (req.method === "GET" && path === "/app/callback") return callback({ s, req, url });
+    if (!path.startsWith("/api/")) return respond("Not found", 404, "text/plain; charset=utf-8");
+    if (!fromPage(req)) return json({ error: { reason: "this request did not come from the tapster setup page", fix: "Open tapster setup from your terminal." } }, 403);
     if (req.method === "POST" && path === "/api/claim") {
       const body = (await req.json().catch(() => null)) as { code?: unknown } | null;
       return claim(s, body?.code);
     }
-    if (!path.startsWith("/api/")) return respond("Not found", 404, "text/plain; charset=utf-8");
-    if (!tokenMatches(req.headers.get("authorization"), s.token)) return json({ error: { reason: "this page is not signed in to tapster setup", fix: "Press Enter in the terminal that runs tapster setup for a fresh link." } }, 401);
+    if (!signedIn(s, req)) return json({ error: { reason: "this page is not signed in to tapster setup", fix: fresh(s) } }, 401);
+    const before = s.touched;
     s.touched = Date.now();
+    if (s.touched - before > 600_000) s.kept();
     if (req.method !== "GET") s.warm.clear();
     const route = routes[`${req.method} ${path}`];
     if (!route) return json({ error: { reason: "unknown request", fix: "Reload the page." } }, 404);

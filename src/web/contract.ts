@@ -1,6 +1,6 @@
 export type Problem = { reason: string; fix: string };
 
-export type SessionView = { version: string; dev: boolean; platform: string; home: string; here: { hub: string | null; repo: string | null; path: string } };
+export type SessionView = { version: string; dev: boolean; service: boolean; platform: string; home: string; here: { hub: string | null; repo: string | null; path: string } };
 
 export type AccountView = { state: "no-gh" } | { state: "signed-out" } | { state: "ok"; login: string; missing: string[] };
 

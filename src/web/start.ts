@@ -48,9 +48,10 @@ export function routes(s: Session, quit: () => void): Routes {
     "GET /api/session": async (): Promise<SessionView> => {
       const repo = await currentRepo(s.deps.cwd).catch(() => null);
       const tap = repo !== null && /\/homebrew-/.test(repo);
-      return { version: TAPSTER.version, dev: TAPSTER.sha === null && s.deps.pin === null, platform: process.platform, home: s.deps.home, here: { hub: tap ? repo : null, repo: tap ? null : repo, path: s.deps.cwd } };
+      return { version: TAPSTER.version, dev: TAPSTER.sha === null && s.deps.pin === null, service: s.mode === "service", platform: process.platform, home: s.deps.home, here: { hub: tap ? repo : null, repo: tap ? null : repo, path: s.deps.cwd } };
     },
     "POST /api/quit": async () => {
+      if (s.mode === "service") throw new TapsterError("the tapster service keeps running", "Stop it with tapster service uninstall.");
       setTimeout(quit, 200);
       return { stopping: true };
     },

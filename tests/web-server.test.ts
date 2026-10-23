@@ -23,17 +23,20 @@ const deps: Deps = {
   store: () => null,
 };
 
-function app(routes: Routes = {}) {
-  const s = newSession(deps, 8277);
+function app(routes: Routes = {}, mode: "once" | "service" = "once") {
+  const s = newSession(deps, 8277, mode);
   const handle = handler(s, routes, (c) => appCallback(c));
   const call = (path: string, init: RequestInit & { host?: string } = {}) =>
     handle(new Request(`http://127.0.0.1:8277${path}`, { ...init, headers: { host: init.host ?? "127.0.0.1:8277", ...(init.headers as Record<string, string>) } }));
   const claim = async (link = s.link()) => {
     const code = link.split("#c=")[1]!;
-    return call("/api/claim", { method: "POST", body: JSON.stringify({ code }) });
+    return call("/api/claim", { method: "POST", headers: HEADER, body: JSON.stringify({ code }) });
   };
   return { s, call, claim };
 }
+
+const HEADER = { "x-tapster": "1" };
+const cookieOf = (res: Response) => /^(tapster_8277=[0-9a-f]{64});/.exec(res.headers.get("set-cookie") ?? "")?.[1] ?? null;
 
 test("only 127.0.0.1 or localhost on this port reach the app", async () => {
   const { call } = app();
@@ -65,31 +68,105 @@ test("the logo for the GitHub App downloads as site/public/logo-512.png, from th
   expect((await call("/logo.png", { host: "evil.example:8277" })).status).toBe(421);
 });
 
-test("the API answers only with the session token", async () => {
-  const { s, call } = app({ "GET /api/ping": async () => ({ pong: true }) });
-  expect((await call("/api/ping")).status).toBe(401);
-  expect((await call("/api/ping", { headers: { authorization: "Bearer nope" } })).status).toBe(401);
-  expect((await call("/api/ping", { headers: { authorization: `Bearer ${"0".repeat(64)}` } })).status).toBe(401);
-  const ok = await call("/api/ping", { headers: { authorization: `Bearer ${s.token}` } });
+test("a claim answers with an HttpOnly SameSite=Strict cookie and never with a token", async () => {
+  const { claim } = app();
+  const res = await claim();
+  expect(res.status).toBe(200);
+  expect(res.headers.get("set-cookie")).toMatch(/^tapster_8277=[0-9a-f]{64}; HttpOnly; SameSite=Strict; Path=\/$/);
+  expect(await res.text()).not.toContain(cookieOf(res)!.split("=")[1]!);
+});
+
+test("the service's cookie lasts 30 days", async () => {
+  const { claim } = app({}, "service");
+  expect((await claim()).headers.get("set-cookie")).toEndWith("; Path=/; Max-Age=2592000");
+});
+
+test("the API answers only with the session cookie and the X-Tapster header", async () => {
+  const { claim, call } = app({ "GET /api/ping": async () => ({ pong: true }) });
+  const cookie = cookieOf(await claim())!;
+  expect((await call("/api/ping", { headers: HEADER })).status).toBe(401);
+  expect((await call("/api/ping", { headers: { ...HEADER, cookie: `tapster_8277=${"0".repeat(64)}` } })).status).toBe(401);
+  expect((await call("/api/ping", { headers: { ...HEADER, cookie: "tapster_8277=nope" } })).status).toBe(401);
+  expect((await call("/api/ping", { headers: { ...HEADER, cookie: cookie.replace("tapster_8277", "tapster_8278") } })).status).toBe(401);
+  expect((await call("/api/ping", { headers: { cookie } })).status).toBe(403);
+  expect((await call("/api/ping", { headers: { cookie, "x-tapster": "0" } })).status).toBe(403);
+  const ok = await call("/api/ping", { headers: { ...HEADER, cookie: `other=1; ${cookie}` } });
   expect(await ok.json()).toEqual({ pong: true });
-  expect((await call("/api/missing", { headers: { authorization: `Bearer ${s.token}` } })).status).toBe(404);
+  expect((await call("/api/missing", { headers: { ...HEADER, cookie } })).status).toBe(404);
+});
+
+test("a claim needs the X-Tapster header too", async () => {
+  const { s, call } = app();
+  const code = s.link().split("#c=")[1]!;
+  expect((await call("/api/claim", { method: "POST", body: JSON.stringify({ code }) })).status).toBe(403);
+  expect((await call("/api/claim", { method: "POST", headers: HEADER, body: JSON.stringify({ code }) })).status).toBe(200);
+});
+
+test("a request from another origin is refused even with the cookie", async () => {
+  const { claim, call } = app({ "POST /api/ping": async () => ({ pong: true }) });
+  const cookie = cookieOf(await claim())!;
+  const send = (origin: string) => call("/api/ping", { method: "POST", headers: { ...HEADER, cookie, origin } });
+  expect((await send("https://evil.example")).status).toBe(403);
+  expect((await send("http://127.0.0.1:9999")).status).toBe(403);
+  expect((await send("http://localhost:8277")).status).toBe(403);
+  expect((await send("null")).status).toBe(403);
+  expect((await send("http://127.0.0.1:8277")).status).toBe(200);
+});
+
+test("a second claim rotates the cookie: the first one stops working", async () => {
+  const { claim, call } = app({ "GET /api/ping": async () => ({ pong: true }) });
+  const first = cookieOf(await claim())!;
+  const second = cookieOf(await claim())!;
+  expect(second).not.toBe(first);
+  expect((await call("/api/ping", { headers: { ...HEADER, cookie: first } })).status).toBe(401);
+  expect((await call("/api/ping", { headers: { ...HEADER, cookie: second } })).status).toBe(200);
+});
+
+test("the service locks after 12 hours without a request; the one-shot session does not", async () => {
+  for (const mode of ["service", "once"] as const) {
+    const { s, claim, call } = app({ "GET /api/ping": async () => ({ pong: true }) }, mode);
+    const cookie = cookieOf(await claim())!;
+    s.touched = Date.now() - 11 * 3_600_000;
+    expect((await call("/api/ping", { headers: { ...HEADER, cookie } })).status).toBe(200);
+    s.touched = Date.now() - 12 * 3_600_000 - 60_000;
+    expect((await call("/api/ping", { headers: { ...HEADER, cookie } })).status).toBe(mode === "service" ? 401 : 200);
+    if (mode === "service") expect((await call("/api/ping", { headers: { ...HEADER, cookie } })).status).toBe(401);
+  }
+});
+
+test("the service's pairing ends after 30 days", async () => {
+  const { s, claim, call } = app({ "GET /api/ping": async () => ({ pong: true }) }, "service");
+  const cookie = cookieOf(await claim())!;
+  s.pairing!.at = Date.now() - 31 * 86_400_000;
+  expect((await call("/api/ping", { headers: { ...HEADER, cookie } })).status).toBe(401);
 });
 
 test("a launch link works once; a second use ends every session and prints a fresh link", async () => {
-  const { s, claim } = app();
+  const { s, claim, call } = app({ "GET /api/ping": async () => ({ pong: true }) });
   const link = s.link();
   const first = await claim(link);
   expect(first.status).toBe(200);
-  const { token } = (await first.json()) as { token: string };
-  expect(token).toBe(s.token);
+  const cookie = cookieOf(first)!;
   logs.length = 0;
   const again = await claim(link);
   expect(again.status).toBe(409);
-  expect(s.token).not.toBe(token);
+  expect(again.headers.get("set-cookie")).toBeNull();
+  expect((await call("/api/ping", { headers: { ...HEADER, cookie } })).status).toBe(401);
   expect(logs.join("\n")).toContain("http://127.0.0.1:8277/#c=");
   const fresh = await claim(logs.join("\n").match(/http:\/\/127\.0\.0\.1:8277\/#c=[0-9a-f]+/)![0]);
   expect(fresh.status).toBe(200);
 });
+
+test("the service never writes a pairing link to its log", async () => {
+  const { s, claim } = app({}, "service");
+  const link = s.link();
+  await claim(link);
+  logs.length = 0;
+  expect((await claim(link)).status).toBe(409);
+  expect(logs.join("\n")).not.toContain("#c=");
+  expect(logs.join("\n")).toContain("Run tapster setup");
+});
+
 
 test("expired or made-up codes are refused", async () => {
   const { s, claim } = app();
@@ -101,7 +178,7 @@ test("expired or made-up codes are refused", async () => {
 });
 
 test("errors reach the page as a reason and a fix; unexpected ones stay in the terminal", async () => {
-  const { s, call } = app({
+  const { claim, call } = app({
     "GET /api/known": async () => {
       throw new TapsterError("the hub has no App yet", "Create it in Setup.");
     },
@@ -109,7 +186,7 @@ test("errors reach the page as a reason and a fix; unexpected ones stay in the t
       throw new Error("internal detail");
     },
   });
-  const auth = { headers: { authorization: `Bearer ${s.token}` } };
+  const auth = { headers: { ...HEADER, cookie: cookieOf(await claim())! } };
   const known = await call("/api/known", auth);
   expect(known.status).toBe(400);
   expect(await known.json()).toEqual({ error: { reason: "the hub has no App yet", fix: "Create it in Setup." } });
