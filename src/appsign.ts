@@ -8,7 +8,7 @@ import { TapsterError } from "./errors";
 import { identifierFor } from "./identity";
 import type { Keychain } from "./keychain";
 import { run } from "./run";
-import { codesignArgs, verifySigned } from "./sign";
+import { codesignArgs, staple, verifySigned } from "./sign";
 
 export async function readEntitlements(path: string): Promise<Entitlements> {
   const res = await run("codesign", ["-d", "--entitlements", "-", "--xml", path], { allowFail: true });
@@ -67,9 +67,8 @@ export async function signApp(kc: Keychain, appDir: string, pkg: Bundle, team: s
   return { items: items.map((i) => i.path), identifiers, dropped };
 }
 
-export async function stapleApp(app: string, exec = run): Promise<void> {
-  await exec("xcrun", ["stapler", "staple", app]);
-  await exec("xcrun", ["stapler", "validate", app]);
+export async function stapleApp(app: string, exec = run, wait?: (ms: number) => Promise<void>): Promise<void> {
+  await staple(app, exec, wait);
   const assessed = await exec("spctl", ["-a", "-t", "execute", "-vv", app], { allowFail: true });
   if (assessed.code !== 0 || !assessed.stderr.includes("Notarized Developer ID")) {
     throw new TapsterError(`${basename(app)} is not accepted by Gatekeeper after notarization`, "Check the notarization log in App Store Connect.");
