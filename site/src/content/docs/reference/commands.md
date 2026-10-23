@@ -23,6 +23,22 @@ the projects on your computer and the hub's health. Under **Optional extras** it
 The page runs on `127.0.0.1` only. The link it opens works once; press Enter in the terminal for a fresh one. It stops
 with Ctrl+C, with **Close** on the page or after two hours without use.
 
+When the [tapster service](/guides/service/) runs, `tapster setup` without `--port` or `--tapster` asks it for a link and
+opens its page instead. `tapster setup --service` is what the service itself runs: it opens no browser, prints no link,
+never stops by itself and reads its port from `~/.config/tapster/service.json`.
+
+## tapster service
+
+Keeps tapster setup running on this computer, so its page is always there and offers each new tapster release. It needs
+tapster installed with Homebrew, Bun or npm. See [Keep setup running](/guides/service/).
+
+| Command | What it does |
+| --- | --- |
+| `service install` | Starts the service now and at every login: a LaunchAgent on macOS, a systemd user unit on Linux. It takes port 8277 or the next free one up to 8299. |
+| `service uninstall` | Stops the service and removes the LaunchAgent or the unit and `~/.config/tapster`. tapster itself stays installed. |
+| `service status` | Says whether the service is installed, which version runs and at which address. |
+| `service logs` | Shows the service's recent log. |
+
 ## tapster init
 
 Run it in a clone of your hub. Each option below adds or changes one part of it. `init` and `init --workflow` also
