@@ -13,21 +13,22 @@ const STABLE = /^v(\d+\.\d+\.\d+)$/;
 
 type Latest = { at: number; version: string | null };
 
-async function latest(s: Session): Promise<string | null> {
-  if (TAPSTER.sha === null && s.deps.pin === null) return null;
+async function release(s: Session): Promise<string | null> {
   const known = s.memo.get("tapster:latest") as Latest | undefined;
   if (known && Date.now() - known.at < CHECK_EVERY) return known.version;
-  try {
-    const gh = await s.deps.github();
-    const tag = (await gh.json<{ tag_name?: string }>("GET", "/repos/doguyilmaz/tapster/releases/latest")).tag_name ?? "";
-    const version = STABLE.exec(tag)?.[1] ?? null;
-    const ours = parseTag(`v${TAPSTER.version}`);
-    const newer = version !== null && ours !== null && compareSemver(parseTag(`v${version}`)!, ours) > 0 ? version : null;
-    s.memo.set("tapster:latest", { at: Date.now(), version: newer } satisfies Latest);
-    return newer;
-  } catch {
-    return null;
-  }
+  const gh = await s.deps.github();
+  const tag = (await gh.json<{ tag_name?: string }>("GET", "/repos/doguyilmaz/tapster/releases/latest")).tag_name ?? "";
+  const version = STABLE.exec(tag)?.[1] ?? null;
+  s.memo.set("tapster:latest", { at: Date.now(), version } satisfies Latest);
+  return version;
+}
+
+// The latest release when it is newer than this tapster, from GitHub at most every six hours. A build from a checkout has no release to compare.
+async function latest(s: Session): Promise<string | null> {
+  if (TAPSTER.sha === null && s.deps.pin === null) return null;
+  const version = await release(s).catch(() => null);
+  const ours = parseTag(`v${TAPSTER.version}`);
+  return version !== null && ours !== null && compareSemver(parseTag(`v${version}`)!, ours) > 0 ? version : null;
 }
 
 const canUpdate = (s: Session) => s.mode === "service" && stableCommand(s.deps.where) !== null;

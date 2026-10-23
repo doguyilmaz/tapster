@@ -8,6 +8,7 @@ import { rulesetBodies } from "../src/rulesets";
 import pins from "../templates/pins.json";
 import { newSparkleKey } from "../src/cli/keystore";
 import { run } from "../src/run";
+import type { Deps } from "../src/web/server";
 import { setup } from "../src/web/start";
 import { findGpg } from "../src/cli/linuxkey";
 import { FakeCloudflare, both } from "../tests/helpers/fakecloudflare";
@@ -99,7 +100,7 @@ export async function sampleHome(fake: FakeHub): Promise<string> {
   return home;
 }
 
-export async function demo(port: number, log: (line: string) => void): Promise<{ fake: FakeHub; cf: FakeCloudflare; home: string; done: Promise<void>; sparkle: { seed: string; publicKey: string } }> {
+export async function demo(port: number, log: (line: string) => void): Promise<{ fake: FakeHub; cf: FakeCloudflare; home: string; done: Promise<void>; sparkle: { seed: string; publicKey: string }; deps: Deps }> {
   const sparkle = newSparkleKey();
   const fake = new FakeHub("octo");
   fake.repo("homebrew-tap", { files: new Map([["README.md", "# octo/tap\n"], [".github/workflows/tests.yml", "jobs:\n  t:\n    steps:\n      - uses: Homebrew/actions/setup-homebrew@master\n"]]) });
@@ -109,7 +110,7 @@ export async function demo(port: number, log: (line: string) => void): Promise<{
   const store = memoryStore();
   useGhWrite(fake.ghWrite);
   const pin = "0123456789abcdef0123456789abcdef01234567";
-  const done = setup(["--port", String(port), "--no-open"], {
+  const deps: Deps = {
     github: async () => new GitHub("demo", fake.fetch, async () => {}, "user"),
     fetch: both(fake.fetch, cf),
     home,
@@ -127,8 +128,9 @@ export async function demo(port: number, log: (line: string) => void): Promise<{
       throw new Error(`the demo runs no ${argv[0]}`);
     },
     exit: () => {},
-  });
-  return { fake, cf, home, done, sparkle };
+  };
+  const done = setup(["--port", String(port), "--no-open"], deps);
+  return { fake, cf, home, done, sparkle, deps };
 }
 
 if (import.meta.main) {

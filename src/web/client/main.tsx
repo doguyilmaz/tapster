@@ -48,11 +48,12 @@ async function start(): Promise<void> {
   readReturn();
   if (!back.value) restoreHub();
   boot.value = { kind: "ready" };
+  const signedIn = loadAccount();
   const here = session.value.here.hub;
   if (!hubName.value && here) chooseHub(here);
   else if (hubName.value) void loadHub();
+  await signedIn;
   watchTapster();
-  await loadAccount();
 }
 
 whenSignedOut(() => {
