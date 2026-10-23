@@ -33,7 +33,7 @@ export type Deps = {
 
 export type Mode = "once" | "service";
 
-// Only a hash of the cookie stays in memory, so the service can keep a pairing across a restart without the cookie itself.
+// Only a hash of the session token stays in memory, so the service can keep a pairing across a restart without the token itself.
 export type Pairing = { hash: string; at: number };
 
 export type Session = {
@@ -137,15 +137,8 @@ const fresh = (s: Session) => (s.mode === "service" ? "Run tapster setup in a te
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
-export const cookieName = (s: Session) => `tapster_${s.port}`;
-
-function cookieValue(s: Session, header: string | null): string | null {
-  const name = `${cookieName(s)}=`;
-  for (const part of (header ?? "").split(";")) {
-    const p = part.trim();
-    if (p.startsWith(name)) return /^[0-9a-f]{64}$/.test(p.slice(name.length)) ? p.slice(name.length) : null;
-  }
-  return null;
+function bearer(header: string | null): string | null {
+  return /^Bearer ([0-9a-f]{64})$/.exec(header ?? "")?.[1] ?? null;
 }
 
 function endPairing(s: Session): void {
@@ -155,7 +148,7 @@ function endPairing(s: Session): void {
 
 function signedIn(s: Session, req: Request): boolean {
   const p = s.pairing;
-  const given = cookieValue(s, req.headers.get("cookie"));
+  const given = bearer(req.headers.get("authorization"));
   if (!p || !given) return false;
   if (!timingSafeEqual(Buffer.from(hash(given)), Buffer.from(p.hash))) return false;
   if (s.mode === "service" && (Date.now() - s.touched > IDLE_LOCK || Date.now() - p.at > PAIRED_DAYS * 86_400_000)) {
@@ -183,13 +176,11 @@ function claim(s: Session, code: unknown): Response {
   s.pairing = { hash: hash(value), at: Date.now() };
   s.touched = Date.now();
   s.kept();
-  const age = s.mode === "service" ? `; Max-Age=${PAIRED_DAYS * 86_400}` : "";
-  return respond(JSON.stringify({ paired: true }), 200, "application/json; charset=utf-8", { "set-cookie": `${cookieName(s)}=${value}; HttpOnly; SameSite=Strict; Path=/${age}` });
+  return json({ token: value, service: s.mode === "service" });
 }
 
-// A custom header needs a CORS preflight that this server never grants, so other sites cannot send it; Origin, when the browser sends one, must be this page.
+// The bearer token lives in this origin's storage only. An Authorization header needs a CORS preflight that this server never grants. Origin, when the browser sends one, must be this page.
 function fromPage(req: Request): boolean {
-  if (req.headers.get("x-tapster") !== "1") return false;
   const origin = req.headers.get("origin");
   return origin === null || origin === `http://${req.headers.get("host")}`;
 }

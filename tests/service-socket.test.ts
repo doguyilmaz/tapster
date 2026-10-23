@@ -107,21 +107,21 @@ test("no service answers when the socket is missing", async () => {
   expect(await askService(join(newHome(), "nothing.sock"), "pair")).toBeNull();
 });
 
-test("a pairing survives a restart as a hash in a private file, never the cookie", async () => {
+test("a pairing survives a restart as a hash in a private file, never the token", async () => {
   const home = newHome();
   const first = newSession(deps(home), 8292, "service");
   keepPairing(first);
   const handle = handler(first, routes(first, () => {}), (c) => appCallback(c));
   const code = first.link().split("#c=")[1]!;
-  const claimed = await handle(new Request("http://127.0.0.1:8292/api/claim", { method: "POST", headers: { host: "127.0.0.1:8292", "x-tapster": "1" }, body: JSON.stringify({ code }) }));
-  const cookie = claimed.headers.get("set-cookie")!.split(";")[0]!;
+  const claimed = await handle(new Request("http://127.0.0.1:8292/api/claim", { method: "POST", headers: { host: "127.0.0.1:8292" }, body: JSON.stringify({ code }) }));
+  const { token } = (await claimed.json()) as { token: string };
   const file = serviceFiles(home).session;
   expect(mode(file)).toBe(0o600);
-  expect(readFileSync(file, "utf8")).not.toContain(cookie.split("=")[1]!);
+  expect(readFileSync(file, "utf8")).not.toContain(token);
   const second = newSession(deps(home), 8292, "service");
   keepPairing(second);
   const again = handler(second, routes(second, () => {}), (c) => appCallback(c));
-  const res = await again(new Request("http://127.0.0.1:8292/api/session", { headers: { host: "127.0.0.1:8292", "x-tapster": "1", cookie } }));
+  const res = await again(new Request("http://127.0.0.1:8292/api/session", { headers: { host: "127.0.0.1:8292", authorization: `Bearer ${token}` } }));
   expect(res.status).toBe(200);
   expect(((await res.json()) as { service: boolean }).service).toBe(true);
 });
@@ -141,9 +141,9 @@ test("setup --service opens no browser, prints no link, pairs over the socket an
   }
   expect(pair!.link).toStartWith("http://127.0.0.1:18377/#c=");
   const code = pair!.link.split("#c=")[1]!;
-  const claimed = await fetch("http://127.0.0.1:18377/api/claim", { method: "POST", headers: { "x-tapster": "1", "content-type": "application/json" }, body: JSON.stringify({ code }) });
-  const cookie = claimed.headers.get("set-cookie")!.split(";")[0]!;
-  const view = (await (await fetch("http://127.0.0.1:18377/api/session", { headers: { "x-tapster": "1", cookie } })).json()) as { service: boolean };
+  const claimed = await fetch("http://127.0.0.1:18377/api/claim", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) });
+  const { token } = (await claimed.json()) as { token: string };
+  const view = (await (await fetch("http://127.0.0.1:18377/api/session", { headers: { authorization: `Bearer ${token}` } })).json()) as { service: boolean };
   expect(view.service).toBe(true);
   expect(mode(f.dir)).toBe(0o700);
   await askService(f.sock, "stop");
@@ -178,9 +178,9 @@ async function oneShot(where: Deps["where"]): Promise<string> {
   const done = setup(["--no-open", "--port", "18378"], { ...deps(home), where });
   while (!logs.some((l) => l.includes("#c="))) await Bun.sleep(20);
   const code = /#c=([0-9a-f]{32})/.exec(logs.join("\n"))![1]!;
-  const claimed = await fetch("http://127.0.0.1:18378/api/claim", { method: "POST", headers: { "x-tapster": "1" }, body: JSON.stringify({ code }) });
-  const cookie = claimed.headers.get("set-cookie")!.split(";")[0]!;
-  await fetch("http://127.0.0.1:18378/api/quit", { method: "POST", headers: { "x-tapster": "1", cookie } });
+  const claimed = await fetch("http://127.0.0.1:18378/api/claim", { method: "POST", body: JSON.stringify({ code }) });
+  const { token } = (await claimed.json()) as { token: string };
+  await fetch("http://127.0.0.1:18378/api/quit", { method: "POST", headers: { authorization: `Bearer ${token}` } });
   await done;
   return logs.join("\n");
 }

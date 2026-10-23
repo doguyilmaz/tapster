@@ -45,7 +45,7 @@ export function readPort(home: string): number {
 
 const pairingSchema = z.object({ hash: z.string().regex(/^[0-9a-f]{64}$/), at: z.number(), touched: z.number() });
 
-// The service keeps its pairing across restarts, such as an update, as a hash: the cookie itself stays in the browser.
+// The service keeps its pairing across restarts, such as an update, as a hash: the token itself stays in the browser.
 export function keepPairing(s: Session): void {
   const f = serviceFiles(s.deps.home);
   const saved = pairingSchema.safeParse(readJson(f.session));

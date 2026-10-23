@@ -502,8 +502,8 @@ try {
   await page.eval("(() => { const s = document.querySelector('.sheet'); const h = [...s.querySelectorAll('strong')].find((e) => e.textContent === 'Releases'); s.scrollTop = h.getBoundingClientRect().top + s.scrollTop - 90; })()");
   await shot("18g-skip-marker");
   await audit("skip-marker");
-  // The service on port 8298: a page reached by a link from another site keeps its Strict cookie for its own requests,
-  // then the update banners, their confirm dialogs and a restart that keeps the route.
+  // The service on port 8298: its token stays in its own origin's storage, which the page on another port never sees,
+  // a link from another site finds it signed in, then the update banners, their confirm dialogs and a restart that keeps the route.
   Object.assign(TAPSTER, { version: "1.7.4", sha: "1".repeat(40) });
   fake.tapsterLatest = "v1.7.5";
   const tap = fake.get("octo/homebrew-tap")!;
@@ -537,6 +537,11 @@ try {
   await page.scheme(false);
   await page.goto(pair!.link);
   await page.waitFor("document.body.textContent.includes('Choose your hub')", 20000);
+  const held = await page.eval<{ local: string | null; session: string | null; cookie: string }>("({ local: localStorage.getItem('tapster.session'), session: sessionStorage.getItem('tapster.session'), cookie: document.cookie })");
+  if (!held.local || held.session || held.cookie) throw new Error(`the service page keeps its token wrong: ${JSON.stringify({ local: Boolean(held.local), session: Boolean(held.session), cookie: held.cookie })}`);
+  await page.goto("http://127.0.0.1:8299/setup");
+  await page.waitFor("document.readyState === 'complete'");
+  if (await page.eval<boolean>(`[localStorage, sessionStorage].some((s) => s.getItem('tapster.session') === ${JSON.stringify(held.local)}) || document.cookie !== ''`)) throw new Error("the page on another port can read the service's token");
   await page.goto(`data:text/html,<a id="x" href="http://127.0.0.1:8298/setup">tapster</a>`);
   await page.click("#x");
   await page.waitFor("location.port === '8298' && document.readyState === 'complete'");
