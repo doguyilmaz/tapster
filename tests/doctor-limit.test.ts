@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { limited } from "../src/cli/doctor";
+import { limited } from "../src/github";
 import { GitHub } from "../src/github";
 
 test("the doctor keeps at most the given number of GitHub calls in flight and loses none", async () => {

@@ -163,6 +163,9 @@ export type ConfigView = {
 
 export type EntryCheck = { before: string; problem: Problem | null; same: boolean };
 
+// Bump on any change to ProjectStatus: the page keeps the last list in localStorage and paints it before GitHub answers.
+export const STATUS_VIEW_VERSION = 1;
+
 export type StatusView = { projects: ProjectStatus[] };
 
 export type FollowView = {

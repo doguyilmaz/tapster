@@ -5,7 +5,7 @@ import { type OneGo, addInOneGo, oneGoRefusal } from "../oneclick";
 import type { ProjectStepId } from "../status";
 import { notes } from "../steps";
 import { post } from "./api";
-import { loadClones, loadHub, problemOf, recall, remember, say, statuses, statusOf, tilde } from "./state";
+import { loadClones, loadHub, problemOf, recall, remember, say, statusCached, statusError, statuses, statusOf, tilde } from "./state";
 import { KIND, Mark, StatusCard } from "./status";
 import { Badge, Busy, Cmd, DiffBlock, Icon, Note, Problem, Spinner } from "./ui";
 
@@ -417,6 +417,14 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
   const [editing, setEditing] = useState(false);
   const [added, setAdded] = useState<AddView | null>(null);
   const [run, setRun] = useState<OneGo | null>(null);
+  const cached = useRef(statusCached.value);
+  useEffect(() => {
+    if (cached.current && !statusCached.value) {
+      setStatus(listed);
+      if (!listed) setProblem(statusError.value);
+    }
+    cached.current = statusCached.value;
+  }, [statusCached.value]);
   const inspect = (dir: string) => post<InspectView>("/api/projects/inspect", { hub: hubName, path: dir }).then(setInfo, (e) => setProblem(problemOf(e)));
   useEffect(() => {
     setInfo(null);

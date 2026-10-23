@@ -6,7 +6,7 @@ import type { GitHub, Release } from "../../github";
 import { readHubFile } from "../../hubcommit";
 import { entryText } from "../../hubentry";
 import type { ConfigView } from "../contract";
-import { openPull, proposal } from "./entry";
+import { type Pull, openPull, proposal } from "./entry";
 
 const SKIP = /(^|\/)(\.git|\.build|build|dist|DerivedData|node_modules|Pods|Carthage)\/|\.(app|xcodeproj)\//;
 
@@ -24,12 +24,23 @@ async function bytesAt(gh: GitHub, repo: string, path: string, ref: string): Pro
   }
 }
 
+// A file at a commit never changes, so the session keeps it by the commit's sha.
+function fileAt(gh: GitHub, repo: string, path: string, sha: string, memo?: Map<string, unknown>): Promise<string | null> {
+  const key = `file:${repo}:${path}@${sha}`;
+  const known = memo?.get(key) as Promise<string | null> | undefined;
+  if (known) return known;
+  const p = readHubFile(gh, repo, path, sha);
+  memo?.set(key, p);
+  p.catch(() => memo?.delete(key));
+  return p;
+}
+
 // GoReleaser's Homebrew section as it stood before the project moved to the hub, from the file's own history on GitHub.
-async function homebrewHistory(gh: GitHub, repo: string, ref: string): Promise<string | null> {
+async function homebrewHistory(gh: GitHub, repo: string, ref: string, memo?: Map<string, unknown>): Promise<string | null> {
   for (const file of [".goreleaser.yaml", ".goreleaser.yml"]) {
     const list = await gh.json<{ sha: string }[]>("GET", `/repos/${repo}/commits?path=${file}&sha=${encodeURIComponent(ref)}&per_page=6`).catch(emptyIfGone([]));
     for (const c of list.slice(1, 6)) {
-      const text = await readHubFile(gh, repo, file, c.sha);
+      const text = await fileAt(gh, repo, file, c.sha, memo);
       if (text !== null && hasHomebrew(text)) return text;
     }
     if (list.length) return null;
@@ -55,6 +66,7 @@ export type ConfigInput = {
   workflow: { name: string; text: string } | null;
   releases: Release[];
   memo?: Map<string, unknown>;
+  pulls?: Promise<Pull[]>;
 };
 
 export function remoteSources(gh: GitHub, o: ConfigInput): EntrySources {
@@ -73,7 +85,7 @@ export function remoteSources(gh: GitHub, o: ConfigInput): EntrySources {
   return {
     kind: o.kind,
     apple: o.apple,
-    goreleaser: once("goreleaser", async () => (o.goreleaser !== null && hasHomebrew(o.goreleaser) ? o.goreleaser : homebrewHistory(gh, o.repo, o.ref))),
+    goreleaser: once("goreleaser", async () => (o.goreleaser !== null && hasHomebrew(o.goreleaser) ? o.goreleaser : homebrewHistory(gh, o.repo, o.ref, o.memo))),
     plists: once("plists", () => plistsAt(gh, o.repo, o.ref)),
     app: once("app", async () => {
       const yml = await readHubFile(gh, o.repo, "project.yml", encodeURIComponent(o.ref));
@@ -105,10 +117,10 @@ export async function readConfig(gh: GitHub, o: Omit<ConfigInput, "goreleaser" |
 export async function configOf(gh: GitHub, o: ConfigInput): Promise<ConfigView | null> {
   const entry = o.hubText === null ? null : entryText(o.hubText, o.name);
   if (entry === null) return null;
-  const pull = await openPull(gh, o.hub, "update", o.name);
+  const pull = await openPull(gh, o.hub, "update", o.name, o.pulls);
   if (pull) {
     try {
-      const p = await proposal(gh, o.hub, o.name, "main", "update");
+      const p = await proposal(gh, o.hub, o.name, "main", "update", o.pulls);
       return { entry, update: null, from: [], manual: [], pending: { pr: p.url, head: p.head, entry: p.entry, blocked: null } };
     } catch (e) {
       if (!(e instanceof TapsterError)) throw e;

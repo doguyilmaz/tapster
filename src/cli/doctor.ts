@@ -4,7 +4,7 @@ import { GitHubError, TapsterError } from "../errors";
 import { readHubFile } from "../hubcommit";
 import { protectionProblems } from "../rulesets";
 import { TAPSTER } from "../version";
-import type { GitHub } from "../github";
+import { type GitHub, early, limited } from "../github";
 import { currentRepo, userGitHub } from "./gh";
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
@@ -168,31 +168,6 @@ async function list<T>(gh: GitHub, path: string, key?: string): Promise<T[]> {
     if (e instanceof GitHubError && e.status === 404) return [];
     throw e;
   }
-}
-
-// Every call starts at once and is awaited in the order the checks print; the noop catch keeps an unawaited rejection quiet.
-const early = <T>(p: Promise<T>): Promise<T> => {
-  p.catch(() => undefined);
-  return p;
-};
-
-// At most `max` requests in flight, so a hub with many projects stays clear of GitHub's secondary rate limits.
-export function limited(gh: GitHub, max: number): GitHub {
-  let active = 0;
-  const waiting: (() => void)[] = [];
-  const g = Object.create(gh) as GitHub;
-  g.request = async (...args: Parameters<GitHub["request"]>) => {
-    if (active >= max) await new Promise<void>((go) => waiting.push(go));
-    else active++;
-    try {
-      return await gh.request(...args);
-    } finally {
-      const next = waiting.shift();
-      if (next) next();
-      else active--;
-    }
-  };
-  return g;
 }
 
 type Setup = { config: HubConfig | null; workflow: string };

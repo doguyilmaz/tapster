@@ -79,7 +79,8 @@ you.
   once used. If a link is used twice, tapster ends every session and prints a fresh link.
 - Every request needs that token in a header. Another site open in your browser cannot send it. The page answers only
   requests addressed to `127.0.0.1` or `localhost` on its port.
-- So the page opens at once, your browser keeps the last view of your hub: names and settings, never a secret's value.
+- So the page opens at once, your browser keeps the last view of your hub and its projects: names and settings, never a
+  secret's value.
   The page shows it while it asks GitHub again and every change waits for GitHub's answer. Choosing another hub or
   signing out clears it.
 - Files you drop, such as the `.p12` and the `.p8`, stay in memory until tapster stores them as secrets through the

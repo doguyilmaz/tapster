@@ -4,7 +4,7 @@ import { ApiError, post } from "./api";
 import { type Stop, type StopId, changedOnly, expiresSoon, firstOpen, installStep, lineDiff, macNeeded, stops } from "../steps";
 import { clonePaths, targetOf } from "./projects";
 import { type SheetTarget, ProjectSheet } from "./sheet";
-import { appResult, back, clones, go, hub, hubCached, hubError, hubLoading, hubName, loadClones, loadHub, loadStatuses, mac, macChoice, openStop, problemOf, say, setMac, statusError, statuses } from "./state";
+import { appResult, back, clones, go, hub, hubCached, hubError, hubLoading, hubName, loadClones, loadHub, loadStatuses, mac, macChoice, openStop, problemOf, say, setMac, statusCached, statusError, statuses } from "./state";
 import { StatusRows } from "./status";
 import { Extras } from "./extras";
 import { Badge, Busy, Cmd, Done, Field, FileDrop, Head, Icon, ManifestForm, Note, Out, Password, Problem, Spinner, savedFor, useAction, useInstall } from "./ui";
@@ -728,7 +728,7 @@ export function Setup() {
   const choice = mac(h.name);
   const list = stops(h, choice, Date.now(), statuses.value?.hub === h.name ? statuses.value.list : null);
   const first = appResult.value?.kind === "created" ? "app" : firstOpen(list);
-  if (hubCached.value) kept.current = first;
+  if (hubCached.value || statusCached.value) kept.current = first;
   else if (kept.current === first) kept.current = null;
   const current = open ?? kept.current ?? first;
   const done = list.filter((s) => s.state === "done" || s.state === "skipped").length;

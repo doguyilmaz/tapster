@@ -1,5 +1,5 @@
 import { GitHubError } from "./errors";
-import type { GitHub } from "./github";
+import { type GitHub, early } from "./github";
 
 const ADMIN_ONLY: { actor_id: number | null; actor_type: string; bypass_mode: string }[] = [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }];
 const DEPLOY_KEYS = { actor_id: null, actor_type: "DeployKey", bypass_mode: "always" };
@@ -69,10 +69,14 @@ async function kind(gh: GitHub, repo: string, target: "tag" | "branch", wanted: 
 }
 
 async function assess(gh: GitHub, repo: string, branch: string, viewer: Viewer, dependabot = false): Promise<{ tag: string[]; branch: string[] }> {
-  const tag = await kind(gh, repo, "tag", TAG_RULESET.rules.map((r) => r.type), viewer, false);
-  const head = await kind(gh, repo, "branch", BRANCH_RULESET.rules.map((r) => r.type), viewer, dependabot);
+  // All three reads start at once; they are awaited in the order they were once made, so the first failure stays the same.
+  const tagP = kind(gh, repo, "tag", TAG_RULESET.rules.map((r) => r.type), viewer, false);
+  const headP = early(kind(gh, repo, "branch", BRANCH_RULESET.rules.map((r) => r.type), viewer, dependabot));
+  const rulesP = early(gh.json<{ type: string }[]>("GET", `/repos/${repo}/rules/branches/${encodeURIComponent(branch)}`));
+  const tag = await tagP;
+  const head = await headP;
   if (head.ok) {
-    const live = new Set((await gh.json<{ type: string }[]>("GET", `/repos/${repo}/rules/branches/${encodeURIComponent(branch)}`)).map((r) => r.type));
+    const live = new Set((await rulesP).map((r) => r.type));
     if (!["update", "deletion", "non_fast_forward"].every((t) => live.has(t))) head.problems.push("GitHub does not enforce rulesets on this repository; private repositories need a paid plan for them");
   }
   return { tag: tag.problems, branch: head.problems };

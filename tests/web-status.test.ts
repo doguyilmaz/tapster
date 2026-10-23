@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { useGhWrite } from "../src/cli/gh";
+import { GitHub } from "../src/github";
 import { withNote } from "../src/draftnote";
 import type { AddView, DiffView, FollowView, InspectView, ProjectStatus, ReachView, StatusView } from "../src/web/contract";
 import { setupProblems } from "../src/web/api/status";
@@ -286,4 +287,27 @@ test("adding a clone that already has tapster's files changes nothing and its di
   expect(diff.files.map((f) => f.change)).toEqual(["same", "same"]);
   const ebb = (await call("POST", "/api/projects/inspect", { hub: HUB, path: join(home, "Developer", "ebb") })).data as unknown as InspectView;
   expect(ebb.ready).toBe(false);
+});
+
+test("the status reads the hub's tapster.yml once, lists its pull requests once and keeps at most 8 GitHub calls in flight", async () => {
+  const urls: string[] = [];
+  let now = 0;
+  let peak = 0;
+  const counting = (async (input: string | URL | Request, init?: RequestInit) => {
+    urls.push(String(input));
+    peak = Math.max(peak, ++now);
+    try {
+      await Bun.sleep(2);
+      return await fake.fetch(input, init);
+    } finally {
+      now--;
+    }
+  }) as typeof fetch;
+  const { call: counted } = webApp(fake, home, { github: async () => new GitHub("t", counting, async () => {}, "user") });
+  const res = await counted("GET", `/api/projects/status?hub=${HUB}`);
+  expect(res.status).toBe(200);
+  expect((res.data as unknown as StatusView).projects.map((p) => p.name)).toEqual((await statuses()).map((p) => p.name));
+  expect(urls.filter((u) => u.includes(`/repos/${HUB}/contents/tapster.yml?ref=main`))).toHaveLength(1);
+  expect(urls.filter((u) => u.includes(`/repos/${HUB}/pulls?`))).toEqual([`https://api.github.com/repos/${HUB}/pulls?state=open&per_page=100`]);
+  expect(peak).toBe(8);
 });

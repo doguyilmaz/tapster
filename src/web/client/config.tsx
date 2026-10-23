@@ -3,7 +3,7 @@ import type { ConfigView, EntryCheck, Problem as ProblemView, ProjectStatus } fr
 import { capFirst } from "../steps";
 import { post } from "./api";
 import { hubName, problemOf, say, statusOf } from "./state";
-import { Busy, DiffBlock, Icon, Note, Out, Problem } from "./ui";
+import { Busy, DiffBlock, Icon, Note, Out, Problem, ofProject } from "./ui";
 
 type Opened = { pr: string; head: string; entry: string };
 
@@ -75,7 +75,7 @@ function Editor({ s, c, onDone, onCancel }: { s: ProjectStatus; c: ConfigView; o
         <button type="button" class="btn secondary small" aria-expanded={show} onClick={() => setShow(!show)}>
           {show ? "Hide the change" : "Show the change"}
         </button>
-        <Busy busy={busy} class="btn primary small" disabled={!ready} onClick={land}>
+        <Busy busy={busy} holds={ofProject(s.repo, (p) => p.config)} class="btn primary small" disabled={!ready} onClick={land}>
           {!busy && <Icon name="pr" />}
           Propose and merge
         </Busy>
@@ -165,7 +165,7 @@ export function Configuration({ s, onStatus }: { s: ProjectStatus; onStatus: (s:
           )}
           <div class="row">
             {p.entry && p.head && (
-              <Busy busy={busy} class="btn primary small" onClick={merge}>
+              <Busy busy={busy} holds={ofProject(s.repo, (p) => p.config)} class="btn primary small" onClick={merge}>
                 {!busy && <Icon name="pr" />}
                 Merge the update
               </Busy>
@@ -181,7 +181,7 @@ export function Configuration({ s, onStatus }: { s: ProjectStatus; onStatus: (s:
           <span>tapster read this from {c.from.join("; ")}. Proposing it adds these lines and changes no other.</span>
           <DiffBlock before={c.entry} after={c.update} label={`The update tapster proposes for ${s.name}`} />
           <div class="row">
-            <Busy busy={busy} class="btn primary small" onClick={propose}>
+            <Busy busy={busy} holds={ofProject(s.repo, (p) => p.config)} class="btn primary small" onClick={propose}>
               {!busy && <Icon name="pr" />}
               Propose the update
             </Busy>
