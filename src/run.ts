@@ -86,7 +86,7 @@ export function runPath(path: string, label: string, args: string[], opts: RunOp
       const bytes = Buffer.concat(out);
       const res = { code: code ?? -1, stdout: bytes.toString("utf8"), stderr: Buffer.concat(err).toString("utf8"), bytes };
       if (res.code !== 0 && !opts.allowFail) {
-        reject(new TapsterError(`${label} exited with ${res.code}`, excerpt(res.stderr) || "No error output."));
+        reject(new TapsterError(`${label} exited with ${res.code}`, excerpt(res.stderr) || excerpt(res.stdout) || "No error output."));
         return;
       }
       resolve(res);

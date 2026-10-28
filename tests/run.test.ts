@@ -27,6 +27,13 @@ test("a failing tool never puts its arguments in the error", async () => {
   expect(`${e.reason} ${e.fix}`).not.toContain("secret-argument-value");
 });
 
+test("a tool that writes its error to stdout is reported with it", async () => {
+  // xcrun stapler does: "The validate action failed! Error 68."
+  const e = (await runPath("/bin/sh", "sh", ["-c", "echo 'The validate action failed! Error 68.'; exit 68"]).catch((err) => err)) as TapsterError;
+  expect(e.reason).toBe("sh exited with 68");
+  expect(e.fix).toBe("The validate action failed! Error 68.");
+});
+
 test("allowFail returns the code instead of throwing", async () => {
   const res = await runPath("/bin/sh", "sh", ["-c", "exit 4"], { allowFail: true });
   expect(res.code).toBe(4);
