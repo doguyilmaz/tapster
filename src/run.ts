@@ -91,6 +91,8 @@ export function runPath(path: string, label: string, args: string[], opts: RunOp
       }
       resolve(res);
     });
+    // A tool that exits before reading its input breaks the pipe: its exit code says what went wrong.
+    child.stdin.on("error", () => {});
     child.stdin.end(opts.stdin ?? "");
   });
 }

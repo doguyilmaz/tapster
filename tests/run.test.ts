@@ -34,6 +34,12 @@ test("a tool that writes its error to stdout is reported with it", async () => {
   expect(e.fix).toBe("The validate action failed! Error 68.");
 });
 
+test("a tool that exits before reading its input fails with its exit code", async () => {
+  // gpg does with a malformed key; the write then breaks its pipe (EPIPE).
+  const e = (await runPath("/bin/sh", "sh", ["-c", "exit 2"], { stdin: "x".repeat(4 << 20) }).catch((err) => err)) as TapsterError;
+  expect(e.reason).toBe("sh exited with 2");
+});
+
 test("allowFail returns the code instead of throwing", async () => {
   const res = await runPath("/bin/sh", "sh", ["-c", "exit 4"], { allowFail: true });
   expect(res.code).toBe(4);
