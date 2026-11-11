@@ -16,7 +16,7 @@ jobs:
       - run: bun run typecheck
       - run: bun test
       - name: dist/ matches the source
-        run: bun run build:action && git diff --exit-code dist/
+        run: bun run build:action && bun run build:auto && git diff --exit-code dist/
       - name: Build the CLI for every target
         env: { TAG: "${{ github.ref_name }}" }
         run: |

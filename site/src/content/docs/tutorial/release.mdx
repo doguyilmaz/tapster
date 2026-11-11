@@ -44,8 +44,10 @@ gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.1.0 -f sha="
 
 ### Docs and CI
 
-The release workflow starts only from a version tag (an app's workflow also runs when you start it by hand), so
-merging docs never releases. Do not add push or paths triggers on `main` to the release workflow.
+The release workflow starts only from a version tag (an app's workflow also runs when you start it by hand).
+To choose versions and tag without a per-release click, enable [automatic releases](/guides/auto-tag) with
+`tapster add --auto`. Its separate workflow checks daily or after each push and skips documentation-only changes
+unless a commit explicitly requests a bump. Keep push or paths triggers on `main` out of the build/release workflow.
 
 To keep pull requests that only change docs from running the full test matrix, give the project's own CI workflow
 `paths-ignore` for the docs folder and give the docs workflow `paths` for it. tapster does not edit those files,

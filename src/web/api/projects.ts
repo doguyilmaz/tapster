@@ -13,9 +13,10 @@ import { type Ctx, type Routes, readJson } from "../server";
 import { checkHub, me } from "./hub";
 import { oneGoProblem } from "../oneclick";
 import { setupProblems } from "./status";
+import { AUTO_FILE, autoMode } from "../../cli/auto";
 
 const COMMIT_MESSAGE = "Release through the tapster hub";
-const TAPSTER_FILES = [".github/workflows/release.yml", ".goreleaser.yaml", ".goreleaser.yml"];
+const TAPSTER_FILES = [".github/workflows/release.yml", AUTO_FILE, ".goreleaser.yaml", ".goreleaser.yml"];
 
 export function clonePath(path: unknown, home: string): string {
   if (typeof path !== "string" || !isAbsolute(path)) throw new TapsterError("that is not a full folder path", "Give the folder's full path, such as /Users/you/Developer/my-tool.");
@@ -139,6 +140,7 @@ async function inspect(c: Ctx): Promise<InspectView> {
     setupProblems({ kind, branch, workflowName: workflow, goreleaser: kind === "go" ? (local(".goreleaser.yaml") ?? local(".goreleaser.yml")) : null, workflow: local(`.github/workflows/${workflow}`) }).length === 0;
   return {
     path: dir,
+    auto: autoMode(readSmall(join(dir, AUTO_FILE))),
     repo,
     name,
     kind,
@@ -159,10 +161,10 @@ async function inspect(c: Ctx): Promise<InspectView> {
   };
 }
 
-const options = z.object({ workflow: z.string().regex(/^[A-Za-z0-9._-]+\.ya?ml$/), autoTag: z.boolean(), dependabot: z.boolean(), force: z.boolean() }).strict();
+const options = z.object({ workflow: z.string().regex(/^[A-Za-z0-9._-]+\.ya?ml$/), autoTag: z.boolean(), auto: z.enum(["daily", "push", "off"]).nullable().optional(), dependabot: z.boolean(), force: z.boolean() }).strict();
 const addBody = z.object({ ...hubBody, path: z.string(), options, oneGo: z.boolean().optional() }).strict();
 
-const optionsOf = (o: z.infer<typeof options>) => ({ ...addOptions([...(o.force ? ["--force"] : []), ...(o.autoTag ? ["--auto-tag"] : []), ...(o.dependabot ? ["--allow-dependabot"] : []), "--workflow", o.workflow]), update: "show" as const });
+const optionsOf = (o: z.infer<typeof options>) => ({ ...addOptions([...(o.force ? ["--force"] : []), ...(o.autoTag ? ["--auto-tag"] : []), ...(o.auto ? ["--auto", o.auto] : []), ...(o.dependabot ? ["--allow-dependabot"] : []), "--workflow", o.workflow]), update: "show" as const });
 
 async function unpushed(dir: string, defaultBranch: string): Promise<{ ahead: number | null; unpushed: Unpushed[] }> {
   const known = async (rev: string) => (await git(dir, ["rev-parse", "--verify", "--quiet", rev])).code === 0;
@@ -203,7 +205,8 @@ async function preview(c: Ctx): Promise<DiffView> {
   const dir = clonePath(body.path, c.s.deps.home);
   const repo = cloneRepo(dir, login);
   const writes = new Map<string, string>();
-  await prepare(dir, repo, projectName(repo), optionsOf(body.options), (await hubFacts(gh, hub)).apple, async (rel, content) => void writes.set(rel, content));
+  const [facts, project] = await Promise.all([hubFacts(gh, hub), gh.getRepo(repo)]);
+  await prepare(dir, repo, projectName(repo), optionsOf(body.options), facts.apple, async (rel, content) => void writes.set(rel, content), project.default_branch);
   const files: DiffView["files"] = [];
   for (const [path, after] of writes) {
     const before = await committed(dir, path);

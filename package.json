@@ -46,6 +46,7 @@
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit && bunx tsc --noEmit -p src/web/client",
     "build:action": "bun build ./src/action/main.ts --target=node --format=esm --minify --outfile dist/index.js",
+    "build:auto": "bun build ./src/auto/main.ts --target=node --format=esm --outfile dist/auto-release.js",
     "build:cli": "bun scripts/build.ts cli"
   },
   "devDependencies": {

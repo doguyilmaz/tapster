@@ -12,13 +12,18 @@ and apt and dnf repositories. When the hub refuses a draft it writes the reason 
 ## How a release starts
 
 - A release starts only from a version tag such as `v1.2.3` (or from the project's own tagging workflow when it was
-  added with `--auto-tag`). Merging or pushing alone publishes nothing.
+  added with `--auto-tag`). With `--auto`, a separate tapster-auto workflow chooses versions daily; `--auto push`
+  checks each push to the default branch. Without automatic tagging, merging or pushing alone publishes nothing.
 - GitHub runs no push workflow for a commit whose message holds `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`
   or `[actions skip]`. The same goes for a message that ends with the trailer `skip-checks: true`. A tag on such a
   commit may never start the release workflow. Never tag a commit whose message carries one of these markers.
 - When you merge several pull requests in a row, put `[skip ci]` in the merge commit message of all but the last. Then
   tag the last one, which carries no marker.
-- Merging docs never releases. Do not add push or paths triggers on `main` to the release workflow. To keep docs-only
+- Automatic releases skip documentation-only changes unless a commit explicitly requests a bump with a Release
+  trailer. Unclassified code uses patch, feat uses minor and a breaking change at 1.0.0 or later needs Release: major.
+  Before 1.0.0 breaking changes bump minor. Prereleases, divergent version tags and pending drafts stop new tags.
+  Use tapster add --auto off and commit the change to return to manual releases.
+- Keep push or paths triggers on `main` out of the build/release workflow; automatic tagging has its own workflow. To keep docs-only
   pull requests from running the full CI, give the project's own CI workflow `paths-ignore` for the docs folder and the
   docs workflow `paths` for it. tapster does not edit those files: each project's CI is its own.
 - tapster setup's Release button and the `gh` command `tapster add` prints read the tip's message first and refuse a

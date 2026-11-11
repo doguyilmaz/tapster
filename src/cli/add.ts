@@ -28,6 +28,7 @@ import { headOf, releaseTriggers, withParentTag } from "../web/api/status";
 import { YAML_OUT, appInstallUrl, autoTagSteps, goreleaserCask, hasHomebrew, keepStyle, binName, bunEntry, descriptionNote, entryExtras, goEntry, hubEntries, hubFacts, hubName, installSentence, proposeEntry, proposeUpdate, releaseEntry, releaseSecrets, repoTags, tagRefs, withoutMac } from "./hubpr";
 import { ask } from "./prompt";
 import { mustRead, readRegular, readSmall, writeInside } from "./paths";
+import { AUTO_FILE, autoMode, autoWorkflow, checkAutoReleaseWorkflow, type AutoMode } from "./auto";
 
 type Pins = typeof pinsJson;
 
@@ -272,19 +273,27 @@ export async function protectProject(gh: GitHub, repo: string, deployKeys = fals
 
 // update: what add does with an update of an entry the hub already has. The terminal proposes it; the setup page shows
 // it and leaves the click to the person.
-export type AddOptions = { hub: string | null; force: boolean; workflow: string; autoTag: boolean; dependabot: boolean; update: "propose" | "show" };
+export type AddOptions = { hub: string | null; force: boolean; workflow: string; autoTag: boolean; auto: AutoMode | null; dependabot: boolean; update: "propose" | "show" };
 
 export function addOptions(args: string[]): AddOptions {
-  const opts: AddOptions = { hub: null, force: false, workflow: "release.yml", autoTag: false, dependabot: false, update: "propose" };
+  const opts: AddOptions = { hub: null, force: false, workflow: "release.yml", autoTag: false, auto: null, dependabot: false, update: "propose" };
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (a === "--force") opts.force = true;
     else if (a === "--auto-tag") opts.autoTag = true;
+    else if (a === "--auto") {
+      const mode = args[i + 1];
+      if (mode && !mode.startsWith("--") && !["daily", "push", "off"].includes(mode)) throw new TapsterError(`unknown automatic release mode ${mode}`, "Use --auto, --auto daily, --auto push or --auto off.");
+      opts.auto = mode === "push" || mode === "off" ? mode : "daily";
+      if (mode === "daily" || mode === "push" || mode === "off") i++;
+    }
     else if (a === "--allow-dependabot") opts.dependabot = true;
     else if (a === "--hub" && args[i + 1]) opts.hub = hubName(args[++i]!);
     else if (a === "--workflow" && args[i + 1] && /^[A-Za-z0-9._-]+\.ya?ml$/.test(args[i + 1]!)) opts.workflow = args[++i]!;
     else throw new TapsterError(`unknown option ${a}`, "Run tapster add --help for the options.");
   }
+  if (opts.auto && opts.auto !== "off") opts.autoTag = true;
+  if (opts.auto && opts.workflow === "tapster-auto.yml") throw new TapsterError("the release and automatic tagging workflows need different files", "Keep tapster-auto.yml for automatic tagging and name the build workflow with --workflow.");
   return opts;
 }
 
@@ -319,7 +328,25 @@ export async function homebrewFromHistory(dir: string): Promise<string | null> {
 
 type Prepared = { kind: "go" | "bun" | "app"; entry: string | null; reason: string | null; notes: string[]; goreleaser: string | null; original?: string | null; bin?: string | null; files: string[] };
 
-export async function prepare(dir: string, repo: string, name: string, opts: AddOptions, mac = true, write: Write = (rel, content) => writeInside(dir, rel, content)): Promise<Prepared> {
+export async function prepare(dir: string, repo: string, name: string, opts: AddOptions, mac = true, write: Write = (rel, content) => writeInside(dir, rel, content), branch?: string): Promise<Prepared> {
+  const writes = new Map<string, string>();
+  const prepared = await prepareRelease(dir, repo, name, opts, mac, async (rel, content) => void writes.set(rel, content));
+  if (opts.auto) {
+    if (!branch) throw new TapsterError("the default branch is needed for automatic releases", "Read the repository's default branch from GitHub first.");
+    const release = writes.get(`.github/workflows/${opts.workflow}`) ?? writes.get(".github/workflows/release.yml");
+    if (!release) throw new TapsterError("the release workflow could not be read", "Set up the release workflow first.");
+    if (opts.auto !== "off") checkAutoReleaseWorkflow(release);
+    const existing = readSmall(join(dir, AUTO_FILE));
+    if (existsSync(join(dir, AUTO_FILE)) && !autoMode(existing)) throw new TapsterError(`${AUTO_FILE} already exists and is not tapster's`, "Move it aside before enabling automatic releases.");
+    writes.set(AUTO_FILE, autoWorkflow(opts.auto, branch));
+    prepared.files.push(AUTO_FILE);
+    prepared.notes.push(opts.auto === "off" ? `- disabled automatic releases in ${AUTO_FILE}; commit and push this file to apply it. The existing tag key and rulesets are kept.` : `- wrote ${AUTO_FILE}; ${opts.auto === "daily" ? "checks daily at 03:23 UTC" : `checks every push to ${branch}`} and can also be run manually. Only code changes or explicit Release trailers produce a version.`);
+  }
+  for (const [rel, content] of writes) await write(rel, content);
+  return prepared;
+}
+
+async function prepareRelease(dir: string, repo: string, name: string, opts: AddOptions, mac: boolean, write: Write): Promise<Prepared> {
   const app = findApp(dir);
   if (app && !mac) throw new TapsterError("the hub has no Apple credentials, which a Mac app needs", "Run tapster init --rotate certificate and tapster init --rotate notary in the hub clone, then tapster add again.");
   if (app) {
@@ -366,20 +393,38 @@ async function resolveHub(dir: string, flag: string | null): Promise<{ hub: stri
   return { hub, remember: async () => void (hub !== saved && (await run("git", ["-C", dir, "config", "tapster.hub", hub]))) };
 }
 
-async function setupAutoTag(gh: GitHub, repo: string, branch: string): Promise<string> {
+export async function setupAutoTag(gh: GitHub, repo: string, branch: string): Promise<string> {
   const keys = await gh.json<{ title: string; read_only: boolean }[]>("GET", `/repos/${repo}/keys`);
-  if (keys.some((k) => k.title === "tapster tags")) return '- the tag key already exists; to replace it, delete the deploy key "tapster tags" and run this again';
+  let environment: { deployment_branch_policy?: { protected_branches: boolean; custom_branch_policies: boolean } | null } | null;
   try {
-    await gh.json("PUT", `/repos/${repo}/environments/release`, { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } });
+    environment = await gh.json("GET", `/repos/${repo}/environments/release`);
+  } catch (e) {
+    if (!(e instanceof GitHubError) || e.status !== 404) throw e;
+    environment = null;
+  }
+  if (environment && (environment.deployment_branch_policy?.protected_branches !== false || environment.deployment_branch_policy?.custom_branch_policies !== true)) {
+    throw new TapsterError('the "release" environment does not restrict access to the default branch', `Set its deployment branches to selected branches with only ${branch}, then run this again. Existing environment approvals are kept.`);
+  }
+  try {
+    if (!environment) await gh.json("PUT", `/repos/${repo}/environments/release`, { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } });
   } catch (e) {
     if (e instanceof GitHubError && [403, 404, 422].includes(e.status)) {
       throw new TapsterError(`GitHub refused environments on ${repo}`, "Automatic tags keep their key in an environment, which private repositories get with GitHub Pro. Make the project public or upgrade.");
     }
     throw e;
   }
-  const policies = await gh.json<{ branch_policies: { name: string }[] }>("GET", `/repos/${repo}/environments/release/deployment-branch-policies`);
+  const policies = await gh.json<{ branch_policies: { name: string; type?: string }[]; total_count?: number }>("GET", `/repos/${repo}/environments/release/deployment-branch-policies?per_page=100`);
+  if ((policies.total_count ?? policies.branch_policies.length) > policies.branch_policies.length || policies.branch_policies.some((p) => p.name !== branch || (p.type !== undefined && p.type !== "branch"))) {
+    throw new TapsterError('the "release" environment permits other branches or tags', `Remove its extra deployment policies so only the branch ${branch} can read TAPSTER_TAG_KEY, then run this again.`);
+  }
   if (!policies.branch_policies.some((p) => p.name === branch)) {
     await gh.json("POST", `/repos/${repo}/environments/release/deployment-branch-policies`, { name: branch, type: "branch" });
+  }
+  if (keys.some((k) => k.title === "tapster tags" && k.read_only)) throw new TapsterError('the deploy key "tapster tags" is read-only', "Delete that deploy key and run this again to create a tag key.");
+  if (keys.some((k) => k.title === "tapster tags")) {
+    const secrets = await gh.json<{ secrets: { name: string }[] }>("GET", `/repos/${repo}/environments/release/secrets?per_page=100`);
+    if (!secrets.secrets.some((s) => s.name === "TAPSTER_TAG_KEY")) throw new TapsterError('the existing tag key has no TAPSTER_TAG_KEY environment secret', 'Delete the deploy key "tapster tags" and run this again to replace both halves.');
+    return '- the tag key already exists; its environment allows only the default branch. To replace it, delete the deploy key "tapster tags" and run this again';
   }
   const dir = tempDir("tapster-tag-");
   try {
@@ -469,15 +514,15 @@ export type Added = { pr: string | null; head: string | null; entry: string | nu
 export async function addProject(gh: GitHub, dir: string, repo: string, hub: string, facts: { slug: string; apple: boolean }, opts: AddOptions, say: (line: string) => void): Promise<Added> {
   const name = projectName(repo);
   const { slug, apple } = facts;
-  const prepared = await prepare(dir, repo, name, opts, apple);
-  for (const n of prepared.notes) say(n);
   const project = await gh.getRepo(repo);
+  const prepared = await prepare(dir, repo, name, opts, apple, undefined, project.default_branch);
+  for (const n of prepared.notes) say(n);
+  if (opts.autoTag) say(await setupAutoTag(gh, repo, project.default_branch));
   say(await protectProject(gh, repo, opts.autoTag, opts.dependabot));
   if (!opts.dependabot && [".github/dependabot.yml", ".github/dependabot.yaml"].some((f) => existsSync(join(dir, f)))) {
     say("- Dependabot cannot open pull requests here now: GitHub does not let personal repositories exempt it from the rules.");
     say("  To keep it, run tapster add --allow-dependabot. Branches named dependabot/... then stay open to anything with write access, the hub's App included, so a stolen App key could run your workflows on its own code there.");
   }
-  if (opts.autoTag) say(await setupAutoTag(gh, repo, project.default_branch));
   const existing = (await hubEntries(gh, hub)).find((e) => e.name === name || e.repo.toLowerCase() === repo.toLowerCase());
   let { entry, reason } = prepared;
   const sources = localSources(gh, dir, repo, prepared, apple, opts);
@@ -557,7 +602,9 @@ export async function add(args: string[]): Promise<void> {
 
 export async function releaseHint(gh: GitHub, repo: string): Promise<string> {
   const keys = await gh.json<{ title: string }[]>("GET", `/repos/${repo}/keys`).catch(() => []);
-  if (keys.some((k) => k.title === "tapster tags")) return "Your release workflow tags each release by itself.";
+  const auto = autoMode(await readHubFile(gh, repo, AUTO_FILE, "HEAD").catch(() => null));
+  if (auto === "daily" || auto === "push") return `Automatic releases ${auto === "daily" ? "check daily at 03:23 UTC" : "check each push to the default branch"}. Run tapster auto on GitHub to check sooner.`;
+  if (auto !== "off" && keys.some((k) => k.title === "tapster tags")) return "Your release workflow tags each release by itself.";
   const branch = (await gh.getRepo(repo)).default_branch;
   const tag = nextTag(highestTag(await repoTags(gh, repo)));
   const cmd = tagCommand(repo, tag, { branch });

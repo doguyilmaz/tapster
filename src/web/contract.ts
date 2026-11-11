@@ -76,6 +76,7 @@ export type LocalProject = {
 export type ScanView = { projects: LocalProject[]; roots: string[]; others: number; truncated: boolean };
 
 export type InspectView = {
+  auto?: "daily" | "push" | "off" | null;
   path: string;
   repo: string;
   name: string;
@@ -101,7 +102,7 @@ export type Unpushed = { sha: string; subject: string; tapster: boolean };
 
 export type CommitResult = { committed: boolean; ahead: number | null; unpushed: Unpushed[] };
 
-export type AddOptionsView = { workflow: string; autoTag: boolean; dependabot: boolean; force: boolean };
+export type AddOptionsView = { workflow: string; autoTag: boolean; auto?: "daily" | "push" | "off" | null; dependabot: boolean; force: boolean };
 
 export type AddView = { lines: string[]; pr: string | null; head: string | null; entry: string | null; installUrl: string; files: string[] };
 
@@ -145,6 +146,7 @@ export type ProjectStatus = {
     highest: string | null;
     next: string;
     autoTag: boolean;
+    auto?: "daily" | "push" | "off" | null;
     atHead: string | null;
     suggest: { kind: "patch" | "minor" | "major"; reason: string } | null;
     head: CommitView | null;
@@ -167,7 +169,7 @@ export type ConfigView = {
 export type EntryCheck = { before: string; problem: Problem | null; same: boolean };
 
 // Bump on any change to ProjectStatus: the page keeps the last list in localStorage and paints it before GitHub answers.
-export const STATUS_VIEW_VERSION = 1;
+export const STATUS_VIEW_VERSION = 2;
 
 export type StatusView = { projects: ProjectStatus[] };
 

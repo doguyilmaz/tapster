@@ -9,6 +9,7 @@ import { setupProblems } from "../src/web/api/status";
 import { type HubCheck, reachFromCheck } from "../src/web/api/reach";
 import { reachNote, readReachNote } from "../src/reachnote";
 import { adaptGoreleaser, adaptReleaseWorkflow, bunWorkflow } from "../src/cli/add";
+import { AUTO_FILE, autoWorkflow } from "../src/cli/auto";
 import { listAims, sampleHome } from "../scripts/demo";
 import pins from "../templates/pins.json";
 import { FakeHub } from "./helpers/fakehub";
@@ -40,6 +41,22 @@ afterAll(() => {
 
 const statuses = async (query = "") => ((await call("GET", `/api/projects/status?hub=${HUB}${query}`)).data as unknown as StatusView).projects;
 const aims = async () => (await statuses()).find((p) => p.name === "aims")!;
+
+test("project status distinguishes automatic releases from manual mode even when the key remains", async () => {
+  const repo = fake.get("octo/aims")!;
+  const before = repo.files!.get(AUTO_FILE);
+  const keys = repo.keys.slice();
+  try {
+    repo.keys.push({ title: "tapster tags", read_only: false });
+    repo.files!.set(AUTO_FILE, autoWorkflow("daily", "main"));
+    expect((await aims()).release).toMatchObject({ auto: "daily", autoTag: true });
+    repo.files!.set(AUTO_FILE, autoWorkflow("off", "main"));
+    expect((await aims()).release).toMatchObject({ auto: "off", autoTag: false });
+  } finally {
+    repo.keys.splice(0, repo.keys.length, ...keys);
+    if (before === undefined) repo.files!.delete(AUTO_FILE); else repo.files!.set(AUTO_FILE, before);
+  }
+});
 
 test("tapster's release setup is read from the files: drafts, attestation and no old Homebrew or signing parts", () => {
   const flow = 'on: { push: { tags: ["v*"] } }\njobs:\n  r:\n    steps:\n      - uses: goreleaser/goreleaser-action@v6\n        env:\n          HOMEBREW_TAP_GITHUB_TOKEN: x\n          MACOS_SIGN_P12: y\n';

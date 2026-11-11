@@ -173,7 +173,7 @@ test("the suggested bump follows Conventional Commits since the highest tag", ()
   expect(suggestBump(["feat: dark mode", "feat(ui): picker", "fix: x"], "v1.4.2")).toEqual({ kind: "minor", reason: "2 commits add features (feat:)" });
   expect(suggestBump(["feat!: drop the old config", "fix: x"], "v1.4.2")).toEqual({ kind: "major", reason: "1 commit marks a breaking change" });
   expect(suggestBump(["refactor: x\n\nBREAKING CHANGE: the flag is gone"], "v1.4.2")).toEqual({ kind: "major", reason: "1 commit marks a breaking change" });
-  expect(suggestBump(["feat!: drop it"], "v0.4.2")).toEqual({ kind: "minor", reason: "1 commit marks a breaking change; before 1.0 that bumps the minor version" });
+  expect(suggestBump(["feat!: drop it"], "v0.4.2")).toEqual({ kind: "minor", reason: "1 commit marks a breaking change; before 1.0.0 that bumps the minor version" });
   expect(suggestBump(["Say in setup whether moving the pin changes the hub"], "v1.6.3")).toEqual({ kind: "patch", reason: "no commit since v1.6.3 uses Conventional Commits types, so pick the bump yourself" });
   expect(suggestBump([], null).kind).toBe("patch");
 });

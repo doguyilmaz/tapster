@@ -82,7 +82,7 @@ To move a hub to a newer release, see [Upgrade tapster](https://tapster.doguyilm
   [Mac apps with Sparkle](https://tapster.doguyilmaz.com/guides/sparkle/),
   [apt and dnf](https://tapster.doguyilmaz.com/guides/linux/),
   [the doorbell](https://tapster.doguyilmaz.com/guides/doorbell/),
-  [workflow tags](https://tapster.doguyilmaz.com/guides/auto-tag/),
+  [automatic releases and workflow tags](https://tapster.doguyilmaz.com/guides/auto-tag),
   [Dependabot](https://tapster.doguyilmaz.com/guides/dependabot/),
   [key rotation](https://tapster.doguyilmaz.com/guides/rotate/),
   [upgrades](https://tapster.doguyilmaz.com/guides/upgrade/)
