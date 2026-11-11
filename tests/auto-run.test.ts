@@ -154,6 +154,9 @@ test("commit text and Git error output are never echoed into workflow logs", () 
   const plan = f.run("plan");
   expect(plan.status).toBe(0);
   expect(plan.stdout).not.toContain("DUMMY_SECRET");
+  const badEvent = f.run("plan", { extra: { GITHUB_EVENT_PATH: join(f.root, dummy) } });
+  expect(badEvent.status).toBe(1);
+  expect(badEvent.stderr).not.toContain(dummy);
   f.git("remote", "set-url", "origin", `https://example.invalid/${dummy}`);
   const failed = f.run("tag", { output: plan.output, extra: { GIT_ALLOW_PROTOCOL: "file" } });
   expect(failed.status).toBe(1);

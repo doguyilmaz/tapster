@@ -111,6 +111,8 @@ function skipMarker(message) {
 var JQ_SKIP = String.raw`(.commit.message | test("(?i)\\[(skip ci|ci skip|no ci|skip actions|actions skip)\\]")) or ([.commit.message | splits("\\r?\\n[ \\t]*\\r?\\n") | select(test("\\S"))] | length > 1 and (last | test("(?im)^skip-checks:\\s*true\\s*$")))`;
 
 // src/auto/main.ts
+class AutoReleaseError extends Error {
+}
 var shaPattern = /^[0-9a-f]{40,64}$/;
 var git = (...args) => execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], { encoding: "utf8", timeout: 30000, maxBuffer: 16 << 20, stdio: ["ignore", "pipe", "pipe"] });
 var digest = (refs) => createHash("sha256").update(refs.sort().join(`
@@ -118,7 +120,7 @@ var digest = (refs) => createHash("sha256").update(refs.sort().join(`
 var output = (values) => {
   const file = process.env.GITHUB_OUTPUT;
   if (!file)
-    throw new Error("GitHub's output file is missing.");
+    throw new AutoReleaseError("GitHub's output file is missing.");
   appendFileSync(file, Object.entries(values).map(([k, v]) => `${k}=${v}
 `).join(""));
 };
@@ -126,26 +128,26 @@ async function pendingDraft() {
   const repo = process.env.GITHUB_REPOSITORY;
   const token = process.env.GH_TOKEN;
   if (!repo || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !token)
-    throw new Error("The repository or read token is missing.");
+    throw new AutoReleaseError("The repository or read token is missing.");
   for (let page = 1;page <= 10; page++) {
     const res = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=100&page=${page}`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }, signal: AbortSignal.timeout(30000), redirect: "error" });
     if (!res.ok)
-      throw new Error(`Could not check pending drafts (HTTP ${res.status}).`);
+      throw new AutoReleaseError(`Could not check pending drafts (HTTP ${res.status}).`);
     const releases = await res.json();
     if (!Array.isArray(releases))
-      throw new Error("GitHub returned an invalid release list.");
+      throw new AutoReleaseError("GitHub returned an invalid release list.");
     if (releases.some((r) => r.draft && TAG.test(r.tag_name)))
       return true;
     if (releases.length < 100)
       return false;
   }
-  throw new Error("The release list is too long to check safely.");
+  throw new AutoReleaseError("The release list is too long to check safely.");
 }
 function context() {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
   const branch = event.repository?.default_branch;
   if (!branch || process.env.GITHUB_REF !== `refs/heads/${branch}` || !["schedule", "push", "workflow_dispatch"].includes(process.env.GITHUB_EVENT_NAME ?? ""))
-    throw new Error("Automatic releases run only on the default branch.");
+    throw new AutoReleaseError("Automatic releases run only on the default branch.");
   return branch;
 }
 async function plan() {
@@ -153,7 +155,7 @@ async function plan() {
   output({ tag: "" });
   const sha = git("rev-parse", "HEAD").trim();
   if (!shaPattern.test(sha))
-    throw new Error("Git returned an invalid commit.");
+    throw new AutoReleaseError("Git returned an invalid commit.");
   if (skipMarker(git("show", "-s", "--format=%B", sha))) {
     console.log("The default branch tip skips workflows. Push an unmarked commit before releasing.");
     return;
@@ -162,23 +164,30 @@ async function plan() {
 `).filter(Boolean);
   const tags = refs.map((r) => r.split("\t")[1].slice("refs/tags/".length)).filter((t) => TAG.test(t));
   if (tags.some((t) => !Object.values(parseTag(t)).filter((n) => typeof n === "number").every(Number.isSafeInteger)))
-    throw new Error("A version tag exceeds the supported integer range.");
+    throw new AutoReleaseError("A version tag exceeds the supported integer range.");
   const highest = tags.sort((a, b) => compareSemver(parseTag(b), parseTag(a)))[0] ?? null;
   if (highest && parseTag(highest).pre !== null)
-    throw new Error("The highest tag is a prerelease. Make a stable release manually first.");
-  if (highest && git("merge-base", "--is-ancestor", `refs/tags/${highest}`, sha) !== "")
-    throw new Error("The highest tag is not an ancestor of the default branch.");
+    throw new AutoReleaseError("The highest tag is a prerelease. Make a stable release manually first.");
+  if (highest) {
+    try {
+      git("merge-base", "--is-ancestor", `refs/tags/${highest}`, sha);
+    } catch (error) {
+      if (error && typeof error === "object" && "status" in error && error.status === 1)
+        throw new AutoReleaseError("The highest tag is not an ancestor of the default branch. Make a stable manual release first.");
+      throw error;
+    }
+  }
   const range = highest ? [`refs/tags/${highest}..${sha}`] : [sha];
   const ids = git("rev-list", "--max-count=1001", ...range).trim().split(`
 `).filter(Boolean);
   if (ids.length > 1000)
-    throw new Error("More than 1000 commits need analysis. Make a manual release first.");
+    throw new AutoReleaseError("More than 1000 commits need analysis. Make a manual release first.");
   const changes = ids.map((id) => ({ message: git("show", "-s", "--format=%B", id), files: git("diff-tree", "--root", "--no-commit-id", "--name-only", "--no-ext-diff", "--no-textconv", "-r", "--first-parent", "-m", "-z", id).split("\x00").filter(Boolean) }));
   const netFiles = highest ? git("diff", "--name-only", "--no-ext-diff", "--no-textconv", "-z", `refs/tags/${highest}`, sha).split("\x00").filter(Boolean) : git("ls-tree", "-r", "--name-only", "-z", sha).split("\x00").filter(Boolean);
   const decision = autoDecision(changes, highest, netFiles);
   console.log(decision.reason);
   if (decision.blocked)
-    throw new Error("Automatic release needs a manual version decision.");
+    throw new AutoReleaseError("Automatic release needs a manual version decision.");
   if (!decision.tag)
     return;
   if (await pendingDraft()) {
@@ -192,7 +201,7 @@ async function tag() {
   const branch = context();
   const { RELEASE_TAG: tag, RELEASE_SHA: sha, RELEASE_REFS: refs } = process.env;
   if (!tag || !/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag) || !sha || !shaPattern.test(sha) || !refs || !/^[0-9a-f]{64}$/.test(refs))
-    throw new Error("Invalid automatic release plan.");
+    throw new AutoReleaseError("Invalid automatic release plan.");
   const remote = git("ls-remote", "--refs", "origin").trim().split(`
 `).filter(Boolean);
   const tip = remote.find((r) => r.split("\t")[1] === `refs/heads/${branch}`)?.split("\t")[0];
@@ -201,7 +210,7 @@ async function tag() {
     return;
   }
   if (git("rev-parse", "HEAD").trim() !== sha || skipMarker(git("show", "-s", "--format=%B", sha)))
-    throw new Error("The checked-out commit does not match the release plan.");
+    throw new AutoReleaseError("The checked-out commit does not match the release plan.");
   if (await pendingDraft()) {
     console.log("A draft release appeared after analysis. No new tag was created.");
     return;
@@ -216,8 +225,8 @@ try {
   else if (process.argv[2] === "tag")
     await tag();
   else
-    throw new Error("Choose plan or tag.");
+    throw new AutoReleaseError("Choose plan or tag.");
 } catch (error) {
-  console.error(error instanceof Error && !("stderr" in error) && error.name === "Error" ? error.message.replace(/[\r\n]/g, " ") : "Automatic release failed while reading or updating Git. Check the repository and re-run.");
+  console.error(error instanceof AutoReleaseError ? error.message : "Automatic release failed while reading or updating Git. Check the repository and re-run.");
   process.exitCode = 1;
 }

@@ -45,7 +45,7 @@ gh api --method POST repos/you/my-tool/git/refs -f ref=refs/tags/v0.1.0 -f sha="
 ### Docs and CI
 
 The release workflow starts only from a version tag (an app's workflow also runs when you start it by hand).
-To choose versions and tag without a per-release click, enable [automatic releases](/guides/auto-tag) with
+To choose versions and tag without a per-release click, enable [automatic releases](/guides/auto-tag/) with
 `tapster add --auto`. Its separate workflow checks daily or after each push and skips documentation-only changes
 unless a commit explicitly requests a bump. Keep push or paths triggers on `main` out of the build/release workflow.
 

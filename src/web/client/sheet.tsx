@@ -276,7 +276,10 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
         )}
         <div class="field">
           <label for="auto-release">Release mode</label>
-          <select id="auto-release" class="input" value={auto ?? "keep"} onChange={(e) => setAuto((e.currentTarget as HTMLSelectElement).value === "keep" ? null : (e.currentTarget as HTMLSelectElement).value as "daily" | "push" | "off")}>
+          <select id="auto-release" class="input" value={auto ?? "keep"} onChange={(e) => {
+            const mode = (e.currentTarget as HTMLSelectElement).value;
+            setAuto(mode === "keep" ? null : mode as "daily" | "push" | "off");
+          }}>
             {!info.auto && <option value="keep">Keep the current release process</option>}
             <option value="daily">Automatic, once a day</option>
             <option value="push">Automatic, after each push</option>
@@ -284,9 +287,11 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
           </select>
           <p class="muted small">Automatic mode picks the version from commits on the default branch. Documentation and CI changes are skipped. Major releases require a Release: major commit trailer.</p>
         </div>
-        {!automatic && auto !== "off" && <Switch checked={autoTag} onChange={setAutoTag} title="Let the release workflow push tags">
-          For workflows that decide the version and tag by themselves. tapster adds a deploy key that only the default branch's release environment can use; the rulesets let deploy keys tag.
-        </Switch>}
+        {!automatic && auto !== "off" && (
+          <Switch checked={autoTag} onChange={setAutoTag} title="Let the release workflow push tags">
+            For workflows that decide the version and tag by themselves. tapster adds a deploy key that only the default branch's release environment can use; the rulesets let deploy keys tag.
+          </Switch>
+        )}
         <Switch checked={dependabot} onChange={setDependabot} title="Keep Dependabot's pull requests">
           {info.dependabot ? "This clone uses Dependabot. " : ""}Branches named dependabot/... stay open to anything with write access, the hub's App included, so a stolen App key could run your workflows on its own code there.
         </Switch>
@@ -312,7 +317,12 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
               <span>Adds the deploy key "tapster tags" and a release environment.</span>
             </li>
           )}
-          {auto && <li><Icon name="right" /><span>{automatic ? "Writes tapster-auto.yml to analyze versions and push release tags without per-release approval." : "Disables tapster's automatic release workflow. The existing tag key and repository rules are kept."}</span></li>}
+          {auto && (
+            <li>
+              <Icon name="right" />
+              <span>{automatic ? "Writes tapster-auto.yml to analyze versions and push release tags without per-release approval." : "Disables tapster's automatic release workflow. The existing tag key and repository rules are kept."}</span>
+            </li>
+          )}
           {inOneGo && (
             <li>
               <Icon name="right" />
