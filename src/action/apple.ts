@@ -106,13 +106,15 @@ export async function withApple<T>(
   each: (set: AppleSet, t: T) => Promise<void>,
   open: OpenKeychain = openKeychain,
 ): Promise<void> {
+  // Building the credentials registers every certificate secret and takes it out of the environment, also when there
+  // is nothing to sign: no step of this run should leave a secret in the environment unregistered.
+  const apple = appleCredentials(open);
   if (todo.length === 0) return;
   const groups = new Map<string | null, T[]>();
   for (const t of todo) {
     const label = labelOf(t);
     groups.set(label, [...(groups.get(label) ?? []), t]);
   }
-  const apple = appleCredentials(open);
   for (const [label, items] of groups) {
     let set: AppleSet;
     try {

@@ -233,20 +233,30 @@ test("a failure while signing names the certificate, and a rejected key names th
   expect(closed).toEqual(["p12-hub-body", "p12-acme-body", "p12-beta-body"]);
 });
 
-test("every certificate secret is masked and leaves the environment once there is work", async () => {
+test("every certificate secret is masked and leaves the environment, with work to sign and with none", async () => {
   const given = { ...HUB, ...ACME, MACOS_SIGN_P12_OTHER: "p12-other-body", MACOS_NOTARY_KEY_BETA: "" };
+  const gone = () => {
+    for (const [name, value] of Object.entries(given)) {
+      if (name.startsWith("TAPSTER_")) continue;
+      expect(process.env[name], name).toBeUndefined();
+      if (value) expect(scrub(`x ${value} y`), name).toBe("x *** y");
+    }
+  };
+  // Nothing to sign or to seal: no tool runs, and the secrets are still masked and out of the environment.
+  for (const mode of [signMode, sealMode]) {
+    setEnv(given);
+    await saveManifest({ items: [] });
+    await mode(ctx, { open });
+    gone();
+    expect(scrub(Buffer.from("p12-acme-body").toString("base64"))).toBe("***");
+    expect(scrub("acme-notary-key")).toBe("***");
+    resetMaskForTests();
+  }
   setEnv(given);
-  await saveManifest({ items: [] });
-  await signMode(ctx, { open, tools: fakeTools() });
-  expect(process.env.MACOS_SIGN_P12_ACME).toBe(ACME.MACOS_SIGN_P12_ACME);
   await saveManifest({ items: [tool("acmetool")] });
   await signMode(ctx, { open, tools: fakeTools() });
   expect(await statuses()).toEqual([["acmetool", "signed"]]);
-  for (const [name, value] of Object.entries(given)) {
-    if (name.startsWith("TAPSTER_")) continue;
-    expect(process.env[name], name).toBeUndefined();
-    if (value) expect(scrub(`x ${value} y`), name).toBe("x *** y");
-  }
+  gone();
   expect(scrub("acme-notary-key")).toBe("***");
   expect(process.env.TAPSTER_TEAM_ID_ACME).toBe("ACME000001");
 });
@@ -298,21 +308,43 @@ test("seal groups the DMGs by certificate the same way", async () => {
   expect(closed).toEqual(["p12-acme-body", "p12-hub-body"]);
 });
 
-test("the leak test's labeled sign steps log the markers its scan waits for", async () => {
+// Runs the signing stage the way the leak workflow's step does, for the package of one of its configs, and returns what
+// the step logs for it. Empty secrets are what GitHub hands a step whose repository secret is missing.
+async function leakLog(file: string, pkg: string, label: string | null, secrets: "set" | "empty", open: OpenKeychain, tools: typeof toolSteps): Promise<string> {
+  const suffix = label === null ? "" : `_${label.toUpperCase()}`;
+  const given = secrets === "set";
+  resetReportForTests();
+  for (const k of Object.keys(process.env)) if (CREDENTIAL.test(k)) delete process.env[k];
+  setEnv({
+    [`TAPSTER_TEAM_ID${suffix}`]: "CANARY0001",
+    [`MACOS_SIGN_P12${suffix}`]: given ? "p12" : "",
+    [`MACOS_SIGN_PASSWORD${suffix}`]: given ? "pw" : "",
+    [`MACOS_NOTARY_KEY${suffix}`]: given ? pem("k") : "",
+    [`MACOS_NOTARY_KEY_ID${suffix}`]: given ? "kid" : "",
+    [`MACOS_NOTARY_ISSUER_ID${suffix}`]: given ? "iss" : "",
+  });
+  // The workflow's fake work item: a binary named fixture, as in the configs.
+  await saveManifest({ items: [{ ...tool(pkg), tag: "v0.0.1", archives: [{ asset: "a", platform: "darwin-arm64", dir: `/nowhere/${pkg}`, binaries: ["fixture"] }] }] });
+  await signMode({ ...ctx, config: parseConfig(readFileSync(file, "utf8"), "doguyilmaz") }, { open, tools });
+  return rowsForTests().map((r) => `${r.item}: ${r.result} (${r.detail})`).join("\n");
+}
+
+test("the leak test's sign steps log the markers its scan waits for", async () => {
   const leak = parse(readFileSync(".github/workflows/leak.yml", "utf8")) as { jobs: { scan: { steps: { env?: { EXPECT_STAGES?: string } }[] } } };
   const stages = JSON.parse(leak.jobs.scan.steps.at(-1)!.env!.EXPECT_STAGES!) as Record<string, string[]>;
-  const fixture = { ...ctx, config: parseConfig(readFileSync("tests/leak/hub/certificate.yml", "utf8"), "doguyilmaz") };
-  const logged = async (open: OpenKeychain, tools: typeof toolSteps) => {
-    resetReportForTests();
-    setEnv({ TAPSTER_TEAM_ID_LEAK: "CANARY0001", MACOS_SIGN_P12_LEAK: "p12", MACOS_SIGN_PASSWORD_LEAK: "pw", MACOS_NOTARY_KEY_LEAK: pem("k"), MACOS_NOTARY_KEY_ID_LEAK: "kid", MACOS_NOTARY_ISSUER_ID_LEAK: "iss" });
-    await saveManifest({ items: [{ ...tool("leakcert"), tag: "v0.0.1" }] });
-    await signMode(fixture, { open, tools });
-    return rowsForTests().map((r) => `${r.item}: ${r.result} (${r.detail})`).join("\n");
-  };
-  const plain = await logged(async () => {
-    throw new TapsterError("openssl exited with 1", "No error output.");
-  }, fakeTools());
-  expect(missingStages(plain, stages.plain!.filter((m) => m.startsWith("leakcert ")))).toEqual([]);
+  const markers = (job: string, pkg: string) => stages[job]!.filter((m) => m.startsWith(`${pkg} v0.0.1`));
+  const signSteps = [
+    { pkg: "leakcert", file: "tests/leak/hub/certificate.yml", label: "leak" },
+    { pkg: "fixture", file: "tests/leak/hub/tapster.yml", label: null },
+  ];
+  // The plain job's fake .p12 is refused by openssl.
+  for (const { pkg, file, label } of signSteps) {
+    const plain = await leakLog(file, pkg, label, "set", async () => {
+      throw new TapsterError("openssl exited with 1", "No error output.");
+    }, fakeTools());
+    expect(markers("plain", pkg), pkg).toHaveLength(1);
+    expect(missingStages(plain, markers("plain", pkg)), pkg).toEqual([]);
+  }
   // The canary certificate opens its keychain and signs, but codesign shows no Developer ID team for it.
   const unsigned = {
     ...fakeTools(),
@@ -320,11 +352,21 @@ test("the leak test's labeled sign steps log the markers its scan waits for", as
       throw new TapsterError(`${basename(file)} is not signed as expected`, "It needs a Developer ID Application signature of the configured team with the hardened runtime.");
     },
   };
-  const masked = await logged(open, unsigned);
-  const markers = stages.masked!.filter((m) => m.startsWith("leakcert "));
-  expect(markers).toHaveLength(1);
-  expect(missingStages(masked, markers)).toEqual([]);
-  expect(missingStages(masked, ["fixture v0.0.1: failed ("])).toEqual(["fixture v0.0.1: failed ("]);
+  for (const { pkg, file, label } of signSteps) {
+    const masked = await leakLog(file, pkg, label, "set", open, unsigned);
+    expect(markers("masked", pkg), pkg).toHaveLength(1);
+    expect(missingStages(masked, markers("masked", pkg)), pkg).toEqual([]);
+    // A step whose repository secrets are gone fails before the keychain: that must not pass for the stage.
+    const gone = await leakLog(file, pkg, label, "empty", open, unsigned);
+    expect(gone, pkg).toContain("is not set");
+    expect(missingStages(gone, markers("masked", pkg)), pkg).toEqual(markers("masked", pkg));
+    // A canary that no keychain accepts fails inside openKeychain, which is not the signature check either.
+    const refused = await leakLog(file, pkg, label, "set", async () => {
+      throw new TapsterError("security exited with 1", "No error output.");
+    }, unsigned);
+    expect(missingStages(refused, markers("masked", pkg)), pkg).toEqual(markers("masked", pkg));
+  }
+  expect(missingStages(await leakLog("tests/leak/hub/certificate.yml", "leakcert", "leak", "set", open, unsigned), markers("masked", "fixture"))).toEqual(markers("masked", "fixture"));
 });
 
 test("seal fails only the DMGs of a certificate it cannot open", async () => {
