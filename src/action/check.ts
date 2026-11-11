@@ -2,6 +2,7 @@ import * as core from "@actions/core";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { missingAttestations } from "../attest";
+import { certificateLabels, certificateNames } from "../certificates";
 import { parseChecksums } from "../checksums";
 import { type AppPackage, type HubConfig, type InvalidPackage, type PackageConfig, compareSemver, isApp, macosCode, parseTag } from "../config";
 import { GitHub, type Release } from "../github";
@@ -35,13 +36,41 @@ export function feedWarning(latest: Release | null, state: State, pkg: AppPackag
 export const needsMacos = (work: WorkItem[], packages: PackageConfig[]) =>
   work.some((i) => !i.resume && packages.some((p) => p.name === i.package && macosCode(p)));
 
+export type AppleVars = { team: string; expires: string };
+type Warning = { reason: string; fix: string };
+
+const endOf = (expires: string) => (expires ? Date.parse(`${expires}T00:00:00Z`) : Number.NaN);
+const expiresSoon = (vars: AppleVars, now: number) => {
+  const end = endOf(vars.expires);
+  return Boolean(vars.team) && end >= now && end - now < 30 * 86_400_000;
+};
+
+function gateError(pkg: PackageConfig, vars: AppleVars, now: number): TapsterError | null {
+  const label = pkg.certificate;
+  if (label === undefined) {
+    if (!vars.team) return new TapsterError(`${pkg.name} ships macOS code, but this hub has no Apple credentials`, "Run tapster init --rotate certificate and tapster init --rotate notary in the hub clone.");
+    if (endOf(vars.expires) < now) return new TapsterError(`the Developer ID certificate expired on ${vars.expires}`, "Create a new Developer ID Application certificate, then run tapster init --rotate certificate.");
+    return null;
+  }
+  if (!vars.team) {
+    return new TapsterError(
+      `${pkg.name} signs with the certificate ${label}, which this hub has not stored`,
+      `Run tapster init --certificate ${label} in the hub clone or store it in tapster setup (Optional extras), which also passes it to the workflow.`,
+    );
+  }
+  if (endOf(vars.expires) < now) return new TapsterError(`the Developer ID certificate ${label} expired on ${vars.expires}`, `Create a new Developer ID Application certificate, then run tapster init --certificate ${label}.`);
+  return null;
+}
+
+// Each macOS item waits for the certificate its package names: the hub's (apple) or a labeled one (certificates).
 export function appleGate(
   items: WorkItem[],
   packages: PackageConfig[],
-  apple: { team: string; expires: string },
+  apple: AppleVars,
   now: number,
-): { items: WorkItem[]; failed: { name: string; error: TapsterError }[]; warning: { reason: string; fix: string } | null; macos: boolean } {
-  const end = apple.expires ? Date.parse(`${apple.expires}T00:00:00Z`) : Number.NaN;
+  certificates: Record<string, AppleVars> = {},
+): { items: WorkItem[]; failed: { name: string; error: TapsterError }[]; warnings: Warning[]; macos: boolean } {
+  const varsOf = (pkg: PackageConfig) => (pkg.certificate === undefined ? apple : (certificates[pkg.certificate] ?? { team: "", expires: "" }));
   const out: WorkItem[] = [];
   const failed: { name: string; error: TapsterError }[] = [];
   for (const item of items) {
@@ -50,17 +79,19 @@ export function appleGate(
       out.push(item);
       continue;
     }
-    if (!apple.team) {
-      failed.push({ name: pkg.name, error: new TapsterError(`${pkg.name} ships macOS code, but this hub has no Apple credentials`, "Run tapster init --rotate certificate and tapster init --rotate notary in the hub clone.") });
-    } else if (end < now) {
-      failed.push({ name: pkg.name, error: new TapsterError(`the Developer ID certificate expired on ${apple.expires}`, "Create a new Developer ID Application certificate, then run tapster init --rotate certificate.") });
-    } else {
-      out.push(item);
+    const error = gateError(pkg, varsOf(pkg), now);
+    if (error) failed.push({ name: pkg.name, error });
+    else out.push(item);
+  }
+  const warnings: Warning[] = [];
+  if (expiresSoon(apple, now)) warnings.push({ reason: `the Developer ID certificate expires on ${apple.expires}`, fix: "Create a new Developer ID Application certificate, then run tapster init --rotate certificate." });
+  for (const label of certificateLabels({ packages })) {
+    const vars = certificates[label];
+    if (vars && expiresSoon(vars, now)) {
+      warnings.push({ reason: `the Developer ID certificate ${label} expires on ${vars.expires}`, fix: `Create a new Developer ID Application certificate, then run tapster init --certificate ${label}.` });
     }
   }
-  const soon = apple.team && end >= now && end - now < 30 * 86_400_000;
-  const warning = soon ? { reason: `the Developer ID certificate expires on ${apple.expires}`, fix: "Create a new Developer ID Application certificate, then run tapster init --rotate certificate." } : null;
-  return { items: out, failed, warning, macos: needsMacos(out, packages) };
+  return { items: out, failed, warnings, macos: needsMacos(out, packages) };
 }
 
 const DRAFT_FIX = "The hub wrote this on the draft too; fix the draft or delete it.";
@@ -210,9 +241,14 @@ export async function check(ctx: Context, token: string): Promise<void> {
       await tok?.revoke();
     }
   }
-  const gate = appleGate(items, ctx.config.packages, { team: process.env.TAPSTER_TEAM_ID ?? "", expires: process.env.TAPSTER_CERT_EXPIRES ?? "" }, Date.now());
+  const varsOf = (label: string | null): AppleVars => {
+    const n = certificateNames(label);
+    return { team: process.env[n.team] ?? "", expires: process.env[n.expires] ?? "" };
+  };
+  const certificates = Object.fromEntries(certificateLabels(ctx.config).map((l) => [l, varsOf(l)]));
+  const gate = appleGate(items, ctx.config.packages, varsOf(null), Date.now(), certificates);
   for (const f of gate.failed) failure(f.name, f.error);
-  if (gate.warning) concern("hub", gate.warning.reason, gate.warning.fix);
+  for (const w of gate.warnings) concern("hub", w.reason, w.fix);
   const work = gate.items.slice(0, 50);
   if (gate.items.length > 50) record({ item: "hub", result: "waiting", detail: `${gate.items.length - 50} more drafts wait for the next run` });
   core.setOutput("work", JSON.stringify(work));

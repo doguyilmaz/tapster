@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
+import { fillWorkflow, flowCertificateLabels, patchCertificateEnv } from "../src/cli/hubfiles";
+import pins from "../templates/pins.json";
 
 type Step = { uses?: string; if?: string; with?: Record<string, unknown> };
 const flow = parse(readFileSync("templates/hub/tapster.yml", "utf8")) as {
@@ -108,4 +110,62 @@ test("tapster's own release builds without write access and attests in a job tha
     expect(s.run ?? "").not.toMatch(/\bbun\b/);
     if (s.uses) expect(s.uses).toMatch(/^actions\/(checkout|download-artifact|attest-build-provenance)@/);
   }
+});
+
+const template = readFileSync("templates/hub/tapster.yml", "utf8");
+const fill = (certificates: string[]) => fillWorkflow(template, pins, { sha: "f".repeat(40), tag: "v1.0.0" }, { sparkle: ["shared"], certificates });
+type EnvStep = { id?: string; with?: { mode?: string }; env?: Record<string, string> | string };
+
+test("without certificate labels the workflow is what the template wrote before labels existed", () => {
+  const before = template.replace("          #__CERTIFICATE_CHECK_ENV__\n", "").replaceAll("          #__CERTIFICATE_ENV__\n", "");
+  expect(before).not.toContain("CERTIFICATE");
+  expect(fill([])).toBe(fillWorkflow(before, pins, { sha: "f".repeat(40), tag: "v1.0.0" }, { sparkle: ["shared"] }));
+  for (const labels of [[], ["acme"], ["acme", "beta"]]) expect(fill(labels)).not.toContain("__");
+});
+
+test("each certificate label reaches the check, sign and seal steps and no other step", () => {
+  const parsed = parse(fill(["acme", "beta"])) as { jobs: Record<string, { steps: EnvStep[] }> };
+  const plain = parse(fill([])) as { jobs: Record<string, { steps: EnvStep[] }> };
+  const extra = (job: string, i: number) => {
+    const env = parsed.jobs[job]!.steps[i]!.env;
+    const was = plain.jobs[job]!.steps[i]!.env;
+    if (typeof env !== "object") return {};
+    return Object.fromEntries(Object.entries(env).filter(([k]) => typeof was !== "object" || !(k in was)));
+  };
+  const v = (n: string) => `\${{ vars.${n} }}`;
+  const s = (n: string) => `\${{ secrets.${n} }}`;
+  const signEnv = (L: string) => ({
+    [`TAPSTER_TEAM_ID_${L}`]: v(`TAPSTER_TEAM_ID_${L}`),
+    [`MACOS_SIGN_P12_${L}`]: s(`MACOS_SIGN_P12_${L}`),
+    [`MACOS_SIGN_PASSWORD_${L}`]: s(`MACOS_SIGN_PASSWORD_${L}`),
+    [`MACOS_NOTARY_KEY_${L}`]: s(`MACOS_NOTARY_KEY_${L}`),
+    [`MACOS_NOTARY_KEY_ID_${L}`]: s(`MACOS_NOTARY_KEY_ID_${L}`),
+    [`MACOS_NOTARY_ISSUER_ID_${L}`]: s(`MACOS_NOTARY_ISSUER_ID_${L}`),
+  });
+  for (const [job, def] of Object.entries(parsed.jobs)) {
+    def.steps.forEach((step, i) => {
+      const got = extra(job, i);
+      if (job === "check" && step.id === "check") {
+        expect(got).toEqual({ TAPSTER_TEAM_ID_ACME: v("TAPSTER_TEAM_ID_ACME"), TAPSTER_CERT_EXPIRES_ACME: v("TAPSTER_CERT_EXPIRES_ACME"), TAPSTER_TEAM_ID_BETA: v("TAPSTER_TEAM_ID_BETA"), TAPSTER_CERT_EXPIRES_BETA: v("TAPSTER_CERT_EXPIRES_BETA") });
+      } else if (job === "sign" && (step.with?.mode === "sign" || step.with?.mode === "seal")) {
+        expect(got).toEqual({ ...signEnv("ACME"), ...signEnv("BETA") });
+      } else {
+        expect(got, `${job} ${step.with?.mode ?? i}`).toEqual({});
+      }
+    });
+  }
+});
+
+test("patching the certificate lines gives what the template writes for those labels", () => {
+  expect(patchCertificateEnv(fill([]), ["acme"])).toBe(fill(["acme"]));
+  expect(patchCertificateEnv(fill(["acme", "beta"]), ["beta"])).toBe(fill(["beta"]));
+  expect(patchCertificateEnv(fill(["acme", "beta"]), [])).toBe(fill([]));
+  expect(patchCertificateEnv(fill(["beta"]), ["beta"])).toBe(fill(["beta"]));
+  expect(flowCertificateLabels(fill(["beta", "acme"]))).toEqual(["beta", "acme"]);
+  expect(flowCertificateLabels(fill([]))).toEqual([]);
+  const fix = expect.objectContaining({ fix: "Run tapster init --workflow to rewrite it from the template." });
+  expect(() => patchCertificateEnv("jobs: {}\n", ["acme"])).toThrow(fix);
+  const noSeal = fill([]).replace(/(mode: seal, template: 2 \}\n\s+env:\n(?:.*\n){5}).*MACOS_NOTARY_ISSUER_ID.*\n/, "$1");
+  expect(noSeal).not.toBe(fill([]));
+  expect(() => patchCertificateEnv(noSeal, ["acme"])).toThrow("the hub workflow has no sign step");
 });

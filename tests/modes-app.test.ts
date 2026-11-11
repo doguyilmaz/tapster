@@ -15,7 +15,7 @@ import { extractFeed } from "../src/appcast";
 import { fillWorkflow } from "../src/cli/hubfiles";
 import { type AppPackage, parseConfig } from "../src/config";
 import { resetMaskForTests } from "../src/mask";
-import { resetReportForTests } from "../src/report";
+import { findings, resetReportForTests } from "../src/report";
 import { draftStatus } from "../src/plan";
 import { emptyState, upsert } from "../src/state";
 import { type Fetched, loadManifest, saveManifest } from "../src/workdir";
@@ -100,8 +100,9 @@ test("package, seal and sparkle pass CLI items and resumed apps through without 
 test("an app is never marked signed without signing it", async () => {
   fresh();
   await saveManifest({ items: [item({ app: { dir: "/nowhere/HafifPix.app", facts, created: "2026-10-19T10:00:00Z", identifiers: [], dmg: null, feed: null } })] });
-  await expect(signMode(ctx)).rejects.toThrow(/MACOS_SIGN_P12/);
-  expect((await loadManifest()).items[0]!.status).toBe("fetched");
+  await signMode(ctx);
+  expect((await loadManifest()).items[0]!.status).toBe("failed");
+  expect(findings()).toEqual([{ item: "hafifpix v1.3.1", reason: "MACOS_SIGN_P12 is not set", fix: expect.stringContaining("tapster setup") }]);
 });
 
 test("the DMG is signed with the app's key and the feed with the current key", () => {
@@ -185,7 +186,7 @@ test("an app publishes the DMG, the feed and the carried files, and drops the ar
 type Step = { uses?: string; if?: string; with?: { mode?: string }; env?: Record<string, string> };
 test("the hub workflow runs package, seal and sparkle with their own credentials", () => {
   const pins = JSON.parse(readFileSync("templates/pins.json", "utf8"));
-  const text = fillWorkflow(readFileSync("templates/hub/tapster.yml", "utf8"), pins, { sha: "f".repeat(40), tag: "v1.0.0" }, ["shared", "recesso"]);
+  const text = fillWorkflow(readFileSync("templates/hub/tapster.yml", "utf8"), pins, { sha: "f".repeat(40), tag: "v1.0.0" }, { sparkle: ["shared", "recesso"] });
   const steps = (parse(text) as { jobs: { sign: { steps: Step[] } } }).jobs.sign.steps;
   const modes = steps.map((s) => s.with?.mode).filter(Boolean);
   expect(modes).toEqual(["fetch", "sign", "package", "seal", "sparkle", "publish", "cleanup"]);

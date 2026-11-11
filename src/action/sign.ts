@@ -7,7 +7,7 @@ import { failure, info, warn } from "../report";
 import { run } from "../run";
 import { type NotaryKey, PRESETS, entitlementsPlist, notarize, signFile, verifySigned, zipForNotary } from "../sign";
 import { type Fetched, loadManifest, saveManifest, workdir } from "../workdir";
-import { withApple } from "./apple";
+import { type OpenKeychain, withApple } from "./apple";
 import type { Context } from "./context";
 
 export const toolSteps = {
@@ -45,33 +45,46 @@ export async function signTool(kc: Keychain, notary: NotaryKey, team: string, pk
   for (const a of item.archives) if (a.app) await steps.stapleApp(join(a.dir, a.app));
 }
 
-export async function signMode(ctx: Context): Promise<void> {
+export const appSteps = { signApp, verifyApp };
+
+export type SignDeps = { open?: OpenKeychain; tools?: typeof toolSteps; apps?: typeof appSteps };
+
+export async function signMode(ctx: Context, deps: SignDeps = {}): Promise<void> {
   const manifest = await loadManifest();
   for (const i of manifest.items) if (i.status === "fetched" && (i.resume || (!i.app && i.archives.length === 0))) i.status = "signed";
   const todo = manifest.items.filter((i) => i.status === "fetched");
-  if (todo.length > 0) {
-    await withApple(async (kc, notary, team) => {
-      for (const item of todo) {
+  const pkgOf = (item: Fetched) => ctx.config.packages.find((p) => p.name === item.package);
+  const apps = deps.apps ?? appSteps;
+  const failed = (item: Fetched, e: unknown) => {
+    item.status = "failed";
+    failure(`${item.package} ${item.tag}`, e);
+  };
+  await withApple(
+    todo,
+    (item) => pkgOf(item)?.certificate ?? null,
+    failed,
+    async ({ kc, notary, team }, items) => {
+      for (const item of items) {
         try {
-          const pkg = ctx.config.packages.find((p) => p.name === item.package)!;
+          const pkg = pkgOf(item)!;
           if (isApp(pkg)) {
-            const signed = await signApp(kc, item.app!.dir, pkg, team);
-            await verifyApp(item.app!.dir, signed, team);
+            const signed = await apps.signApp(kc, item.app!.dir, pkg, team);
+            await apps.verifyApp(item.app!.dir, signed, team);
             item.app!.identifiers = signed.identifiers;
             for (const d of signed.dropped) warn(`${item.package} ${item.tag}: the entitlement ${d} is not in code, so it was not signed`);
             item.status = "signed";
             info(`${item.package} ${item.tag}: signed ${signed.items.length} pieces of code`);
             continue;
           }
-          await signTool(kc, notary, team, pkg, item);
+          await signTool(kc, notary, team, pkg, item, deps.tools);
           item.status = "signed";
           info(`${item.package} ${item.tag}: signed and notarized`);
         } catch (e) {
-          item.status = "failed";
-          failure(`${item.package} ${item.tag}`, e);
+          failed(item, e);
         }
       }
-    });
-  }
+    },
+    deps.open,
+  );
   await saveManifest(manifest);
 }

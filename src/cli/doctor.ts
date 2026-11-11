@@ -8,7 +8,7 @@ import { type GitHub, early, limited } from "../github";
 import { currentRepo, userGitHub } from "./gh";
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
-import { PIN, fillWorkflow, sparkleLabels } from "./hubfiles";
+import { PIN, fillWorkflow, flowCertificateLabels, sparkleLabels } from "./hubfiles";
 import { releaseSecrets } from "./hubpr";
 import { everyFromFlow } from "./schedule";
 
@@ -99,7 +99,8 @@ export function workflowCheck(text: string, me: { version: string; sha: string |
   if (pin[1] !== me.sha) {
     return ok(name, `the hub runs tapster ${pin[2]} (${pin[1]!.slice(0, 7)}) and this is tapster ${me.version}; tapster init --workflow moves the hub to this one. The tapster that wrote the workflow checks it byte for byte`);
   }
-  const labels = [...text.matchAll(/SPARKLE_KEY_([A-Z0-9]+): "/g)].map((m) => m[1]!.toLowerCase());
+  const sparkle = [...text.matchAll(/SPARKLE_KEY_([A-Z0-9]+): "/g)].map((m) => m[1]!.toLowerCase());
+  const labels = { sparkle, certificates: flowCertificateLabels(text) };
   const expected = fillWorkflow(hubWorkflow, pinsJson, { sha: pin[1]!, tag: pin[2]! }, labels, everyFromFlow(text) ?? 10);
   return expected === text ? ok(name) : bad(name, "The workflow differs from the template; hand edits can reach the credentials. Run tapster init --workflow and review the diff.");
 }

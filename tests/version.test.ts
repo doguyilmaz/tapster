@@ -63,7 +63,7 @@ test("the sparkle step of the real template is found and patched", async () => {
   const template = await Bun.file("templates/hub/tapster.yml").text();
   const written = fillWorkflow(template, pins, { sha, tag: "v1.0.0" });
   const patched = patchSparkleEnv(written, ["shared"]);
-  expect(patched).toBe(fillWorkflow(template, pins, { sha, tag: "v1.0.0" }, ["shared"]));
+  expect(patched).toBe(fillWorkflow(template, pins, { sha, tag: "v1.0.0" }, { sparkle: ["shared"] }));
 });
 
 test("setup offers a workflow update only to a hub that runs an older tapster", async () => {

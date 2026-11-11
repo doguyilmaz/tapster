@@ -1,3 +1,4 @@
+import { certificateLabels, certificateNames } from "../certificates";
 import { type HubConfig, compareSemver, isApp, parseHub, parseTag } from "../config";
 import { TapsterError } from "../errors";
 import type { GitHub } from "../github";
@@ -21,10 +22,42 @@ export function sparkleEnv(labels: string[]): string {
   return lines.length ? `{ ${lines.join(", ")} }` : "{}";
 }
 
-export function fillWorkflow(template: string, pins: Pins, tapster: { sha: string; tag: string }, labels: string[] = [], every = 10): string {
+export type HubLabels = { sparkle: string[]; certificates: string[] };
+
+export function hubLabels(config: HubConfig): HubLabels {
+  return { sparkle: sparkleLabels(config), certificates: certificateLabels(config) };
+}
+
+const ENV_INDENT = " ".repeat(10);
+const envLine = (name: string, from: "vars" | "secrets") => `${ENV_INDENT}${name}: \${{ ${from}.${name} }}\n`;
+
+// The lines the check step gets for each certificate label, after the hub's TAPSTER_CERT_EXPIRES.
+export function certificateCheckEnv(labels: string[]): string {
+  return labels
+    .map((l) => {
+      const n = certificateNames(l);
+      return envLine(n.team, "vars") + envLine(n.expires, "vars");
+    })
+    .join("");
+}
+
+// The lines the sign and seal steps get for each certificate label, after the hub's MACOS_NOTARY_ISSUER_ID.
+export function certificateEnv(labels: string[]): string {
+  return labels
+    .map((l) => {
+      const n = certificateNames(l);
+      return [envLine(n.team, "vars"), ...[n.p12, n.password, n.notaryKey, n.notaryKeyId, n.notaryIssuer].map((s) => envLine(s, "secrets"))].join("");
+    })
+    .join("");
+}
+
+export function fillWorkflow(template: string, pins: Pins, tapster: { sha: string; tag: string }, labels: Partial<HubLabels> = {}, every = 10): string {
+  const certificates = labels.certificates ?? [];
   return template
+    .replaceAll(`${ENV_INDENT}#__CERTIFICATE_CHECK_ENV__\n`, () => certificateCheckEnv(certificates))
+    .replaceAll(`${ENV_INDENT}#__CERTIFICATE_ENV__\n`, () => certificateEnv(certificates))
     .replaceAll("__CRON__", cronFor(every))
-    .replaceAll("__SPARKLE_ENV__", sparkleEnv(labels))
+    .replaceAll("__SPARKLE_ENV__", sparkleEnv(labels.sparkle ?? []))
     .replaceAll("__CHECKOUT_SHA__", pins["actions/checkout"].sha)
     .replaceAll("__CHECKOUT_TAG__", pins["actions/checkout"].tag)
     .replaceAll("__ATTEST_SHA__", pins["actions/attest-build-provenance"].sha)
@@ -84,6 +117,19 @@ export function patchSparkleEnv(flow: string, labels: string[]): string {
   return flow.replace(step, (_, head: string) => `${head}${sparkleEnv(labels)}\n`);
 }
 
+const CHECK_ENV = /(\n {10}TAPSTER_CERT_EXPIRES: \$\{\{ vars\.TAPSTER_CERT_EXPIRES \}\}\n)(?: {10}(?:TAPSTER_TEAM_ID|TAPSTER_CERT_EXPIRES)_[A-Z0-9]+: .*\n)*/;
+const SIGN_ENV = /(\n {10}MACOS_NOTARY_ISSUER_ID: \$\{\{ secrets\.MACOS_NOTARY_ISSUER_ID \}\}\n)(?: {10}(?:TAPSTER_TEAM_ID|MACOS_SIGN_P12|MACOS_SIGN_PASSWORD|MACOS_NOTARY_KEY|MACOS_NOTARY_KEY_ID|MACOS_NOTARY_ISSUER_ID)_[A-Z0-9]+: .*\n)*/g;
+
+// Rewrites only the lines of the certificate labels in the check, sign and seal steps; the hub's own lines stay as they are.
+export function patchCertificateEnv(flow: string, labels: string[]): string {
+  if (!CHECK_ENV.test(flow)) throw new TapsterError("the hub workflow has no check step", "Run tapster init --workflow to rewrite it from the template.");
+  if ((flow.match(SIGN_ENV) ?? []).length < 2) throw new TapsterError("the hub workflow has no sign step", "Run tapster init --workflow to rewrite it from the template.");
+  return flow.replace(CHECK_ENV, (_, head: string) => head + certificateCheckEnv(labels)).replace(SIGN_ENV, (_, head: string) => head + certificateEnv(labels));
+}
+
+// The certificate labels a workflow passes, in order of appearance.
+export const flowCertificateLabels = (flow: string): string[] => [...new Set([...flow.matchAll(/MACOS_SIGN_P12_([A-Z0-9]+): /g)].map((m) => m[1]!.toLowerCase()))];
+
 
 export type Schedule = { every: number | null; isPrivate: boolean };
 export type HubFile = { path: string; content: string; before: string | null };
@@ -99,7 +145,7 @@ export function scheduleNotes(every: number, kept: number | null, schedule: Sche
   return notes;
 }
 
-export async function workflowFile(gh: GitHub, before: string | null, labels: string[], flag: string | null, schedule: Schedule): Promise<{ file: HubFile; change: string; notes: string[] }> {
+export async function workflowFile(gh: GitHub, before: string | null, labels: HubLabels, flag: string | null, schedule: Schedule): Promise<{ file: HubFile; change: string; notes: string[] }> {
   const ref = await tapsterPin(gh, TAPSTER, flag);
   const kept = before === null ? null : everyFromFlow(before);
   const every = schedule.every ?? kept ?? (schedule.isPrivate ? 60 : 10);
@@ -128,7 +174,7 @@ export async function hubFiles(gh: GitHub, hub: string, read: Read, flag: string
     else kept.push(f.path);
   }
   const config = await read("tapster.yml");
-  const labels = config === null ? [] : sparkleLabels(parseHub(config, hub.split("/")[0]!).config);
+  const labels = config === null ? { sparkle: [], certificates: [] } : hubLabels(parseHub(config, hub.split("/")[0]!).config);
   const flow = await workflowFile(gh, await read(FLOW), labels, flag, schedule);
   files.push(flow.file);
   return { files, kept, change: flow.change, notes: flow.notes };

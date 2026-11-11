@@ -42,6 +42,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           TAPSTER_TEAM_ID: ${{ vars.TAPSTER_TEAM_ID }}
           TAPSTER_CERT_EXPIRES: ${{ vars.TAPSTER_CERT_EXPIRES }}
+          #__CERTIFICATE_CHECK_ENV__
   report:
     needs: check
     if: ${{ !cancelled() && (needs.check.outputs.report == 'true' || (needs.check.result == 'failure' && needs.check.outputs.findings == '')) }}
@@ -83,6 +84,7 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          #__CERTIFICATE_ENV__
       - name: Build the DMGs
         if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__
@@ -98,6 +100,7 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          #__CERTIFICATE_ENV__
       - name: Sign the Sparkle feeds
         if: ${{ !cancelled() }}
         uses: doguyilmaz/tapster@__TAPSTER_SHA__ # __TAPSTER_TAG__

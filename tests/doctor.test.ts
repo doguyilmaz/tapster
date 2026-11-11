@@ -63,8 +63,12 @@ test("doctor compares the workflow byte for byte when the hub runs this tapster"
   const pins = (await import("../templates/pins.json")).default;
   const template = await Bun.file("templates/hub/tapster.yml").text();
   const me = { version: "1.0.0", sha: "a".repeat(40) };
-  const flow = fillWorkflow(template, pins, { sha: me.sha, tag: "v1.0.0" }, ["shared"], 60);
+  const flow = fillWorkflow(template, pins, { sha: me.sha, tag: "v1.0.0" }, { sparkle: ["shared"] }, 60);
   expect(workflowCheck(flow, me).ok).toBe(true);
+  const labeled = fillWorkflow(template, pins, { sha: me.sha, tag: "v1.0.0" }, { sparkle: ["shared"], certificates: ["acme", "beta"] }, 60);
+  expect(workflowCheck(labeled, me).ok).toBe(true);
+  expect(workflowCheck(fillWorkflow(template, pins, { sha: me.sha, tag: "v1.0.0" }, { certificates: ["acme"] }), me).ok).toBe(true);
+  expect(workflowCheck(labeled.replace("          MACOS_SIGN_PASSWORD_BETA: ${{ secrets.MACOS_SIGN_PASSWORD_BETA }}\n", ""), me).ok).toBe(false);
   const edited = workflowCheck(flow.replace("contents: read", "contents: write"), me);
   expect(edited.ok).toBe(false);
   expect(edited.fix).toContain("tapster init --workflow");

@@ -19,7 +19,7 @@ import { findGpg, finishLinuxRotation, linuxKeyAllowed, makeLinuxKey } from "./l
 import { cleanPath, readInput } from "./paths";
 import { waitFor } from "./poll";
 import { cronFor, everyFromFlow } from "./schedule";
-import { FLOW, type Schedule, hubFiles, patchSparkleEnv, sparkleLabels, workflowFile } from "./hubfiles";
+import { FLOW, type HubLabels, type Schedule, hubFiles, hubLabels, patchSparkleEnv, sparkleLabels, workflowFile } from "./hubfiles";
 import { ask } from "./prompt";
 
 export function initSteps(have: { vars: string[]; secrets: string[] }, mac: boolean): string[] {
@@ -190,7 +190,7 @@ function hubConfig(dir: string, hub: string): HubConfig {
   return config;
 }
 
-async function writeWorkflow(gh: GitHub, dir: string, labels: string[], flag: string | null, schedule: Schedule): Promise<void> {
+async function writeWorkflow(gh: GitHub, dir: string, labels: HubLabels, flag: string | null, schedule: Schedule): Promise<void> {
   const before = existsSync(join(dir, FLOW)) ? readFileSync(join(dir, FLOW), "utf8") : null;
   const flow = await workflowFile(gh, before, labels, flag, schedule);
   await mkdir(join(dir, ".github/workflows"), { recursive: true });
@@ -369,7 +369,7 @@ export async function init(argv: string[]): Promise<void> {
   if (action.kind === "linux") return setupLinux(gh, dir, hub, false);
   if (action.kind === "sparkle-new") return createSparkleKey(dir, hub, action.label);
   if (action.kind === "sparkle") return storeSparkleKey(gh, dir, hub, action.label, action.account);
-  if (action.kind === "workflow") return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)), flag, { every, isPrivate: (await gh.getRepo(hub)).private });
+  if (action.kind === "workflow") return writeWorkflow(gh, dir, hubLabels(hubConfig(dir, hub)), flag, { every, isPrivate: (await gh.getRepo(hub)).private });
   const have = await hubState(gh, hub);
   await protectHub(gh, hub, have.private);
   const hasApple = have.vars.includes("TAPSTER_TEAM_ID") || have.secrets.includes("MACOS_NOTARY_KEY");

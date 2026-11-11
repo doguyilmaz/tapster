@@ -87,4 +87,10 @@ packages:
   expect(set.kept).toEqual(["tapster.yml", "README.md"]);
   expect(set.files.map((f) => f.path)).toEqual([".tapster/state.json", FLOW]);
   expect(set.files[1]!.content).toContain('SPARKLE_KEY_SHARED: "${{ secrets.SPARKLE_KEY_SHARED }}"');
+  expect(set.files[1]!.content).not.toContain("_ACME");
+  const labeled = config.replace("sparkle: { key: shared", "certificate: acme, sparkle: { key: shared");
+  const withCert = await hubFiles(gh, "o/homebrew-tap", async (p) => (p === "tapster.yml" ? labeled : null), sha, { every: null, isPrivate: false });
+  const flow = withCert.files.find((f) => f.path === FLOW)!.content;
+  expect(flow).toBe(fillWorkflow(readFileSync("templates/hub/tapster.yml", "utf8"), pins, { sha, tag: "main" }, { sparkle: ["shared"], certificates: ["acme"] }, 10));
+  expect(flow.split("MACOS_SIGN_P12_ACME: ${{ secrets.MACOS_SIGN_P12_ACME }}").length).toBe(3);
 });
