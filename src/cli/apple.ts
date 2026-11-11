@@ -87,7 +87,7 @@ export function labelNotary(label: string, team: string, vars: { name: string; v
 }
 
 // The label's own notary secrets that must be deleted once its certificate is saved. stale: the hub's key takes over.
-// needed: what is stored may belong to the team the certificate left, and the action would notarize with it unchecked
+// needed: what is stored may belong to the team the certificate left. The action would notarize with it unchecked
 // until the new team's key replaces it, so it goes before the new key is asked for.
 export function labelNotaryRemoved(label: string, plan: LabelNotary, secrets: string[]): string[] {
   if (plan !== "stale" && plan !== "needed") return [];

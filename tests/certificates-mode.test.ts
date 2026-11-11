@@ -242,7 +242,7 @@ test("every certificate secret is masked and leaves the environment, with work t
       if (value) expect(scrub(`x ${value} y`), name).toBe("x *** y");
     }
   };
-  // Nothing to sign or to seal: no tool runs, and the secrets are still masked and out of the environment.
+  // Nothing to sign or to seal: no tool runs. The secrets are still masked and out of the environment.
   for (const mode of [signMode, sealMode]) {
     setEnv(given);
     await saveManifest({ items: [] });
@@ -308,7 +308,7 @@ test("seal groups the DMGs by certificate the same way", async () => {
   expect(closed).toEqual(["p12-acme-body", "p12-hub-body"]);
 });
 
-// Runs the signing stage the way the leak workflow's step does, for the package of one of its configs, and returns what
+// Runs the signing stage the way the leak workflow's step does, for the package of one of its configs. Returns what
 // the step logs for it. Empty secrets are what GitHub hands a step whose repository secret is missing.
 async function leakLog(file: string, pkg: string, label: string | null, secrets: "set" | "empty", open: OpenKeychain, tools: typeof toolSteps): Promise<string> {
   const suffix = label === null ? "" : `_${label.toUpperCase()}`;
