@@ -15,7 +15,7 @@ const holdsFor = (label: string | null) => (label === null ? (v: HubView) => [v.
 function storedText(label: string | null, c: StoredCertificate, hubKey: boolean): string {
   if (label === null) return `Certificate stored for team ${c.team}. It expires on ${c.expires}.`;
   const first = `Certificate ${label} stored for team ${c.team}. It expires on ${c.expires}.`;
-  if (c.notary === "needed") return `${first} Next: a notarization key of team ${c.team}.`;
+  if (c.notary === "needed") return `${first}${c.removed ? ` tapster removed the notarization key stored for ${label}: it may belong to another team.` : ""} Next: a notarization key of team ${c.team}.`;
   if (c.notary === "own") return `${first} The notarization key stored for ${label} stays.`;
   if (c.removed) return `${first} tapster removed the notarization key stored for ${label}: the hub's key notarizes it, since both belong to team ${c.team}.`;
   return `${first} The hub's notarization key notarizes it too.${hubKey ? "" : " The hub has no notarization key yet; store it under Notarization key."}`;

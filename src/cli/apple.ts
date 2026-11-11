@@ -69,7 +69,8 @@ export async function saveCertificate(hub: string, data: Uint8Array, password: s
 // How a labeled certificate of `team` gets notarized, judged from the hub's environment before the certificate is saved:
 // kept: the label's own key stays, since it was stored for this team or the hub has no key that could serve instead;
 // hub: the hub's key is of the same team; stale: the same, but a key stored for the label (maybe of another team) would
-// win over the hub's, so it goes; needed: Apple needs a key of this team.
+// win over the hub's, so it goes; needed: Apple needs a key of this team (what the label stores may be of another one,
+// see labelNotaryRemoved).
 export type LabelNotary = "kept" | "hub" | "stale" | "needed";
 
 export function labelNotary(label: string, team: string, vars: { name: string; value?: string }[], secrets: string[]): LabelNotary {
@@ -83,6 +84,15 @@ export function labelNotary(label: string, team: string, vars: { name: string; v
   // Removing the label's key is safe only when the hub's own key takes over.
   if ([hub.notaryKey, hub.notaryKeyId, hub.notaryIssuer].every((s) => secrets.includes(s))) return "stale";
   return own.length === 3 ? "kept" : "needed";
+}
+
+// The label's own notary secrets that must be deleted once its certificate is saved. stale: the hub's key takes over.
+// needed: what is stored may belong to the team the certificate left, and the action would notarize with it unchecked
+// until the new team's key replaces it, so it goes before the new key is asked for.
+export function labelNotaryRemoved(label: string, plan: LabelNotary, secrets: string[]): string[] {
+  if (plan !== "stale" && plan !== "needed") return [];
+  const n = certificateNames(label);
+  return [n.notaryKey, n.notaryKeyId, n.notaryIssuer].filter((s) => secrets.includes(s));
 }
 
 export const notaryArgs = (keyPath: string, keyId: string, issuer: string) => ["notarytool", "history", "--key", keyPath, "--key-id", keyId, "--issuer", issuer, "--output-format", "json"];

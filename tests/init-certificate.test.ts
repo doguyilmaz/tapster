@@ -138,6 +138,23 @@ test("a certificate moved to the hub's team drops the label's key, which would w
   expect(logs).toContain(`The hub's notarization key notarizes it too, since both belong to team ${TEAM}.`);
 });
 
+test("a certificate moved to a third team drops the old team's key before it asks for the new one, so stopping there leaves no key to notarize with", async () => {
+  const h = hub({ TAPSTER_TEAM_ID: "HUBTEAM001", TAPSTER_TEAM_ID_ACME: "OLDTEAM001" }, [...HUB_NOTARY, ...ACME_NOTARY]);
+  const io = answers(p12, "pw");
+  await expect(quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, io))).rejects.toThrow("unexpected question: .p8 file (drag it here): ");
+  expect(h.env.vars.get("TAPSTER_TEAM_ID_ACME")).toBe(TEAM);
+  expect([...h.env.secrets].sort()).toEqual([...HUB_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
+  expect(logs).toContain(`Removed the notarization key stored for acme: it may belong to another team than the new certificate's team ${TEAM}.`);
+});
+
+test("the new team's key replaces the old one when the owner stores it", async () => {
+  const h = hub({ TAPSTER_TEAM_ID: "HUBTEAM001", TAPSTER_TEAM_ID_ACME: "OLDTEAM001" }, [...HUB_NOTARY, ...ACME_NOTARY]);
+  const io = answers(p12, "pw", p8, "KEY0000001", "0000000a-0000-4000-8000-00000000000b");
+  await quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, io));
+  expect([...h.env.secrets].sort()).toEqual([...HUB_NOTARY, ...ACME_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
+  expect(logs).toContain(`Notarization key for the certificate acme stored. You may delete ${p8} once you keep a backup.`);
+});
+
 test("the label's key stays when the hub has no notarization key to take over", async () => {
   const h = hub({ TAPSTER_TEAM_ID: TEAM }, ACME_NOTARY);
   const io = answers(p12, "pw");

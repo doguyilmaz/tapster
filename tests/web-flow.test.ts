@@ -289,6 +289,16 @@ const labeledP12 = (label: string | null, file: string, password = "right") => {
   return f;
 };
 
+const labeledKey = (label: string) => {
+  const f = new FormData();
+  f.set("hub", "octo/homebrew-tap");
+  f.set("keyId", "QWERT67890");
+  f.set("issuerId", "00000000-0000-4000-8000-000000000001");
+  f.set("p8", new File(["-----BEGIN PRIVATE KEY-----\nMIG\n-----END PRIVATE KEY-----\n"], "AuthKey_QWERT67890.p8"));
+  f.set("label", label);
+  return f;
+};
+
 test("a labeled .p12 goes to the label's names and the hub workflow on main passes it", async () => {
   const hub = fake.get("octo/homebrew-tap")!;
   hub.files!.set("tapster.yml", labeledApps);
@@ -332,15 +342,7 @@ test("a certificate of another team asks for that team's notary key, stored unde
   await run("openssl", ["pkcs12", "-export", "-in", join(home, "c2.pem"), "-inkey", join(home, "k2.pem"), "-out", join(home, "t2.p12"), "-passout", "pass:right"]);
   expect((await call("POST", "/api/hub/certificate", labeledP12("beta", "t2.p12"))).data).toMatchObject({ team: "QWERT67890", workflow: "unchanged", notary: "needed", removed: false });
   expect((await hubView()).extras.certificates[1]).toMatchObject({ label: "beta", stored: true, team: "QWERT67890", notary: "needed" });
-  const key = (label: string) => {
-    const f = new FormData();
-    f.set("hub", "octo/homebrew-tap");
-    f.set("keyId", "QWERT67890");
-    f.set("issuerId", "00000000-0000-4000-8000-000000000001");
-    f.set("p8", new File(["-----BEGIN PRIVATE KEY-----\nMIG\n-----END PRIVATE KEY-----\n"], "AuthKey_QWERT67890.p8"));
-    f.set("label", label);
-    return f;
-  };
+  const key = labeledKey;
   const writes = recordWrites();
   expect((await call("POST", "/api/hub/notary", key("gamma"))).status).toBe(400);
   expect((await call("POST", "/api/hub/notary", key("id"))).status).toBe(400);
@@ -352,6 +354,23 @@ test("a certificate of another team asks for that team's notary key, stored unde
   expect((await call("POST", "/api/hub/certificate", labeledP12("beta", "t.p12"))).data).toMatchObject({ team: "ABCDE12345", notary: "hub", removed: true });
   expect(writes.slice(4)).toEqual(["secret delete MACOS_NOTARY_KEY_BETA", "secret delete MACOS_NOTARY_KEY_ID_BETA", "secret delete MACOS_NOTARY_ISSUER_ID_BETA"]);
   expect((await hubView()).extras.certificates[1]).toMatchObject({ team: "ABCDE12345", notary: "hub" });
+  useGhWrite(fake.ghWrite);
+});
+
+test("a certificate moved to a third team removes the second team's key, so the card asks for the third team's key", async () => {
+  const hub = fake.get("octo/homebrew-tap")!;
+  await run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(home, "k3.pem"), "-out", join(home, "c3.pem"), "-days", "30", "-subj", "/CN=Developer ID Application: Third (THIRD00001)/OU=THIRD00001"]);
+  await run("openssl", ["pkcs12", "-export", "-in", join(home, "c3.pem"), "-inkey", join(home, "k3.pem"), "-out", join(home, "t3.p12"), "-passout", "pass:right"]);
+  const keyNames = ["MACOS_NOTARY_KEY_BETA", "MACOS_NOTARY_KEY_ID_BETA", "MACOS_NOTARY_ISSUER_ID_BETA"];
+  expect((await call("POST", "/api/hub/certificate", labeledP12("beta", "t2.p12"))).data).toMatchObject({ team: "QWERT67890", notary: "needed", removed: false });
+  expect((await call("POST", "/api/hub/notary", labeledKey("beta"))).data).toEqual({ checked: false });
+  expect(keyNames.every((s) => hub.env!.secrets.has(s))).toBe(true);
+  expect((await hubView()).extras.certificates[1]).toMatchObject({ team: "QWERT67890", notary: "own" });
+  const writes = recordWrites();
+  expect((await call("POST", "/api/hub/certificate", labeledP12("beta", "t3.p12"))).data).toMatchObject({ team: "THIRD00001", notary: "needed", removed: true });
+  expect(writes.slice(4)).toEqual(keyNames.map((s) => `secret delete ${s}`));
+  expect(keyNames.some((s) => hub.env!.secrets.has(s))).toBe(false);
+  expect((await hubView()).extras.certificates[1]).toMatchObject({ team: "THIRD00001", notary: "needed" });
   useGhWrite(fake.ghWrite);
 });
 

@@ -9,7 +9,7 @@ import { readHubFile } from "../../hubcommit";
 import { appJwt, installationRepos } from "../../token";
 import { TAPSTER } from "../../version";
 import { certificateLabels, certificateNames } from "../../certificates";
-import { type Certificate, P12_LIMIT, P8_LIMIT, inspectP12, labelNotary, notaryKey, saveCertificate, saveNotary } from "../../cli/apple";
+import { type Certificate, P12_LIMIT, P8_LIMIT, inspectP12, labelNotary, labelNotaryRemoved, notaryKey, saveCertificate, saveNotary } from "../../cli/apple";
 import { convertManifest, permissionLines } from "../../cli/appflow";
 import { doctorChecks, hubRulesetCheck, policyCheck } from "../../cli/doctor";
 import { installLink } from "../../cli/hubpr";
@@ -383,8 +383,9 @@ async function labeledFor(gh: GitHub, hub: string, f: Form): Promise<Labeled | n
   return { label, config };
 }
 
-// Mirrors tapster init --certificate <label>: the notary plan is judged before saving, a label key that would win over
-// the hub's key of the same team is removed. Then the hub workflow on main passes every label the packages name.
+// Mirrors tapster init --certificate <label>: the notary plan is judged before saving. A label key that would win over
+// the hub's key of the same team goes. So does one that may belong to the team the certificate left. Then the hub
+// workflow on main passes every label the packages name.
 async function storeLabeled(gh: GitHub, hub: string, login: string, { label, config }: Labeled, data: Uint8Array, password: string, cert: Certificate): Promise<StoredCertificate> {
   const labels = certificateLabels(config);
   const flow = await readHubFile(gh, hub, FLOW, "main");
@@ -393,8 +394,7 @@ async function storeLabeled(gh: GitHub, hub: string, login: string, { label, con
   const [vars, secrets] = await Promise.all([hubEnv(gh, hub, "variables"), hubEnv(gh, hub, "secrets").then((xs) => xs.map((x) => x.name))]);
   const plan = labelNotary(label, cert.team, vars, secrets);
   await saveCertificate(hub, data, password, cert, label);
-  const n = certificateNames(label);
-  const stale = plan === "stale" ? [n.notaryKey, n.notaryKeyId, n.notaryIssuer].filter((s) => secrets.includes(s)) : [];
+  const stale = labelNotaryRemoved(label, plan, secrets);
   for (const s of stale) await deleteEnvSecret(hub, s);
   const workflow = await writeMain(gh, hub, login, async (_, read) => {
     const now = await read(FLOW);

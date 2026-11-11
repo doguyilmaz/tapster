@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkP8, inspectP12, labelNotary, notaryKey, saveCertificate, saveNotary } from "../src/cli/apple";
+import { checkP8, inspectP12, labelNotary, labelNotaryRemoved, notaryKey, saveCertificate, saveNotary } from "../src/cli/apple";
 import { useGhWrite } from "../src/cli/gh";
 import { TapsterError } from "../src/errors";
 import { run } from "../src/run";
@@ -86,6 +86,17 @@ test("a labeled certificate keeps its own notary key of the same team, else uses
   expect(labelNotary("acme", "HUBTEAM001", [...hubTeam, { name: "TAPSTER_TEAM_ID_ACME", value: "OTHERTEAM1" }], [...own, ...hubKey])).toBe("stale");
   expect(labelNotary("acme", "HUBTEAM001", hubTeam, [...own.slice(0, 1), ...hubKey])).toBe("stale");
   expect(labelNotary("acme", "OTHERTEAM1", [{ name: "TAPSTER_TEAM_ID_ACME", value: "OTHERTEAM1" }], own.slice(0, 2))).toBe("needed");
+});
+
+test("a label's notary secrets go when the hub's key takes over or the new team needs a key of its own", () => {
+  const own = ["MACOS_NOTARY_KEY_ACME", "MACOS_NOTARY_KEY_ID_ACME", "MACOS_NOTARY_ISSUER_ID_ACME"];
+  const secrets = [...hubKey, ...own, "MACOS_SIGN_P12_ACME"];
+  expect(labelNotaryRemoved("acme", "stale", secrets)).toEqual(own);
+  expect(labelNotaryRemoved("acme", "needed", secrets)).toEqual(own);
+  expect(labelNotaryRemoved("acme", "needed", [...own.slice(0, 2), ...hubKey])).toEqual(own.slice(0, 2));
+  expect(labelNotaryRemoved("acme", "needed", hubKey)).toEqual([]);
+  expect(labelNotaryRemoved("acme", "kept", secrets)).toEqual([]);
+  expect(labelNotaryRemoved("acme", "hub", secrets)).toEqual([]);
 });
 
 test("a label's key is never removed while the hub has no notary key to take over", () => {

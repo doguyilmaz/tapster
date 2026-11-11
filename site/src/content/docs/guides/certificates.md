@@ -91,8 +91,9 @@ bunx @doguyilmaz/tapster init --certificate acme --notary
 ```
 
 When a label's certificate moves to the hub's team, tapster removes the key stored for that label if the hub has a
-notarization key of its own. The hub's key notarizes it from then on. A renewal within the same team keeps the label's
-key.
+notarization key of its own. The hub's key notarizes it from then on. When it moves to another team, tapster removes the
+stored key too and asks for a key of the new team. Until you store it, that label's releases fail with
+`the hub has no notary key for that team`. A renewal within the same team keeps the label's key.
 
 ## What the hub stores
 

@@ -12,7 +12,7 @@ import { TAPSTER } from "../version";
 import { run } from "../run";
 import { appFromManifest, openUrl } from "./appflow";
 import { appInstallation, appManifest, storeApp } from "./hubapp";
-import { type Certificate, checkKeyId, checkP8, inspectP12, labelNotary, notaryKey, saveCertificate, saveNotary, verifyNotary } from "./apple";
+import { type Certificate, checkKeyId, checkP8, inspectP12, labelNotary, labelNotaryRemoved, notaryKey, saveCertificate, saveNotary, verifyNotary } from "./apple";
 import { doorbellRepos, rotateDoorbell, setupDoorbell } from "./doorbell";
 import { currentRepo, deleteEnvSecret, hubEnv, setEnvSecret, setEnvVariable, userGitHub } from "./gh";
 import { localStore, newSparkleKey, requireStore } from "./keystore";
@@ -295,10 +295,13 @@ export async function storeCertificateFor(gh: GitHub, dir: string, hub: string, 
       const hubTeam = vars.find((v) => v.name === hubNames.team)?.value;
       const other = hubTeam && hubTeam !== cert.team ? `, not to the hub's team ${hubTeam}` : "";
       console.log(`The certificate ${label} belongs to team ${cert.team}${other}. Apple notarizes it only with an App Store Connect key of team ${cert.team}.`);
+      const gone = labelNotaryRemoved(label, plan, secrets);
+      for (const s of gone) await deleteEnvSecret(hub, s);
+      if (gone.length) console.log(`Removed the notarization key stored for ${label}: it may belong to another team than the new certificate's team ${cert.team}.`);
       await storeNotary(hub, label, io);
     } else {
       if (plan === "stale") {
-        for (const s of [n.notaryKey, n.notaryKeyId, n.notaryIssuer].filter((x) => secrets.includes(x))) await deleteEnvSecret(hub, s);
+        for (const s of labelNotaryRemoved(label, plan, secrets)) await deleteEnvSecret(hub, s);
         console.log(`Removed the notarization key stored for ${label}: it would win over the hub's key and may belong to another team.`);
       }
       console.log(`The hub's notarization key notarizes it too, since both belong to team ${cert.team}.`);
