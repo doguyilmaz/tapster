@@ -62,6 +62,9 @@ export async function verifySigned(file: string, teamId: string, identifier?: st
 export type NotaryKey = { p8Path: string; keyId: string; issuer: string };
 export type NotaryResult = { id: string; status: string };
 
+// The command that stores the hub's notary key; a failure with a labeled certificate's own key names its command instead.
+export const ROTATE_NOTARY = "tapster init --rotate notary";
+
 export function parseNotary(stdout: string, stderr = ""): NotaryResult {
   try {
     const j = JSON.parse(stdout) as { id?: unknown; status?: unknown };
@@ -69,7 +72,7 @@ export function parseNotary(stdout: string, stderr = ""): NotaryResult {
   } catch {
   }
   if (/HTTP status code: 401\b/.test(stderr)) {
-    throw new TapsterError("Apple rejected the notary key (HTTP 401)", "Store the App Store Connect key, its Key ID and the Issuer ID again with tapster init --rotate notary. The draft is untouched.");
+    throw new TapsterError("Apple rejected the notary key (HTTP 401)", `Store the App Store Connect key, its Key ID and the Issuer ID again with ${ROTATE_NOTARY}. The draft is untouched.`);
   }
   const line = stderr.split("\n").find((l) => l.trim() !== "");
   if (line) throw new TapsterError(`notarytool failed: ${scrub(line.trim()).slice(0, 300)}`, "The draft is untouched; the next run tries again.");

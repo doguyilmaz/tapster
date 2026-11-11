@@ -573,9 +573,18 @@ type Opened = { label: string; what: "certificate" | "notary" };
 
 const NOTARY: Record<"own" | "hub" | "needed", string> = { own: "A key stored for this certificate", hub: "The hub's key, of the same team", needed: "Missing" };
 
+// What a certificate still needs before its entries can sign; null when it needs nothing.
+const certificateGap = (c: CertificateView) => (!c.stored ? "Not stored" : c.notary === "needed" ? "Key missing" : !c.wired ? "Not in the workflow" : null);
+
+function notaryText(h: HubView, c: CertificateView): string {
+  if (c.notary === "needed") return `Missing: Apple needs a key of team ${c.team}`;
+  if (c.notary === "hub" && !h.apple.notary) return "The hub's key, of the same team. The hub has no notarization key yet; store it under Notarization key.";
+  return NOTARY[c.notary ?? "needed"];
+}
+
 function LabelCertificate({ h, c, open, picked, onOpen, onClose }: { h: HubView; c: CertificateView; open: Opened["what"] | null; picked: boolean; onOpen: (what: Opened["what"]) => void; onClose: (next: Opened["what"] | null) => void }) {
   const hubTeam = h.apple.certificate?.team ?? null;
-  const missing = !c.stored || c.notary === "needed";
+  const gap = certificateGap(c);
   const cancel = picked ? () => onClose(null) : undefined;
   return (
     <div class="card pad stack tight">
@@ -583,7 +592,7 @@ function LabelCertificate({ h, c, open, picked, onOpen, onClose }: { h: HubView;
         <strong>
           Certificate <code>{c.label}</code>
         </strong>
-        <Badge tone={missing ? "warn" : "ok"}>{!c.stored ? "Not stored" : c.notary === "needed" ? "Key missing" : "Stored"}</Badge>
+        <Badge tone={gap ? "warn" : "ok"}>{gap ?? "Stored"}</Badge>
       </div>
       <p class="muted small">It signs {c.packages.join(", ")}.</p>
       {c.stored && (
@@ -595,8 +604,13 @@ function LabelCertificate({ h, c, open, picked, onOpen, onClose }: { h: HubView;
             {c.expires ?? "Unknown"} {c.expires && expiresSoon(c.expires) && <Badge tone="error">Renew it soon</Badge>}
           </dd>
           <dt>Notarization key</dt>
-          <dd>{c.notary === "needed" ? `Missing: Apple needs a key of team ${c.team}` : NOTARY[c.notary ?? "needed"]}</dd>
+          <dd>{notaryText(h, c)}</dd>
         </dl>
+      )}
+      {c.stored && !c.wired && (
+        <Note tone="warn" title="The hub workflow does not pass it">
+          <span>The workflow on main lacks this certificate, so its entries cannot sign. Update the workflow under Hub files or store the certificate again here; both add it.</span>
+        </Note>
       )}
       {open === "certificate" ? (
         <CertificateForm h={h} label={c.label} guide={!c.stored} onDone={(s) => onClose(s.notary === "needed" ? "notary" : null)} onCancel={cancel} />
@@ -640,7 +654,9 @@ function Certificates({ h }: { h: HubView }) {
   const [picked, setPicked] = useState<Opened | null>(null);
   const first = list.find((c) => !c.stored || c.notary === "needed");
   const open: Opened | null = picked ?? (first ? { label: first.label, what: first.stored ? "notary" : "certificate" } : null);
-  const missing = list.filter((c) => !c.stored || c.notary === "needed").length;
+  const missing = list.filter((c) => certificateGap(c) !== null).length;
+  // An update that changes the hub's code may be the one that brings certificate labels, so an older pin could refuse them.
+  const older = h.files.workflow === "older" && h.files.update !== "optional";
   return (
     <section class="stack tight anchor" id="certificates">
       <div class="spread">
@@ -650,6 +666,11 @@ function Certificates({ h }: { h: HubView }) {
       <p class="muted">
         A package signs with the hub's Developer ID certificate unless its entry in tapster.yml says <code>certificate: &lt;label&gt;</code>. You choose that in the entry, under Configuration on the Projects page. Store each certificate here; tapster passes it to the hub workflow on main too.
       </p>
+      {older && (
+        <Note tone="warn" title="Update the hub workflow too">
+          <span>The hub runs tapster {h.files.pinned}, older than this one. An older tapster may refuse entries with certificate:, so update the workflow under Hub files.</span>
+        </Note>
+      )}
       {!h.protect.environment ? (
         <Note tone="info" title="Protect the hub first">
           <span>The certificates go into {h.name}'s tapster environment.</span>

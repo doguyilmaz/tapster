@@ -1,7 +1,7 @@
 version: 1
 tap: doguyilmaz/tapster-test
 packages:
-  - name: fixture
+  - name: leakcert
     repo: doguyilmaz/tapster-fixture
     binaries: [fixture]
     attestation: "off"

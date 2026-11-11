@@ -68,12 +68,13 @@ test("the Linux button says what it writes to tapster.yml", () => {
 
 test("Optional extras needs attention while a certificate a package names is missing or expires soon", () => {
   const now = Date.parse("2099-01-01T00:00:00Z");
-  const cert = (label: string, o: Partial<CertificateView> = {}): CertificateView => ({ label, packages: ["pix"], stored: true, team: "5MYT4VYJFC", expires: "2100-01-01", notary: "hub", ...o });
+  const cert = (label: string, o: Partial<CertificateView> = {}): CertificateView => ({ label, packages: ["pix"], stored: true, team: "5MYT4VYJFC", expires: "2100-01-01", notary: "hub", wired: true, ...o });
   expect(extrasState(hub(), now)).toEqual({ attention: false, status: "Doorbell, apt and dnf, Sparkle, certificates" });
   expect(extrasState(hub({ certificates: [cert("acme"), cert("beta", { notary: "own" })] }), now).attention).toBe(false);
   expect(extrasState(hub({ certificates: [cert("acme", { stored: false, team: null, expires: null, notary: null })] }), now)).toEqual({ attention: true, status: "Certificate acme: not stored yet" });
   expect(extrasState(hub({ certificates: [cert("acme", { notary: "needed" })] }), now).status).toBe("Certificate acme: needs a notarization key");
   expect(extrasState(hub({ certificates: [cert("acme", { expires: "2099-01-20" })] }), now).status).toBe("Certificate acme: renew it soon");
+  expect(extrasState(hub({ certificates: [cert("acme", { wired: false, expires: "2099-01-20" })] }), now)).toEqual({ attention: true, status: "Certificate acme: not in the hub workflow" });
   expect(extrasState(hub({ certificates: [cert("acme", { notary: "needed" }), cert("beta", { stored: false })] }), now)).toEqual({ attention: true, status: "2 certificates need you" });
 });
 

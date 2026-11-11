@@ -11,12 +11,14 @@ type FormProps = { h: HubView; label?: string | null; guide: boolean; onDone?: (
 
 const holdsFor = (label: string | null) => (label === null ? (v: HubView) => [v.apple, v.protect.environment] : (v: HubView) => [v.extras.certificates.find((c) => c.label === label) ?? null, v.protect.environment]);
 
-function storedText(label: string | null, c: StoredCertificate): string {
+// hubKey: the hub holds its own notarization key, which a labeled certificate of the hub's team uses.
+function storedText(label: string | null, c: StoredCertificate, hubKey: boolean): string {
   if (label === null) return `Certificate stored for team ${c.team}. It expires on ${c.expires}.`;
   const first = `Certificate ${label} stored for team ${c.team}. It expires on ${c.expires}.`;
   if (c.notary === "needed") return `${first} Next: a notarization key of team ${c.team}.`;
   if (c.notary === "own") return `${first} The notarization key stored for ${label} stays.`;
-  return `${first} ${c.removed ? `tapster removed the notarization key stored for ${label}: the hub's key notarizes it, since both belong to team ${c.team}.` : "The hub's notarization key notarizes it too."}`;
+  if (c.removed) return `${first} tapster removed the notarization key stored for ${label}: the hub's key notarizes it, since both belong to team ${c.team}.`;
+  return `${first} The hub's notarization key notarizes it too.${hubKey ? "" : " The hub has no notarization key yet; store it under Notarization key."}`;
 }
 
 export function CertificateForm({ h, label = null, guide, onDone, onCancel }: FormProps) {
@@ -42,7 +44,7 @@ export function CertificateForm({ h, label = null, guide, onDone, onCancel }: Fo
       savedFor(label === null ? "certificate" : `certificate-${label}`);
       setFile(null);
       await loadHub();
-      say("ok", storedText(label, stored));
+      say("ok", storedText(label, stored, h.apple.notary));
       onDone?.(stored);
     });
   };

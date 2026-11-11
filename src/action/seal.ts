@@ -19,16 +19,10 @@ export async function sealMode(ctx: Context, deps: SealDeps = {}): Promise<void>
     todo,
     ({ pkg }) => pkg.certificate ?? null,
     failed,
-    async ({ kc, notary }, items) => {
-      for (const t of items) {
-        try {
-          await seal(kc, t.item.app!.dmg!, notary);
-          t.item.status = "sealed";
-          info(`${t.item.package} ${t.item.tag}: the DMG is signed, notarized and stapled`);
-        } catch (e) {
-          failed(t, e);
-        }
-      }
+    async ({ kc, notary }, t) => {
+      await seal(kc, t.item.app!.dmg!, notary);
+      t.item.status = "sealed";
+      info(`${t.item.package} ${t.item.tag}: the DMG is signed, notarized and stapled`);
     },
     deps.open,
   );

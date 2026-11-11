@@ -95,11 +95,12 @@ export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now(),
 }
 
 // The Optional extras line in the route. A certificate that a package names is no longer optional: without it that
-// package fails to sign, so a missing one or one that expires soon needs attention.
+// package fails to sign, so a missing one, one the hub workflow does not pass or one that expires soon needs attention.
 export function extrasState(h: HubView, now = Date.now()): { attention: boolean; status: string } {
   const open = h.extras.certificates.flatMap((c) => {
     if (!c.stored) return [`Certificate ${c.label}: not stored yet`];
     if (c.notary === "needed") return [`Certificate ${c.label}: needs a notarization key`];
+    if (!c.wired) return [`Certificate ${c.label}: not in the hub workflow`];
     return c.expires && expiresSoon(c.expires, now) ? [`Certificate ${c.label}: renew it soon`] : [];
   });
   if (open.length === 0) return { attention: false, status: "Doorbell, apt and dnf, Sparkle, certificates" };

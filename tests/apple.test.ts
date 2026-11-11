@@ -72,6 +72,8 @@ test("a labeled certificate and notary key are stored under the label's names, t
   }
 });
 
+const hubKey = ["MACOS_NOTARY_KEY", "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER_ID"];
+
 test("a labeled certificate keeps its own notary key of the same team, else uses the hub's of the same team, else needs one", () => {
   const own = ["MACOS_NOTARY_KEY_ACME", "MACOS_NOTARY_KEY_ID_ACME", "MACOS_NOTARY_ISSUER_ID_ACME"];
   const hubTeam = [{ name: "TAPSTER_TEAM_ID", value: "HUBTEAM001" }];
@@ -81,7 +83,15 @@ test("a labeled certificate keeps its own notary key of the same team, else uses
   expect(labelNotary("acme", "OTHERTEAM1", [...hubTeam, { name: "TAPSTER_TEAM_ID_ACME", value: "OTHERTEAM1" }], own)).toBe("kept");
   expect(labelNotary("acme", "HUBTEAM001", [...hubTeam, { name: "TAPSTER_TEAM_ID_ACME", value: "HUBTEAM001" }], own)).toBe("kept");
   expect(labelNotary("acme", "THIRDTEAM1", [...hubTeam, { name: "TAPSTER_TEAM_ID_ACME", value: "OTHERTEAM1" }], own)).toBe("needed");
-  expect(labelNotary("acme", "HUBTEAM001", [...hubTeam, { name: "TAPSTER_TEAM_ID_ACME", value: "OTHERTEAM1" }], own)).toBe("stale");
-  expect(labelNotary("acme", "HUBTEAM001", hubTeam, own.slice(0, 1))).toBe("stale");
+  expect(labelNotary("acme", "HUBTEAM001", [...hubTeam, { name: "TAPSTER_TEAM_ID_ACME", value: "OTHERTEAM1" }], [...own, ...hubKey])).toBe("stale");
+  expect(labelNotary("acme", "HUBTEAM001", hubTeam, [...own.slice(0, 1), ...hubKey])).toBe("stale");
   expect(labelNotary("acme", "OTHERTEAM1", [{ name: "TAPSTER_TEAM_ID_ACME", value: "OTHERTEAM1" }], own.slice(0, 2))).toBe("needed");
+});
+
+test("a label's key is never removed while the hub has no notary key to take over", () => {
+  const own = ["MACOS_NOTARY_KEY_ACME", "MACOS_NOTARY_KEY_ID_ACME", "MACOS_NOTARY_ISSUER_ID_ACME"];
+  const hubTeam = [{ name: "TAPSTER_TEAM_ID", value: "HUBTEAM001" }];
+  expect(labelNotary("acme", "HUBTEAM001", hubTeam, own)).toBe("kept");
+  expect(labelNotary("acme", "HUBTEAM001", [...hubTeam, { name: "TAPSTER_TEAM_ID_ACME", value: "OTHERTEAM1" }], [...own, ...hubKey.slice(0, 2)])).toBe("kept");
+  expect(labelNotary("acme", "HUBTEAM001", hubTeam, own.slice(0, 2))).toBe("needed");
 });

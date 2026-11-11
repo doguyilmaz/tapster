@@ -63,26 +63,20 @@ export async function signMode(ctx: Context, deps: SignDeps = {}): Promise<void>
     todo,
     (item) => pkgOf(item)?.certificate ?? null,
     failed,
-    async ({ kc, notary, team }, items) => {
-      for (const item of items) {
-        try {
-          const pkg = pkgOf(item)!;
-          if (isApp(pkg)) {
-            const signed = await apps.signApp(kc, item.app!.dir, pkg, team);
-            await apps.verifyApp(item.app!.dir, signed, team);
-            item.app!.identifiers = signed.identifiers;
-            for (const d of signed.dropped) warn(`${item.package} ${item.tag}: the entitlement ${d} is not in code, so it was not signed`);
-            item.status = "signed";
-            info(`${item.package} ${item.tag}: signed ${signed.items.length} pieces of code`);
-            continue;
-          }
-          await signTool(kc, notary, team, pkg, item, deps.tools);
-          item.status = "signed";
-          info(`${item.package} ${item.tag}: signed and notarized`);
-        } catch (e) {
-          failed(item, e);
-        }
+    async ({ kc, notary, team }, item) => {
+      const pkg = pkgOf(item)!;
+      if (isApp(pkg)) {
+        const signed = await apps.signApp(kc, item.app!.dir, pkg, team);
+        await apps.verifyApp(item.app!.dir, signed, team);
+        item.app!.identifiers = signed.identifiers;
+        for (const d of signed.dropped) warn(`${item.package} ${item.tag}: the entitlement ${d} is not in code, so it was not signed`);
+        item.status = "signed";
+        info(`${item.package} ${item.tag}: signed ${signed.items.length} pieces of code`);
+        return;
       }
+      await signTool(kc, notary, team, pkg, item, deps.tools);
+      item.status = "signed";
+      info(`${item.package} ${item.tag}: signed and notarized`);
     },
     deps.open,
   );

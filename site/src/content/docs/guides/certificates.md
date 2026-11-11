@@ -65,6 +65,10 @@ certificate's lines to the sign steps of `.github/workflows/tapster.yml`.
 
 Review the workflow change, commit it with `tapster.yml` and push.
 
+The hub workflow has to run a tapster that knows `certificate:`. An older one refuses the entries that name a
+certificate. When `init --certificate` says the hub runs an older tapster, run `tapster init --workflow` too. In tapster
+setup, update the workflow under **Hub files** when the certificates section asks for it.
+
 :::note[Where your keys go]{icon="padlock"}
 The certificate and its notarization key become secrets of the hub's `tapster` environment, like the hub's own. Only
 the steps that sign and notarize macOS code see them.
@@ -86,8 +90,9 @@ To replace only that key:
 bunx @doguyilmaz/tapster init --certificate acme --notary
 ```
 
-When you store a certificate of the hub's team under a label that has a key of its own, tapster removes that key. The
-hub's key notarizes it from then on.
+When a label's certificate moves to the hub's team, tapster removes the key stored for that label if the hub has a
+notarization key of its own. The hub's key notarizes it from then on. A renewal within the same team keeps the label's
+key.
 
 ## What the hub stores
 
@@ -104,7 +109,8 @@ The names are the hub's own with `_<LABEL>` at the end. For the label `acme`, th
 | `MACOS_NOTARY_ISSUER_ID_ACME` | secret | Its Issuer ID. |
 
 The hub workflow passes the secrets to the steps that sign and notarize macOS code only. `tapster doctor` checks that
-every label your entries name is stored, has a notarization key and reaches the workflow.
+every label your entries name is stored, has a notarization key and reaches the workflow. In tapster setup, the
+certificate's card says **Not in the workflow** when the workflow on `main` does not pass it.
 
 ## Renew it
 

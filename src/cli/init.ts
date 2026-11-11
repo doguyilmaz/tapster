@@ -20,7 +20,7 @@ import { findGpg, finishLinuxRotation, linuxKeyAllowed, makeLinuxKey } from "./l
 import { cleanPath, readInput } from "./paths";
 import { waitFor } from "./poll";
 import { cronFor, everyFromFlow } from "./schedule";
-import { FLOW, type HubLabels, type Schedule, hubFiles, hubLabels, patchCertificateEnv, patchSparkleEnv, sparkleLabels, workflowFile } from "./hubfiles";
+import { FLOW, type HubLabels, PIN, type Schedule, hubFiles, hubLabels, patchCertificateEnv, patchSparkleEnv, pinState, sparkleLabels, workflowFile } from "./hubfiles";
 import { ask } from "./prompt";
 
 export function initSteps(have: { vars: string[]; secrets: string[] }, mac: boolean): string[] {
@@ -288,10 +288,13 @@ export async function storeCertificateFor(gh: GitHub, dir: string, hub: string, 
   } else {
     const cert = await storeCertificate(hub, label, io);
     const plan = labelNotary(label, cert.team, vars, secrets);
-    if (plan === "kept") console.log(`The notarization key stored for ${label} belongs to team ${cert.team} too, so it stays.`);
-    else if (plan === "needed") {
+    if (plan === "kept") {
+      if (vars.find((v) => v.name === n.team)?.value === cert.team) console.log(`The notarization key stored for ${label} belongs to team ${cert.team} too, so it stays.`);
+      else console.log(`The notarization key stored for ${label} stays, since the hub has no notarization key of its own. Apple accepts it only if it belongs to team ${cert.team}.`);
+    } else if (plan === "needed") {
       const hubTeam = vars.find((v) => v.name === hubNames.team)?.value;
-      console.log(`The certificate ${label} belongs to team ${cert.team}${hubTeam ? `, not to the hub's team ${hubTeam}` : ""}. Apple notarizes it only with an App Store Connect key of team ${cert.team}.`);
+      const other = hubTeam && hubTeam !== cert.team ? `, not to the hub's team ${hubTeam}` : "";
+      console.log(`The certificate ${label} belongs to team ${cert.team}${other}. Apple notarizes it only with an App Store Connect key of team ${cert.team}.`);
       await storeNotary(hub, label, io);
     } else {
       if (plan === "stale") {
@@ -301,6 +304,10 @@ export async function storeCertificateFor(gh: GitHub, dir: string, hub: string, 
       console.log(`The hub's notarization key notarizes it too, since both belong to team ${cert.team}.`);
       if (![hubNames.notaryKey, hubNames.notaryKeyId, hubNames.notaryIssuer].every((s) => secrets.includes(s))) console.log("The hub has no notarization key yet; store it with tapster init --rotate notary.");
     }
+  }
+  // An Action from before certificate labels refuses the entries that name one, so the workflow's pin has to move too.
+  if (pinState(before, TAPSTER, null) === "older") {
+    console.log(`The hub workflow runs tapster ${PIN.exec(before)![2]}, older than this tapster v${TAPSTER.version}. An older tapster may refuse entries with certificate:, so run tapster init --workflow too.`);
   }
   if (after === before) {
     console.log(`${FLOW} already passes the certificate ${label}.`);

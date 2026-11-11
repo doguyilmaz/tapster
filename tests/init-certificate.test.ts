@@ -7,6 +7,7 @@ import { FLOW, fillWorkflow } from "../src/cli/hubfiles";
 import { type StoreIO, storeCertificateFor } from "../src/cli/init";
 import { GitHub } from "../src/github";
 import { run } from "../src/run";
+import { TAPSTER } from "../src/version";
 import pins from "../templates/pins.json";
 import { FakeHub } from "./helpers/fakehub";
 
@@ -130,11 +131,45 @@ test("a renewed certificate of the same team keeps the label's notary key", asyn
 });
 
 test("a certificate moved to the hub's team drops the label's key, which would win over the hub's", async () => {
-  const h = hub({ TAPSTER_TEAM_ID: TEAM, TAPSTER_TEAM_ID_ACME: "OLDTEAM001" }, ACME_NOTARY);
+  const h = hub({ TAPSTER_TEAM_ID: TEAM, TAPSTER_TEAM_ID_ACME: "OLDTEAM001" }, [...HUB_NOTARY, ...ACME_NOTARY]);
   await quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, answers(p12, "pw")));
-  expect([...h.env.secrets].sort()).toEqual(["MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"]);
+  expect([...h.env.secrets].sort()).toEqual([...HUB_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
   expect(logs).toContain("Removed the notarization key stored for acme: it would win over the hub's key and may belong to another team.");
-  expect(logs).toContain("The hub has no notarization key yet; store it with tapster init --rotate notary.");
+  expect(logs).toContain(`The hub's notarization key notarizes it too, since both belong to team ${TEAM}.`);
+});
+
+test("the label's key stays when the hub has no notarization key to take over", async () => {
+  const h = hub({ TAPSTER_TEAM_ID: TEAM }, ACME_NOTARY);
+  const io = answers(p12, "pw");
+  await quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, io));
+  expect(io.asked).toHaveLength(2);
+  expect([...h.env.secrets].sort()).toEqual([...ACME_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
+  expect(logs).toContain(`The notarization key stored for acme stays, since the hub has no notarization key of its own. Apple accepts it only if it belongs to team ${TEAM}.`);
+  expect(logs.some((l) => l.startsWith("Removed"))).toBe(false);
+});
+
+test("a part of the label's key with no hub key to take over asks for the whole key", async () => {
+  const h = hub({ TAPSTER_TEAM_ID: TEAM }, ACME_NOTARY.slice(0, 1));
+  const io = answers(p12, "pw", p8, "KEY0000001", "0000000a-0000-4000-8000-00000000000b");
+  await quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, io));
+  expect([...h.env.secrets].sort()).toEqual([...ACME_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
+  expect(logs).toContain(`The certificate acme belongs to team ${TEAM}. Apple notarizes it only with an App Store Connect key of team ${TEAM}.`);
+});
+
+test("a hub workflow of an older tapster gets a note that its pin has to move too", async () => {
+  const build = { ...TAPSTER };
+  Object.assign(TAPSTER, { version: "1.2.0", sha: "b".repeat(40) });
+  try {
+    const h = hub({ TAPSTER_TEAM_ID: TEAM }, HUB_NOTARY);
+    await quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, answers(p12, "pw")));
+    expect(logs).toContain("The hub workflow runs tapster v1.0.0, older than this tapster v1.2.0. An older tapster may refuse entries with certificate:, so run tapster init --workflow too.");
+    Object.assign(TAPSTER, { version: "1.0.0", sha: "a".repeat(40) });
+    const current = hub({ TAPSTER_TEAM_ID: TEAM }, HUB_NOTARY);
+    await quietly(() => storeCertificateFor(current.gh, current.dir, HUB, "acme", false, answers(p12, "pw")));
+    expect(logs.some((l) => l.includes("older than this tapster"))).toBe(false);
+  } finally {
+    Object.assign(TAPSTER, build);
+  }
 });
 
 test("--notary stores only the label's notary key", async () => {

@@ -51,6 +51,8 @@ With the tapster MCP server connected, use its tools; otherwise use `gh`.
 - "signs with the certificate <label>, which this hub has not stored" or "has no notary key for that team": the entry
   names `certificate: <label>` and the hub lacks that certificate or its team's App Store Connect key. The user stores
   it in tapster setup (Optional extras) or with `tapster init --certificate <label>` (`--notary` for the key only).
+  Any other reason that starts with "certificate <label>:" failed with that certificate; follow the fix it carries,
+  which names `tapster init --certificate <label>` rather than the hub's `--rotate` commands where they differ.
   See https://tapster.doguyilmaz.com/guides/certificates/.
 - "the hub changed in ways only you may change it": someone else pushed to the hub's `main`; review and revert those
   commits.

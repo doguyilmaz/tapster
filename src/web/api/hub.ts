@@ -147,7 +147,8 @@ const parsedHub = (config: string | null, hub: string) => {
 };
 
 // A label's notary secrets win over the hub's key when any of them is set, so a partial set needs the rest stored.
-export function certificateViews(config: HubConfig, secrets: string[], v: (name: string) => string | null): CertificateView[] {
+// flow is the hub workflow on main (null before Hub files writes it, with every label).
+export function certificateViews(config: HubConfig, secrets: string[], v: (name: string) => string | null, flow: string | null): CertificateView[] {
   const hubTeam = v(certificateNames(null).team);
   return certificateLabels(config).map((label) => {
     const n = certificateNames(label);
@@ -155,7 +156,8 @@ export function certificateViews(config: HubConfig, secrets: string[], v: (name:
     const stored = secrets.includes(n.p12) && secrets.includes(n.password) && team !== null;
     const own = [n.notaryKey, n.notaryKeyId, n.notaryIssuer].filter((s) => secrets.includes(s)).length;
     const notary = !stored ? null : own === 3 ? "own" : own === 0 && team === hubTeam ? "hub" : "needed";
-    return { label, packages: config.packages.filter((p) => p.certificate === label).map((p) => p.name), stored, team, expires: v(n.expires) || null, notary };
+    const wired = flow === null || flow.includes(`${n.p12}: \${{ secrets.${n.p12} }}`);
+    return { label, packages: config.packages.filter((p) => p.certificate === label).map((p) => p.name), stored, team, expires: v(n.expires) || null, notary, wired };
   });
 }
 
@@ -235,7 +237,8 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
   ];
   const appId = v("TAPSTER_APP_ID");
   const held = s.apps.get(hub);
-  const macPackages = parsed?.config.packages.some(macosCode) ?? false;
+  // A package that names a certificate signs with it, not with the hub's own (as in doctor's credentialsCheck).
+  const macPackages = parsed?.config.packages.some((p) => macosCode(p) && !p.certificate) ?? false;
   const hasApple = Boolean(v("TAPSTER_TEAM_ID")) || names(secrets).includes("MACOS_NOTARY_KEY");
   const pinned = flow ? PIN.exec(flow) : null;
   const workflow = pinState(flow, TAPSTER, s.deps.pin);
@@ -270,7 +273,7 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
       doorbell: doorbellView(s, hub, v, { owner: repo.owner.id, hub: repo.id }),
       linux,
       sparkle: (parsed ? sparkleLabels(parsed.config) : []).map((label) => ({ label, stored: names(secrets).includes(`SPARKLE_KEY_${label.toUpperCase()}`) })),
-      certificates: parsed ? certificateViews(parsed.config, names(secrets), v) : [],
+      certificates: parsed ? certificateViews(parsed.config, names(secrets), v, flow) : [],
     },
   };
 }

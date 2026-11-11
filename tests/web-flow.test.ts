@@ -295,8 +295,8 @@ test("a labeled .p12 goes to the label's names and the hub workflow on main pass
   const before = hub.files!.get(FLOW)!;
   const hubVars = [hub.env!.vars.get("TAPSTER_TEAM_ID"), hub.env!.vars.get("TAPSTER_CERT_EXPIRES")];
   expect((await hubView()).extras.certificates).toEqual([
-    { label: "acme", packages: ["pix", "tool"], stored: false, team: null, expires: null, notary: null },
-    { label: "beta", packages: ["note"], stored: false, team: null, expires: null, notary: null },
+    { label: "acme", packages: ["pix", "tool"], stored: false, team: null, expires: null, notary: null, wired: false },
+    { label: "beta", packages: ["note"], stored: false, team: null, expires: null, notary: null, wired: false },
   ]);
   const writes = recordWrites();
   const refused = async (label: string, reason: string) => {
@@ -321,7 +321,7 @@ test("a labeled .p12 goes to the label's names and the hub workflow on main pass
   expect(hub.files!.get(FLOW)).toContain("MACOS_SIGN_P12_ACME: ${{ secrets.MACOS_SIGN_P12_ACME }}");
   expect((await call("POST", "/api/hub/certificate", labeledP12("acme", "t.p12"))).data).toMatchObject({ workflow: "unchanged", notary: "hub" });
   const view = (await hubView()).extras.certificates;
-  expect(view[0]).toEqual({ label: "acme", packages: ["pix", "tool"], stored: true, team: "ABCDE12345", expires: stored.data.expires as string, notary: "hub" });
+  expect(view[0]).toEqual({ label: "acme", packages: ["pix", "tool"], stored: true, team: "ABCDE12345", expires: stored.data.expires as string, notary: "hub", wired: true });
   expect(view[1]!.stored).toBe(false);
   useGhWrite(fake.ghWrite);
 });
@@ -360,11 +360,31 @@ test("a label's notary state needs all three of its secrets or none with the hub
   const vars: Record<string, string> = { TAPSTER_TEAM_ID: "ABCDE12345", TAPSTER_TEAM_ID_ACME: "ABCDE12345", TAPSTER_TEAM_ID_BETA: "QWERT67890" };
   const v = (n: string) => vars[n] ?? null;
   const stored = ["MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME", "MACOS_SIGN_P12_BETA", "MACOS_SIGN_PASSWORD_BETA"];
-  expect(certificateViews(config, stored, v).map((c) => c.notary)).toEqual(["hub", "needed"]);
-  expect(certificateViews(config, [...stored, "MACOS_NOTARY_KEY_ACME"], v)[0]!.notary).toBe("needed");
-  expect(certificateViews(config, [...stored, "MACOS_NOTARY_KEY_BETA", "MACOS_NOTARY_KEY_ID_BETA", "MACOS_NOTARY_ISSUER_ID_BETA"], v)[1]!.notary).toBe("own");
-  expect(certificateViews(config, stored.slice(1), v)[0]).toMatchObject({ stored: false, notary: null });
-  expect(certificateViews(config, stored, (n) => (n === "TAPSTER_TEAM_ID_BETA" ? null : v(n)))[1]).toMatchObject({ stored: false, team: null, notary: null });
+  expect(certificateViews(config, stored, v, null).map((c) => c.notary)).toEqual(["hub", "needed"]);
+  expect(certificateViews(config, [...stored, "MACOS_NOTARY_KEY_ACME"], v, null)[0]!.notary).toBe("needed");
+  expect(certificateViews(config, [...stored, "MACOS_NOTARY_KEY_BETA", "MACOS_NOTARY_KEY_ID_BETA", "MACOS_NOTARY_ISSUER_ID_BETA"], v, null)[1]!.notary).toBe("own");
+  expect(certificateViews(config, stored.slice(1), v, null)[0]).toMatchObject({ stored: false, notary: null });
+  expect(certificateViews(config, stored, (n) => (n === "TAPSTER_TEAM_ID_BETA" ? null : v(n)), null)[1]).toMatchObject({ stored: false, team: null, notary: null });
+});
+
+test("a hub whose macOS entries all name a certificate needs none of its own, and a card says when the workflow lacks one", async () => {
+  const files = fake.get("octo/homebrew-fresh")!.files!;
+  const config = files.get("tapster.yml")!;
+  const flow = files.get(FLOW)!;
+  const view = async () => (await call("GET", "/api/hub?hub=octo/homebrew-fresh")).data as unknown as HubView;
+  try {
+    files.set("tapster.yml", labeledApps);
+    const labeled = await view();
+    expect([labeled.apple.needed, labeled.apple.certificate, labeled.apple.notary]).toEqual([null, null, false]);
+    expect(labeled.extras.certificates.map((c) => c.wired)).toEqual([false, false]);
+    files.set(FLOW, patchCertificateEnv(flow, ["acme"]));
+    expect((await view()).extras.certificates.map((c) => c.wired)).toEqual([true, false]);
+    files.set("tapster.yml", `${labeledApps}  - { name: plain, repo: octo/plain, binaries: [plain], assets: { darwin-arm64: "plain_{version}.tar.gz" } }\n`);
+    expect((await view()).apple.needed).toBe(true);
+  } finally {
+    files.set("tapster.yml", config);
+    files.set(FLOW, flow);
+  }
 });
 
 test("the files step says whether moving the pin changes what runs in the hub", async () => {
