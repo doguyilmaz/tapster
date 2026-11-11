@@ -379,7 +379,7 @@ export type InitAction =
 
 const INIT_USAGE = "Run tapster init --help for the options.";
 
-function certificateLabel(label: string): string {
+export function certificateLabel(label: string): string {
   if (label === "id") throw new TapsterError("the label id is reserved", "MACOS_NOTARY_KEY_ID already names the hub's key, so pick another label for certificate in tapster.yml.");
   if (!CERT_LABEL.test(label)) throw new TapsterError(`${label} is not a valid label`, "Use up to 40 lowercase letters and digits, as in certificate in tapster.yml.");
   return label;
