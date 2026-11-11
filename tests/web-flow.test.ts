@@ -352,7 +352,8 @@ test("a certificate of another team asks for that team's notary key, stored unde
   expect((await hubView()).extras.certificates[1]!.notary).toBe("own");
   writes.length = 0;
   expect((await call("POST", "/api/hub/certificate", labeledP12("beta", "t.p12"))).data).toMatchObject({ team: "ABCDE12345", notary: "hub", removed: true });
-  expect(writes.slice(4)).toEqual(["secret delete MACOS_NOTARY_KEY_BETA", "secret delete MACOS_NOTARY_KEY_ID_BETA", "secret delete MACOS_NOTARY_ISSUER_ID_BETA"]);
+  expect(writes.slice(0, 3)).toEqual(["secret delete MACOS_NOTARY_KEY_BETA", "secret delete MACOS_NOTARY_KEY_ID_BETA", "secret delete MACOS_NOTARY_ISSUER_ID_BETA"]);
+  expect(writes.slice(3)).toEqual(["secret set MACOS_SIGN_P12_BETA", "secret set MACOS_SIGN_PASSWORD_BETA", "variable set TAPSTER_TEAM_ID_BETA", "variable set TAPSTER_CERT_EXPIRES_BETA"]);
   expect((await hubView()).extras.certificates[1]).toMatchObject({ team: "ABCDE12345", notary: "hub" });
   useGhWrite(fake.ghWrite);
 });
@@ -368,7 +369,8 @@ test("a certificate moved to a third team removes the second team's key, so the 
   expect((await hubView()).extras.certificates[1]).toMatchObject({ team: "QWERT67890", notary: "own" });
   const writes = recordWrites();
   expect((await call("POST", "/api/hub/certificate", labeledP12("beta", "t3.p12"))).data).toMatchObject({ team: "THIRD00001", notary: "needed", removed: true });
-  expect(writes.slice(4)).toEqual(keyNames.map((s) => `secret delete ${s}`));
+  expect(writes.slice(0, 3)).toEqual(keyNames.map((s) => `secret delete ${s}`));
+  expect(writes).toHaveLength(7);
   expect(keyNames.some((s) => hub.env!.secrets.has(s))).toBe(false);
   expect((await hubView()).extras.certificates[1]).toMatchObject({ team: "THIRD00001", notary: "needed" });
   useGhWrite(fake.ghWrite);

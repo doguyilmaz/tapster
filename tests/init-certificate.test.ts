@@ -58,7 +58,7 @@ function hub(vars: Record<string, string>, secrets: string[], flow: string | nul
   const env = { policies: ["main"], custom: true, vars: new Map(Object.entries(vars)), secrets: new Set(secrets) };
   fake.repo("homebrew-tap", { env });
   useGhWrite(fake.ghWrite);
-  return { dir, env, gh: new GitHub("t", fake.fetch, async () => {}, "user") };
+  return { dir, env, gh: new GitHub("t", fake.fetch, async () => {}, "user"), fake };
 }
 
 // Answers the prompts in order and records each question.
@@ -144,6 +144,29 @@ test("a certificate moved to a third team drops the old team's key before it ask
   await expect(quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, io))).rejects.toThrow("unexpected question: .p8 file (drag it here): ");
   expect(h.env.vars.get("TAPSTER_TEAM_ID_ACME")).toBe(TEAM);
   expect([...h.env.secrets].sort()).toEqual([...HUB_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
+  expect(logs).toContain(`Removed the notarization key stored for acme: it may belong to another team than the new certificate's team ${TEAM}.`);
+});
+
+test("a delete that fails stores nothing, so a second run still sees the old team and removes its key", async () => {
+  const h = hub({ TAPSTER_TEAM_ID: "HUBTEAM001", TAPSTER_TEAM_ID_ACME: "OLDTEAM001" }, [...HUB_NOTARY, ...ACME_NOTARY]);
+  useGhWrite(async (args, stdin) => {
+    if (args[0] === "secret" && args[1] === "delete") throw new Error("gh could not delete");
+    return h.fake.ghWrite(args, stdin);
+  });
+  await expect(quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, answers(p12, "pw")))).rejects.toThrow("gh could not delete");
+  expect(h.env.vars.get("TAPSTER_TEAM_ID_ACME")).toBe("OLDTEAM001");
+  expect([...h.env.secrets].sort()).toEqual([...HUB_NOTARY, ...ACME_NOTARY].sort());
+  useGhWrite(h.fake.ghWrite);
+  await expect(quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, answers(p12, "pw")))).rejects.toThrow("unexpected question: .p8 file (drag it here): ");
+  expect([...h.env.secrets].sort()).toEqual([...HUB_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
+});
+
+test("a key stored before its certificate is asked for again once the certificate's team is known", async () => {
+  const h = hub({ TAPSTER_TEAM_ID: "HUBTEAM001" }, ACME_NOTARY);
+  const io = answers(p12, "pw", p8, "KEY0000001", "0000000a-0000-4000-8000-00000000000b");
+  await quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, io));
+  expect(io.asked.slice(2)).toEqual([".p8 file (drag it here): ", "Key ID: ", "Issuer ID: "]);
+  expect([...h.env.secrets].sort()).toEqual([...ACME_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
   expect(logs).toContain(`Removed the notarization key stored for acme: it may belong to another team than the new certificate's team ${TEAM}.`);
 });
 

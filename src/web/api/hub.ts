@@ -393,9 +393,11 @@ async function storeLabeled(gh: GitHub, hub: string, login: string, { label, con
   await checkedMain(gh, hub, login);
   const [vars, secrets] = await Promise.all([hubEnv(gh, hub, "variables"), hubEnv(gh, hub, "secrets").then((xs) => xs.map((x) => x.name))]);
   const plan = labelNotary(label, cert.team, vars, secrets);
-  await saveCertificate(hub, data, password, cert, label);
+  // Before the certificate is stored: were a key to survive a failed delete, a second run would find the new team stored
+  // and take the old team's key for the new team's.
   const stale = labelNotaryRemoved(label, plan, secrets);
   for (const s of stale) await deleteEnvSecret(hub, s);
+  await saveCertificate(hub, data, password, cert, label);
   const workflow = await writeMain(gh, hub, login, async (_, read) => {
     const now = await read(FLOW);
     const next = now === null ? null : patchCertificateEnv(now, labels);

@@ -12,7 +12,7 @@ import { TAPSTER } from "../version";
 import { run } from "../run";
 import { appFromManifest, openUrl } from "./appflow";
 import { appInstallation, appManifest, storeApp } from "./hubapp";
-import { type Certificate, checkKeyId, checkP8, inspectP12, labelNotary, labelNotaryRemoved, notaryKey, saveCertificate, saveNotary, verifyNotary } from "./apple";
+import { type Certificate, type LabelNotary, checkKeyId, checkP8, inspectP12, labelNotary, labelNotaryRemoved, notaryKey, saveCertificate, saveNotary, verifyNotary } from "./apple";
 import { doorbellRepos, rotateDoorbell, setupDoorbell } from "./doorbell";
 import { currentRepo, deleteEnvSecret, hubEnv, setEnvSecret, setEnvVariable, userGitHub } from "./gh";
 import { localStore, newSparkleKey, requireStore } from "./keystore";
@@ -137,8 +137,8 @@ async function rotateAppKey(gh: GitHub, hub: string): Promise<void> {
 export type StoreIO = { ask: typeof ask; verify: typeof verifyNotary };
 const PROMPTS: StoreIO = { ask, verify: verifyNotary };
 
-// label null stores the hub's own certificate.
-async function storeCertificate(hub: string, label: string | null = null, io = PROMPTS): Promise<Certificate> {
+// label null stores the hub's own certificate. beforeSave runs once the .p12 is checked and before anything is stored.
+async function storeCertificate(hub: string, label: string | null = null, io = PROMPTS, beforeSave: (cert: Certificate) => Promise<void> = async () => {}): Promise<Certificate> {
   console.log(`Apple certificate${label === null ? "" : ` ${label}`}: a Developer ID Application certificate exported as .p12. In Keychain Access, open My Certificates,`);
   console.log("right-click \"Developer ID Application: ...\", choose Export and save it as .p12 with a password. Create one at");
   console.log("https://developer.apple.com/account/resources/certificates if you have none. It stays in your hub's secrets only.");
@@ -146,6 +146,7 @@ async function storeCertificate(hub: string, label: string | null = null, io = P
   const data = await readInput(path, "the .p12 file");
   const password = await io.ask(".p12 password: ", true);
   const cert = await inspectP12(data, password);
+  await beforeSave(cert);
   await saveCertificate(hub, data, password, cert, label);
   console.log(`Certificate${label === null ? "" : ` ${label}`} stored for team ${cert.team}. It expires on ${cert.expires}; the hub warns 30 days before.`);
   return cert;
@@ -286,8 +287,21 @@ export async function storeCertificateFor(gh: GitHub, dir: string, hub: string, 
     if (team) console.log(`Apple notarizes it only with an App Store Connect key of team ${team}, the team of the certificate ${label}.`);
     await storeNotary(hub, label, io);
   } else {
-    const cert = await storeCertificate(hub, label, io);
-    const plan = labelNotary(label, cert.team, vars, secrets);
+    // The label's keys that cannot serve the new certificate go before the certificate is stored. Were one to survive a
+    // failed delete, a second run would find the new team stored and take the old team's key for the new team's.
+    const judged = { plan: "hub" as LabelNotary };
+    const cert = await storeCertificate(hub, label, io, async (c) => {
+      judged.plan = labelNotary(label, c.team, vars, secrets);
+      const gone = labelNotaryRemoved(label, judged.plan, secrets);
+      for (const s of gone) await deleteEnvSecret(hub, s);
+      if (!gone.length) return;
+      console.log(
+        judged.plan === "stale"
+          ? `Removed the notarization key stored for ${label}: it would win over the hub's key and may belong to another team.`
+          : `Removed the notarization key stored for ${label}: it may belong to another team than the new certificate's team ${c.team}.`,
+      );
+    });
+    const plan = judged.plan;
     if (plan === "kept") {
       if (vars.find((v) => v.name === n.team)?.value === cert.team) console.log(`The notarization key stored for ${label} belongs to team ${cert.team} too, so it stays.`);
       else console.log(`The notarization key stored for ${label} stays, since the hub has no notarization key of its own. Apple accepts it only if it belongs to team ${cert.team}.`);
@@ -295,15 +309,8 @@ export async function storeCertificateFor(gh: GitHub, dir: string, hub: string, 
       const hubTeam = vars.find((v) => v.name === hubNames.team)?.value;
       const other = hubTeam && hubTeam !== cert.team ? `, not to the hub's team ${hubTeam}` : "";
       console.log(`The certificate ${label} belongs to team ${cert.team}${other}. Apple notarizes it only with an App Store Connect key of team ${cert.team}.`);
-      const gone = labelNotaryRemoved(label, plan, secrets);
-      for (const s of gone) await deleteEnvSecret(hub, s);
-      if (gone.length) console.log(`Removed the notarization key stored for ${label}: it may belong to another team than the new certificate's team ${cert.team}.`);
       await storeNotary(hub, label, io);
     } else {
-      if (plan === "stale") {
-        for (const s of labelNotaryRemoved(label, plan, secrets)) await deleteEnvSecret(hub, s);
-        console.log(`Removed the notarization key stored for ${label}: it would win over the hub's key and may belong to another team.`);
-      }
       console.log(`The hub's notarization key notarizes it too, since both belong to team ${cert.team}.`);
       if (![hubNames.notaryKey, hubNames.notaryKeyId, hubNames.notaryIssuer].every((s) => secrets.includes(s))) console.log("The hub has no notarization key yet; store it with tapster init --rotate notary.");
     }
