@@ -53,6 +53,10 @@ const help: Record<string, string> = {
                                store a Sparkle key from your keychain in the hub
   tapster init --sparkle <label> --new
                                make a Sparkle key, keep it in your keychain and store it in the hub
+  tapster init --certificate <label>
+                               store the certificate for the packages with certificate: <label>
+  tapster init --certificate <label> --notary
+                               store the notarization key of that certificate's team
   tapster init --doorbell      deploy the Worker that starts the hub when a project releases
   tapster init --linux         make the key for the apt and dnf repositories
   tapster init --workflow [--every <minutes>] [--tapster <commit>]

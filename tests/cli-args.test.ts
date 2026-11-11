@@ -20,6 +20,15 @@ test.each([["init --bogus"], ["init --rotate everything"], ["add --bogus"], ["do
   expect(res.stderr.toString()).not.toContain("gh");
 });
 
+test("tapster init --help lists the certificate commands, and a bad label is refused before anything runs", () => {
+  const help = cli(["init", "--help"]).stdout.toString();
+  expect(help).toContain("tapster init --certificate <label>\n");
+  expect(help).toContain("tapster init --certificate <label> --notary\n");
+  const res = cli(["init", "--certificate", "Acme"]);
+  expect(res.exitCode).toBe(1);
+  expect(res.stderr.toString()).toBe("tapster: Acme is not a valid label\n  Use up to 40 lowercase letters and digits, as in certificate in tapster.yml.\n");
+});
+
 test("without the GitHub CLI, tapster says how to get it", async () => {
   const { cliGh } = await import("../src/cli/gh");
   expect(() => cliGh(["/nonexistent/gh"])).toThrow(expect.objectContaining({ fix: expect.stringContaining("brew install gh") }));
