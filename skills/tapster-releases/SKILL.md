@@ -45,7 +45,13 @@ With the tapster MCP server connected, use its tools; otherwise use `gh`.
   that `tapster add` prints.
 - "no attestation yet": the project's workflow did not attest the files; the draft waits up to an hour.
 - "the Developer ID certificate expires on": renew it at developer.apple.com, then replace it in tapster setup
-  (Apple certificate) or with `tapster init --rotate certificate`.
+  (Apple certificate) or with `tapster init --rotate certificate`. "the Developer ID certificate <label> expires on"
+  (or "expired on") names a certificate that entries pick with `certificate: <label>`: replace it in tapster setup
+  (Optional extras, Certificates for single apps) or with `tapster init --certificate <label>` in the hub clone.
+- "signs with the certificate <label>, which this hub has not stored" or "has no notary key for that team": the entry
+  names `certificate: <label>` and the hub lacks that certificate or its team's App Store Connect key. The user stores
+  it in tapster setup (Optional extras) or with `tapster init --certificate <label>` (`--notary` for the key only).
+  See https://tapster.doguyilmaz.com/guides/certificates/.
 - "the hub changed in ways only you may change it": someone else pushed to the hub's `main`; review and revert those
   commits.
 - "tapster vX is out": update the hub workflow in tapster setup (Hub files) or with `tapster init --workflow`.

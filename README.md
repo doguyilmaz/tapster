@@ -84,6 +84,7 @@ To move a hub to a newer release, see [Upgrade tapster](https://tapster.doguyilm
   [the doorbell](https://tapster.doguyilmaz.com/guides/doorbell/),
   [workflow tags](https://tapster.doguyilmaz.com/guides/auto-tag/),
   [Dependabot](https://tapster.doguyilmaz.com/guides/dependabot/),
+  [certificates of single apps](https://tapster.doguyilmaz.com/guides/certificates/),
   [key rotation](https://tapster.doguyilmaz.com/guides/rotate/),
   [upgrades](https://tapster.doguyilmaz.com/guides/upgrade/)
 - Reference: [Commands](https://tapster.doguyilmaz.com/reference/commands/),

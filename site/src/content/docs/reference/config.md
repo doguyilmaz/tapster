@@ -53,6 +53,7 @@ YAML 1.2 rules apply: write `true` and `false`. `yes`, `no`, `on` and `off` are 
 | `license` | none | One SPDX identifier, such as `MIT`, for Scoop and the Linux packages. |
 | `attestation` | `auto` | `auto` checks the build attestation of every file of a public project. `off` skips it. |
 | `protection` | `on` | `on` refuses a project whose branches and tags are not protected. `dependabot` allows open `dependabot/...` branches, see [Dependabot](/guides/dependabot/). `off` turns the check off and warns on every run. |
+| `certificate` | the hub's certificate | The label of another Developer ID certificate that signs the package's macOS code: up to 40 lowercase letters and digits, not `id`. Needs a `darwin-*` asset. See [Sign apps with another certificate](/guides/certificates/). |
 
 ## Command line tools
 

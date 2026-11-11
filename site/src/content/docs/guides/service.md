@@ -2,7 +2,7 @@
 title: "Keep setup running"
 description: "Run tapster setup as a service on your computer, so its page is always there and updates tapster with one click."
 sidebar:
-  order: 11
+  order: 12
 ---
 
 `tapster setup` normally runs while you need it and stops after two hours without use. The tapster service keeps it

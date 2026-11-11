@@ -2,7 +2,7 @@
 title: "Rotate a key"
 description: "Replace a certificate or key that expires, leaked or is due for a change."
 sidebar:
-  order: 8
+  order: 9
 ---
 
 Each key has its own command. Run it in a clone of your hub. The old key keeps working until the new one is stored, so
@@ -16,6 +16,8 @@ A new key goes the same way as the first: from your computer into your own hub o
 | --- | --- | --- |
 | Developer ID certificate | `init --rotate certificate` | Before it expires. `doctor` warns 30 days ahead. |
 | App Store Connect API key | `init --rotate notary` | When you revoke the old key or it leaked. |
+| Certificate of a single app | `init --certificate <label>` | Before it expires. `doctor` warns 30 days ahead. See [Sign apps with another certificate](/guides/certificates/#renew-it). |
+| Its App Store Connect API key | `init --certificate <label> --notary` | When you revoke the old key or it leaked. |
 | tapster App key | `init --rotate app` | When it leaked or at your own interval. |
 | Doorbell App key | `init --rotate doorbell` | When it leaked or after an upgrade. See [Faster releases](/guides/doorbell/#rotate-its-key). |
 | Linux signing key | `init --rotate linux` | See [apt and dnf](/guides/linux/#rotate-the-key). |
