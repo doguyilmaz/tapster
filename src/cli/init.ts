@@ -284,7 +284,7 @@ export async function storeCertificateFor(gh: GitHub, dir: string, hub: string, 
   const hubNames = certificateNames(null);
   if (notaryOnly) {
     const team = vars.find((v) => v.name === n.team)?.value;
-    if (team) console.log(`Apple notarizes it only with an App Store Connect key of team ${team}, the team of the certificate ${label}.`);
+    if (team) console.log(`tapster notarizes it with an App Store Connect key of team ${team}, the team of the certificate ${label}.`);
     await storeNotary(hub, label, io);
   } else {
     // The label's keys that cannot serve the new certificate go before the certificate is stored. Were one to survive a
@@ -304,11 +304,11 @@ export async function storeCertificateFor(gh: GitHub, dir: string, hub: string, 
     const plan = judged.plan;
     if (plan === "kept") {
       if (vars.find((v) => v.name === n.team)?.value === cert.team) console.log(`The notarization key stored for ${label} belongs to team ${cert.team} too, so it stays.`);
-      else console.log(`The notarization key stored for ${label} stays, since the hub has no notarization key of its own. Apple accepts it only if it belongs to team ${cert.team}.`);
+      else console.log(`The notarization key stored for ${label} stays, since the hub has no notarization key of its own. It should belong to team ${cert.team}.`);
     } else if (plan === "needed") {
       const hubTeam = vars.find((v) => v.name === hubNames.team)?.value;
       const other = hubTeam && hubTeam !== cert.team ? `, not to the hub's team ${hubTeam}` : "";
-      console.log(`The certificate ${label} belongs to team ${cert.team}${other}. Apple notarizes it only with an App Store Connect key of team ${cert.team}.`);
+      console.log(`The certificate ${label} belongs to team ${cert.team}${other}. tapster notarizes it with an App Store Connect key of team ${cert.team}.`);
       await storeNotary(hub, label, io);
     } else {
       console.log(`The hub's notarization key notarizes it too, since both belong to team ${cert.team}.`);

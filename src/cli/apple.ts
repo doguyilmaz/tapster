@@ -66,10 +66,12 @@ export async function saveCertificate(hub: string, data: Uint8Array, password: s
   await setEnvVariable(hub, n.expires, cert.expires);
 }
 
-// How a labeled certificate of `team` gets notarized, judged from the hub's environment before the certificate is saved:
+// How a labeled certificate of `team` gets notarized, judged from the hub's environment before the certificate is saved.
+// tapster notarizes it only with a key of its own team, so each team's notarization history stays in its own account;
+// Apple itself accepts a key of any team.
 // kept: the label's own key stays, since it was stored for this team or the hub has no key that could serve instead;
 // hub: the hub's key is of the same team; stale: the same, but a key stored for the label (maybe of another team) would
-// win over the hub's, so it goes; needed: Apple needs a key of this team (what the label stores may be of another one,
+// win over the hub's, so it goes; needed: tapster needs a key of this team (what the label stores may be of another one,
 // see labelNotaryRemoved).
 export type LabelNotary = "kept" | "hub" | "stale" | "needed";
 

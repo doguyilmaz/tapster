@@ -33,7 +33,7 @@ export type HubView = {
 
 // A certificate that packages name with certificate: <label>. stored: its .p12, password and team are in the hub.
 // notary (once stored): own when the label has its three notary secrets, hub when the hub's key is of the same team,
-// needed when Apple needs a key of the label's team. wired: false when the hub workflow on main does not pass it.
+// needed when tapster needs a key of the label's team. wired: false when the hub workflow on main does not pass it.
 export type CertificateView = { label: string; packages: string[]; stored: boolean; team: string | null; expires: string | null; notary: "own" | "hub" | "needed" | null; wired: boolean };
 
 // What POST /api/hub/certificate answers. A labeled certificate also says whether the hub workflow on main changed and

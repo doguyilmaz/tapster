@@ -108,7 +108,7 @@ test("a certificate of another team asks for that team's notary key", async () =
   await quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, io));
   expect(io.asked.slice(2)).toEqual([".p8 file (drag it here): ", "Key ID: ", "Issuer ID: "]);
   expect([...h.env.secrets].sort()).toEqual([...HUB_NOTARY, ...ACME_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
-  expect(logs).toContain(`The certificate acme belongs to team ${TEAM}, not to the hub's team HUBTEAM001. Apple notarizes it only with an App Store Connect key of team ${TEAM}.`);
+  expect(logs).toContain(`The certificate acme belongs to team ${TEAM}, not to the hub's team HUBTEAM001. tapster notarizes it with an App Store Connect key of team ${TEAM}.`);
   expect(logs).toContain(`Notarization key for the certificate acme stored. You may delete ${p8} once you keep a backup.`);
 });
 
@@ -117,7 +117,7 @@ test("a hub without a certificate of its own asks for the label's notary key", a
   const io = answers(p12, "pw", p8, "KEY0000001", "0000000a-0000-4000-8000-00000000000b");
   await quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, io));
   expect([...h.env.secrets].sort()).toEqual([...ACME_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
-  expect(logs).toContain(`The certificate acme belongs to team ${TEAM}. Apple notarizes it only with an App Store Connect key of team ${TEAM}.`);
+  expect(logs).toContain(`The certificate acme belongs to team ${TEAM}. tapster notarizes it with an App Store Connect key of team ${TEAM}.`);
 });
 
 test("a renewed certificate of the same team keeps the label's notary key", async () => {
@@ -184,7 +184,7 @@ test("the label's key stays when the hub has no notarization key to take over", 
   await quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, io));
   expect(io.asked).toHaveLength(2);
   expect([...h.env.secrets].sort()).toEqual([...ACME_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
-  expect(logs).toContain(`The notarization key stored for acme stays, since the hub has no notarization key of its own. Apple accepts it only if it belongs to team ${TEAM}.`);
+  expect(logs).toContain(`The notarization key stored for acme stays, since the hub has no notarization key of its own. It should belong to team ${TEAM}.`);
   expect(logs.some((l) => l.startsWith("Removed"))).toBe(false);
 });
 
@@ -193,7 +193,7 @@ test("a part of the label's key with no hub key to take over asks for the whole 
   const io = answers(p12, "pw", p8, "KEY0000001", "0000000a-0000-4000-8000-00000000000b");
   await quietly(() => storeCertificateFor(h.gh, h.dir, HUB, "acme", false, io));
   expect([...h.env.secrets].sort()).toEqual([...ACME_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
-  expect(logs).toContain(`The certificate acme belongs to team ${TEAM}. Apple notarizes it only with an App Store Connect key of team ${TEAM}.`);
+  expect(logs).toContain(`The certificate acme belongs to team ${TEAM}. tapster notarizes it with an App Store Connect key of team ${TEAM}.`);
 });
 
 test("a hub workflow of an older tapster gets a note that its pin has to move too", async () => {
@@ -219,7 +219,7 @@ test("--notary stores only the label's notary key", async () => {
   expect(io.asked).toEqual([".p8 file (drag it here): ", "Key ID: ", "Issuer ID: "]);
   expect([...h.env.secrets].sort()).toEqual([...ACME_NOTARY, "MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME"].sort());
   expect([...h.env.vars.keys()].sort()).toEqual(["TAPSTER_TEAM_ID", "TAPSTER_TEAM_ID_ACME"]);
-  expect(logs).toContain(`Apple notarizes it only with an App Store Connect key of team ${TEAM}, the team of the certificate acme.`);
+  expect(logs).toContain(`tapster notarizes it with an App Store Connect key of team ${TEAM}, the team of the certificate acme.`);
   expect(readFileSync(join(h.dir, FLOW), "utf8")).toBe(fill(["acme"]));
 });
 

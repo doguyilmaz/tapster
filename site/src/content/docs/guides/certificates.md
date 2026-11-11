@@ -76,7 +76,8 @@ the steps that sign and notarize macOS code see them.
 
 ## 3. The notarization key
 
-Apple notarizes code only with an App Store Connect API key of the certificate's team.
+tapster notarizes a certificate's code with an App Store Connect API key of the same team, so each team's notarization
+history stays in its own account. Apple itself accepts a key of any team.
 
 - **A certificate of the hub's team** uses the hub's notarization key. tapster asks for no other.
 - **A certificate of another team** needs a key of that team. Create it in that team's App Store Connect as in

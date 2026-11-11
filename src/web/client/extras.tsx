@@ -577,7 +577,7 @@ const NOTARY: Record<"own" | "hub" | "needed", string> = { own: "A key stored fo
 const certificateGap = (c: CertificateView) => (!c.stored ? "Not stored" : c.notary === "needed" ? "Key missing" : !c.wired ? "Not in the workflow" : null);
 
 function notaryText(h: HubView, c: CertificateView): string {
-  if (c.notary === "needed") return `Missing: Apple needs a key of team ${c.team}`;
+  if (c.notary === "needed") return `Missing: tapster needs a key of team ${c.team}`;
   if (c.notary === "hub" && !h.apple.notary) return "The hub's key, of the same team. The hub has no notarization key yet; store it under Notarization key.";
   return NOTARY[c.notary ?? "needed"];
 }
@@ -618,8 +618,8 @@ function LabelCertificate({ h, c, open, picked, onOpen, onClose }: { h: HubView;
         <>
           <p class="muted small">
             {hubTeam && hubTeam !== c.team
-              ? `The certificate ${c.label} belongs to team ${c.team}, not to the hub's team ${hubTeam}. Apple notarizes it only with an App Store Connect key of team ${c.team}.`
-              : `Apple notarizes it only with an App Store Connect key of team ${c.team}, the team of the certificate ${c.label}.`}
+              ? `The certificate ${c.label} belongs to team ${c.team}, not to the hub's team ${hubTeam}. tapster notarizes it with an App Store Connect key of team ${c.team}.`
+              : `tapster notarizes it with an App Store Connect key of team ${c.team}, the team of the certificate ${c.label}.`}
           </p>
           <NotaryForm h={h} label={c.label} guide={c.notary !== "own"} onDone={() => onClose(null)} onCancel={cancel} />
         </>
