@@ -25,7 +25,7 @@ The new `.github/workflows/tapster-auto.yml` checks the default branch daily at 
 closed. GitHub may delay scheduled runs. You can also run **tapster auto** from GitHub Actions to check sooner.
 
 For a release after each push instead, use `tapster add --auto push`. The setup page offers the same choices under
-Projects, Update the project, Release mode. Choosing automatic mode authorizes releases from the default branch
+Projects, Release settings, Release mode (or Update the project when setup is incomplete). Choosing automatic mode authorizes releases from the default branch
 without a separate approval for each version. Existing environment approval requirements are kept and still apply.
 
 The build workflow stays separate and starts from a version tag. Auto mode requires it to explicitly accept `v*`
@@ -86,6 +86,17 @@ bunx @doguyilmaz/tapster add --auto off
 Commit and push the disabled workflow. The manual Release button becomes available once GitHub has that change.
 The existing deploy key and rulesets are kept; remove the deploy key in GitHub settings if nothing else needs it.
 Running `tapster add` without an auto option keeps an existing automatic workflow as it is.
+
+### Reading the project list
+
+The list and the project details show **Auto · daily**, **Auto · push**, **Workflow tags** for custom tagging workflows
+or **Manual**. A dot beside the repository name marks changes to review. **New commits** means the default branch
+has commits after its highest version tag; documentation-only commits may still be skipped by automation.
+**Config update**, **Config PR** and **Review config** describe changes needed in the hub entry.
+
+These indicators stay separate from the release stage. A draft can be waiting for the hub while newer commits are
+already visible in the list. A previous published release no longer hides those commits. A new tag with no release
+yet shows **Tagged v1.2.3; awaiting draft** rather than saying there is nothing new.
 
 ## Set it up
 

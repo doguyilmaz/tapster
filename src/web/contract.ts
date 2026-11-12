@@ -147,6 +147,7 @@ export type ProjectStatus = {
     next: string;
     autoTag: boolean;
     auto?: "daily" | "push" | "off" | null;
+    changes?: { since: string; commits: number } | null;
     atHead: string | null;
     suggest: { kind: "patch" | "minor" | "major"; reason: string } | null;
     head: CommitView | null;
@@ -169,7 +170,7 @@ export type ConfigView = {
 export type EntryCheck = { before: string; problem: Problem | null; same: boolean };
 
 // Bump on any change to ProjectStatus: the page keeps the last list in localStorage and paints it before GitHub answers.
-export const STATUS_VIEW_VERSION = 2;
+export const STATUS_VIEW_VERSION = 3;
 
 export type StatusView = { projects: ProjectStatus[] };
 

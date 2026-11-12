@@ -42,6 +42,28 @@ afterAll(() => {
 const statuses = async (query = "") => ((await call("GET", `/api/projects/status?hub=${HUB}${query}`)).data as unknown as StatusView).projects;
 const aims = async () => (await statuses()).find((p) => p.name === "aims")!;
 
+test("status counts commits once, keeps the count for large ranges and never marks divergent history as new", async () => {
+  const fetch = fake.fetch;
+  let calls = 0;
+  let status = "ahead";
+  let count = 2;
+  fake.fetch = async (input, init) => {
+    if (String(input).includes("/repos/octo/aims/compare/")) {
+      calls++;
+      return Response.json({ status, ahead_by: count, total_commits: count, commits: count > 1000 ? [] : Array.from({ length: count }, () => ({ commit: { message: "fix: crash" } })) });
+    }
+    return fetch(input, init);
+  };
+  try {
+    expect((await aims()).release).toMatchObject({ changes: { since: "v0.2.1", commits: 2 }, suggest: { kind: "patch" } });
+    expect(calls).toBe(1);
+    count = 1001;
+    expect((await aims()).release).toMatchObject({ changes: { since: "v0.2.1", commits: 1001 }, suggest: null });
+    status = "diverged";
+    expect((await aims()).release).toMatchObject({ changes: null, suggest: null });
+  } finally { fake.fetch = fetch; }
+});
+
 test("project status distinguishes automatic releases from manual mode even when the key remains", async () => {
   const repo = fake.get("octo/aims")!;
   const before = repo.files!.get(AUTO_FILE);

@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { FollowView, Problem as ProblemView, ProjectStatus, ReachView } from "../contract";
-import { type ProjectStep, type ProjectStepId, bumps, canRelease, followSteps, projectNext, projectSteps, releasableParent, tagCommand, tagProblem } from "../status";
+import { type ProjectStep, type ProjectStepId, bumps, canRelease, followSteps, projectNext, projectSteps, projectUpdates, releaseMode, releasableParent, tagCommand, tagProblem } from "../status";
 import { get, post } from "./api";
 import { confirm } from "./confirm";
 import { hub, hubName, problemOf, say, statusOf, tilde } from "./state";
@@ -24,19 +24,35 @@ export function StatusBadge({ s }: { s: ProjectStatus }) {
   return <Badge tone={next.state === "attention" ? "error" : next.state === "wait" ? undefined : "next"}>{next.label}</Badge>;
 }
 
+export function ReleaseModeBadge({ s }: { s: ProjectStatus }) {
+  const mode = releaseMode(s);
+  return mode ? <Badge title={mode.detail}>{mode.label}</Badge> : null;
+}
+
+function UpdateBadges({ s }: { s: ProjectStatus }) {
+  return <>{projectUpdates(s).map((update) => <Badge key={update.id} tone={update.tone} title={update.detail}>{update.label}</Badge>)}</>;
+}
+
 export function StatusRows({ list, paths, onOpen }: { list: ProjectStatus[]; paths: Map<string, string>; onOpen: (s: ProjectStatus) => void }) {
   return (
     <div class="card list">
       {list.map((s) => {
         const path = paths.get(s.repo.toLowerCase());
+        const updates = projectUpdates(s);
+        const id = `project-updates-${s.name}`;
         return (
-          <div class="item" key={s.repo}>
-            <button type="button" class="link" onClick={() => onOpen(s)}>
-              <span class="name">{s.repo}</span>
+          <div class="item project-item" key={s.repo}>
+            <button type="button" class="link" onClick={() => onOpen(s)} aria-describedby={updates.length ? id : undefined}>
+              <span class="project-name">
+                {updates.length > 0 && <span class="project-change-dot" aria-hidden="true" />}
+                <span class="name">{s.repo}</span>
+              </span>
               <span class="path">{path ? tilde(path) : "No clone on this computer"}</span>
             </button>
-            <span class="row">
+            <span class="row project-meta" id={id}>
               <Badge>{KIND[s.kind] ?? s.kind}</Badge>
+              <ReleaseModeBadge s={s} />
+              <UpdateBadges s={s} />
               <StatusBadge s={s} />
             </span>
           </div>
@@ -433,7 +449,7 @@ function ReleaseBox({ s, onStatus }: { s: ProjectStatus; onStatus: (s: ProjectSt
   );
 }
 
-export function StatusCard({ s, onStatus, fix }: { s: ProjectStatus; onStatus: (s: ProjectStatus) => void; fix: (id: ProjectStepId) => ComponentChildren }) {
+export function StatusCard({ s, onStatus, fix, onSettings }: { s: ProjectStatus; onStatus: (s: ProjectStatus) => void; fix: (id: ProjectStepId) => ComponentChildren; onSettings?: () => void }) {
   const [busy, setBusy] = useState(false);
   const steps = projectSteps(s);
   const state = (id: ProjectStepId) => steps.find((x) => x.id === id)?.state ?? "done";
@@ -456,11 +472,21 @@ export function StatusCard({ s, onStatus, fix }: { s: ProjectStatus; onStatus: (
         <h3 id={`status-${s.name}`} class="section-title">
           Where {s.name} stands
         </h3>
-        <Busy busy={busy} class="btn quiet small" onClick={refresh}>
-          {!busy && <Icon name="refresh" />}
-          Refresh
-        </Busy>
+        <div class="row">
+          {onSettings && <button type="button" class="btn secondary small" onClick={onSettings}>Release settings</button>}
+          <Busy busy={busy} class="btn quiet small" onClick={refresh}>
+            {!busy && <Icon name="refresh" />}
+            Refresh
+          </Busy>
+        </div>
       </div>
+      {!s.unreadable && (
+        <div class="row" aria-live="polite">
+          <ReleaseModeBadge s={s} />
+          <UpdateBadges s={s} />
+          {s.release.changes && <span class="muted small">{s.release.changes.commits.toLocaleString()} new {s.release.changes.commits === 1 ? "commit" : "commits"} since {s.release.changes.since}.</span>}
+        </div>
+      )}
       {s.unreadable ? (
         <Note tone="error" title={`GitHub did not show ${s.repo}`}>
           <span>{s.unreadable} If the repository was renamed or deleted, change or remove its entry in the hub's tapster.yml.</span>

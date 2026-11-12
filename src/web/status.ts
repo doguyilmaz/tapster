@@ -97,20 +97,44 @@ export type ProjectStep = { id: ProjectStepId; state: "done" | "open" | "wait" |
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
+export function releaseMode(s: ProjectStatus): { label: string; detail: string } | null {
+  if (s.unreadable) return null;
+  if (s.release.auto === "daily") return { label: "Auto · daily", detail: "Checks the default branch daily at 03:23 UTC; no per-release approval unless the environment requires one." };
+  if (s.release.auto === "push") return { label: "Auto · push", detail: "Checks each push to the default branch and picks the next version." };
+  if (s.release.auto !== "off" && s.release.autoTag) return { label: "Workflow tags", detail: "The project's own workflow chooses versions and pushes tags." };
+  return { label: "Manual", detail: "You choose when to create the next release tag." };
+}
+
+export function projectUpdates(s: ProjectStatus): { id: string; label: string; detail: string; tone: "next" | "warn" }[] {
+  if (s.unreadable) return [];
+  const updates: ReturnType<typeof projectUpdates> = [];
+  const changes = s.release.changes;
+  if (changes && changes.commits > 0) updates.push({ id: "commits", label: "New commits", detail: `${plural(changes.commits, "commit")} on ${s.defaultBranch} since ${changes.since}. Documentation-only changes may not trigger an automatic release.`, tone: "next" });
+  const config = s.config;
+  if (config?.pending?.blocked || config?.manual.length) updates.push({ id: "config", label: "Review config", detail: config.pending?.blocked ?? config.manual.join(" "), tone: "warn" });
+  else if (config?.pending) updates.push({ id: "config", label: "Config PR", detail: "Hub entry changes are waiting in a pull request. Open the project to review and merge them.", tone: "next" });
+  else if (config?.update) updates.push({ id: "config", label: "Config update", detail: "The package now ships something its hub entry does not describe. Open the project to review the changes.", tone: "next" });
+  return updates;
+}
+
 export function projectSteps(s: ProjectStatus): ProjectStep[] {
   if (s.unreadable) return [{ id: "setup", state: "attention", label: "GitHub did not show it" }];
   const r = s.release;
-  const release: ProjectStep = r.draft?.note
-    ? { id: "release", state: "attention", label: `Fix the draft ${r.draft.tag}` }
-    : r.draft
-      ? { id: "release", state: "wait", label: `The hub publishes ${r.draft.tag} next` }
-      : r.latest?.byHub
-        ? { id: "release", state: "done", label: `Published ${r.latest.tag}` }
-        : r.atHead
-          ? { id: "release", state: "done", label: `Nothing new since ${r.atHead}` }
-          : r.head?.skip && !r.autoTag
-            ? { id: "release", state: "open", label: `Push a commit without ${r.head.skip}` }
-            : { id: "release", state: "open", label: r.autoTag ? "Release from the workflow" : `Release ${r.next}` };
+  const tagged = r.highest && (!r.latest || compareSemver(parseTag(r.highest)!, parseTag(r.latest.tag)!) > 0) && (r.atHead === r.highest || r.changes?.since === r.highest);
+  const next = r.suggest ? bumps(r.highest)[r.suggest.kind] : r.next;
+  const automatic = r.auto === "daily" || r.auto === "push";
+  const releaseLabel = automatic ? "Automatic releases enabled" : r.autoTag ? "Release from the workflow" : `Release ${next}`;
+  const release: ProjectStep = (() => {
+    const step = (state: ProjectStep["state"], label: string): ProjectStep => ({ id: "release", state, label });
+    if (r.draft?.note) return step("attention", `Fix the draft ${r.draft.tag}`);
+    if (r.draft) return step("wait", `The hub publishes ${r.draft.tag} next`);
+    if (r.head?.skip && (!r.atHead || tagged)) return step("open", `Push a commit without ${r.head.skip}`);
+    if (tagged) return step("wait", `Tagged ${r.highest}; awaiting draft`);
+    if (r.changes && r.changes.commits > 0) return step("open", automatic ? `New commits on ${s.defaultBranch}` : releaseLabel);
+    if (r.latest?.byHub) return step("done", `Published ${r.latest.tag}`);
+    if (r.atHead) return step("done", `Nothing new since ${r.atHead}`);
+    return step("open", releaseLabel);
+  })();
   const steps: ProjectStep[] = [
     { id: "setup", state: s.setup.ok ? "done" : "open", label: "Set up the release workflow" },
     { id: "protect", state: s.protection.ok || s.protection.off ? "done" : "open", label: "Protect the repository" },

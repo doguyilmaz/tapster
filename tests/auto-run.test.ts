@@ -1,6 +1,6 @@
 import { afterAll, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -44,10 +44,10 @@ function fixture() {
   const eventFile = join(root, "event.json");
   const preload = join(root, "fetch.mjs");
   writeFileSync(eventFile, JSON.stringify({ repository: { default_branch: "main" } }));
-  const run = (mode: "plan" | "tag", options: { releases?: unknown[]; apiStatus?: number; output?: Record<string, string>; extra?: Record<string, string> } = {}) => {
+  const run = (mode: "plan" | "tag", options: { releases?: unknown[]; pages?: unknown[][]; apiStatus?: number; output?: Record<string, string>; extra?: Record<string, string> } = {}) => {
     const outputFile = join(root, "output");
     writeFileSync(outputFile, "");
-    writeFileSync(preload, `globalThis.fetch = async (url, options) => { if (!url.startsWith("https://api.github.com/repos/o/tool/releases?") || options.headers.Authorization !== ${JSON.stringify(`Bearer ${dummy}`)}) throw new Error("Unexpected request"); return new Response(${JSON.stringify(JSON.stringify(options.releases ?? []))}, {status: ${options.apiStatus ?? 200}}); };`);
+    writeFileSync(preload, `globalThis.fetch = async (url, options) => { if (!url.startsWith("https://api.github.com/repos/o/tool/releases?") || options.headers.Authorization !== ${JSON.stringify(`Bearer ${dummy}`)}) throw new Error("Unexpected request"); const pages = ${JSON.stringify(options.pages ?? null)}; const releases = pages ? pages[Number(new URL(url).searchParams.get("page")) - 1] ?? [] : ${JSON.stringify(options.releases ?? [])}; return new Response(JSON.stringify(releases), {status: ${options.apiStatus ?? 200}}); };`);
     const result = spawnSync(node, ["--import", preload, "--input-type=module", "-", mode], {
       cwd: repo, input: code(mode), encoding: "utf8", timeout: 20_000,
       env: { ...env, GITHUB_OUTPUT: outputFile, GITHUB_EVENT_PATH: eventFile, GITHUB_EVENT_NAME: "schedule", GITHUB_REF: "refs/heads/main", GITHUB_REPOSITORY: "o/tool", GH_TOKEN: dummy, ...(options.output ? { RELEASE_TAG: options.output.tag!, RELEASE_SHA: options.output.sha!, RELEASE_REFS: options.output.refs! } : {}), ...options.extra },
@@ -173,4 +173,50 @@ test("a non-squash merge includes the feature branch's commits and the merge's e
   f.git("-c", "commit.gpgsign=false", "merge", "--no-ff", "-m", "Merge pull request #7 from o/feature\n\nRemove legacy mode\n\nRelease: major", "feature");
   f.git("push", "-q", "origin", "main");
   expect(f.run("plan").output.tag).toBe("v2.0.0");
+});
+
+test("push and manual dispatch events on the default branch run the same version analysis", () => {
+  const f = fixture();
+  f.version();
+  f.commit("feat: add export");
+  for (const event of ["push", "workflow_dispatch"]) expect(f.run("plan", { extra: { GITHUB_EVENT_NAME: event } }).output.tag).toBe("v1.3.0");
+});
+
+test("a real Git revert leaves no release and a stable breaking change waits for explicit major authorization", () => {
+  const f = fixture();
+  f.version();
+  f.commit("feat: add export");
+  f.git("-c", "commit.gpgsign=false", "revert", "--no-edit", "HEAD");
+  expect(f.run("plan").output.tag).toBe("");
+  f.commit("feat!: remove legacy config");
+  expect(f.run("plan").status).toBe(1);
+  f.commit("Release legacy removal\n\nRelease: major", {});
+  expect(f.run("plan").output.tag).toBe("v2.0.0");
+});
+
+test("a draft on a later API page prevents both planning and tagging", () => {
+  const f = fixture();
+  const plan = f.run("plan");
+  const pages = [Array.from({ length: 100 }, () => ({ tag_name: "v0.0.1", draft: false })), [{ tag_name: "v0.1.0", draft: true }]];
+  expect(f.run("plan", { pages }).output.tag).toBe("");
+  expect(f.run("tag", { output: plan.output, pages }).stdout).toContain("appeared after analysis");
+  expect(f.git("ls-remote", "--tags", "origin")).toBe("");
+});
+
+test("version analysis and tag creation never execute project scripts, Git hooks or text conversion", () => {
+  const f = fixture();
+  f.version();
+  const marker = join(f.root, "project-code-ran");
+  const script = `#!/bin/sh\ntouch '${marker}'\n`;
+  f.commit("fix: crash", { "src/main.ts": "fixed", "package.json": JSON.stringify({ scripts: { test: `touch '${marker}'` } }), ".gitattributes": "* diff=trap\n" });
+  const hooks = join(f.root, "hooks");
+  mkdirSync(hooks);
+  for (const hook of ["pre-push", "reference-transaction"]) writeFileSync(join(hooks, hook), script, { mode: 0o755 });
+  f.git("config", "core.hooksPath", hooks);
+  f.git("config", "diff.trap.textconv", `touch '${marker}'`);
+  f.git("config", "diff.trap.command", `touch '${marker}'`);
+  const plan = f.run("plan");
+  expect(plan.output.tag).toBe("v1.2.4");
+  expect(f.run("tag", { output: plan.output }).status).toBe(0);
+  expect(existsSync(marker)).toBe(false);
 });

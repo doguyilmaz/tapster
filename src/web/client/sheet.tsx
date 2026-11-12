@@ -486,7 +486,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
     }
     return <span class="muted small">{info.branch === info.defaultBranch ? `The clone has tapster's files. Push ${info.branch}, then check again.` : `The clone's branch ${info.branch} has tapster's files. Merge it into ${info.defaultBranch} on GitHub.`}</span>;
   };
-  const card = status && <StatusCard s={status} onStatus={setStatus} fix={fix} />;
+  const card = status && <StatusCard s={status} onStatus={setStatus} fix={fix} onSettings={info && !addFixes && !added ? () => setEditing(true) : undefined} />;
   return (
     <Frame title={target.repo} sub={path ? tilde(path) : "No clone on this computer"} onClose={onClose}>
       {path && !info && !problem && (

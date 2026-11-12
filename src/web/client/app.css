@@ -240,6 +240,11 @@ details.more[open] summary { margin-bottom: 0.5rem; }
 .item button.link { all: unset; cursor: pointer; display: grid; gap: 0.15rem; min-width: 0; }
 .item button.link:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; border-radius: 6px; }
 .item:hover .name { color: var(--link); }
+.project-item { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
+.project-name { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
+.project-change-dot { flex: 0 0 0.5rem; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--link); align-self: center; }
+.project-meta { justify-content: flex-end; min-width: 0; gap: 0.4rem; }
+.project-meta .badge { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
 .files .file { border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
 .files summary { display: flex; align-items: center; gap: 0.7rem; padding: 0.7rem 0.9rem; cursor: pointer; list-style: none; }
 .files summary::-webkit-details-marker { display: none; }
@@ -312,6 +317,7 @@ details.more[open] summary { margin-bottom: 0.5rem; }
   .card.pad { padding: 1.1rem; }
   .grid2 { grid-template-columns: minmax(0, 1fr); }
   .item { grid-template-columns: minmax(0, 1fr); }
+  .project-meta { justify-content: flex-start; }
   .facts { grid-template-columns: minmax(0, 1fr); gap: 0.1rem; }
   .facts dd { margin-bottom: 0.5rem; }
   .title { font-size: 1.4rem; }

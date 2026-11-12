@@ -122,8 +122,8 @@ export function Problem({ problem }: { problem: { reason: string; fix: string } 
   );
 }
 
-export function Badge({ tone, children }: { tone?: "ok" | "warn" | "error" | "next"; children: ComponentChildren }) {
-  return <span class={`badge${tone ? ` ${tone}` : ""}`}>{children}</span>;
+export function Badge({ tone, title, children }: { tone?: "ok" | "warn" | "error" | "next"; title?: string; children: ComponentChildren }) {
+  return <span class={`badge${tone ? ` ${tone}` : ""}`} title={title}>{children}</span>;
 }
 
 export function Copy({ text, label = "Copy" }: { text: string; label?: string }) {

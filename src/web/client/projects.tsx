@@ -135,7 +135,7 @@ export function Projects() {
           </section>
           {other.length > 0 && (
             <section class="stack tight">
-              <button type="button" class="btn quiet" onClick={() => setAll(!all)} aria-expanded={all} style="justify-self: start">
+              <button type="button" class="btn quiet" onClick={() => setAll(!all)} aria-expanded={all} style="justify-self: start; max-width: 100%; white-space: normal; text-align: left">
                 <Icon name={all ? "down" : "right"} />
                 {other.length} other {other.length === 1 ? "clone" : "clones"} tapster cannot publish yet
               </button>
