@@ -10,16 +10,28 @@ import { FakeHub } from "./helpers/fakehub";
 import { webApp } from "./helpers/web";
 
 const HUB = "octo/homebrew-tap";
-const LAG = 40;
 const fake = new FakeHub("octo");
 const cf = new FakeCloudflare();
 const home = mkdtempSync(join(tmpdir(), "tapster-landing-"));
-const starts: number[] = [];
+let readRounds = 0;
+let replies: (() => void)[] = [];
+
+// Release concurrent requests together on the next event-loop turn. A read that needs an answer
+// cannot start until the following round, regardless of how long the runner pauses between callbacks.
+const nextReply = () => new Promise<void>((resolve) => {
+  replies.push(resolve);
+  if (replies.length !== 1) return;
+  setImmediate(() => {
+    const ready = replies;
+    replies = [];
+    readRounds++;
+    for (const reply of ready) reply();
+  });
+});
 let writing = 0;
 let most = 0;
 const slow = async (input: string | URL | Request, init?: RequestInit) => {
-  starts.push(performance.now());
-  await Bun.sleep(LAG);
+  await nextReply();
   return fake.fetch(input, init);
 };
 const app = webApp(fake, home, { github: async () => new GitHub("t", slow as typeof fetch, async () => {}, "user"), fetch: both(slow, cf) });
@@ -37,7 +49,7 @@ beforeAll(async () => {
   fake.repo("aims");
   useGhWrite(async (args, stdin) => {
     most = Math.max(most, ++writing);
-    await Bun.sleep(LAG);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     writing--;
     return fake.ghWrite(args, stdin);
   });
@@ -51,11 +63,10 @@ afterAll(() => {
   });
 });
 
-// Requests that start together form one round; the next round starts only after an answer, LAG later.
 const rounds = async (f: () => Promise<unknown>) => {
-  starts.length = 0;
+  const before = readRounds;
   await f();
-  return starts.filter((t, i) => i === 0 || t - starts[i - 1]! > LAG * 0.75).length;
+  return readRounds - before;
 };
 
 const back = async (state: string) => (await app.handle(new Request(`http://127.0.0.1:8277/app/callback?code=abc&state=${state}`, { headers: { host: "127.0.0.1:8277" } }))).headers.get("location");
