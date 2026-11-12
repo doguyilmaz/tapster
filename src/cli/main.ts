@@ -62,10 +62,11 @@ const help: Record<string, string> = {
   When the token reaches several accounts, tapster asks which one. CLOUDFLARE_ACCOUNT_ID answers that in advance.`,
   add: `tapster add: prepare this project clone and propose it to the hub
 
-  tapster add [--hub owner/repo] [--workflow file.yml] [--auto-tag] [--allow-dependabot] [--force]
+  tapster add [--hub owner/repo] [--workflow file.yml] [--auto [daily|push|off]] [--auto-tag] [--allow-dependabot] [--force]
     --hub               the hub that publishes this project (remembered in git config)
     --workflow          the workflow that runs GoReleaser, if not release.yml
     --auto-tag          let the project's release workflow push tags with a deploy key
+    --auto [daily|push|off]  pick versions and tag automatically (daily by default); off disables it
     --allow-dependabot  leave branches named dependabot/... open so Dependabot can open pull requests
     --force             replace an existing release workflow`,
   doctor: `tapster doctor: check the hub's setup on GitHub and name the command that fixes each finding

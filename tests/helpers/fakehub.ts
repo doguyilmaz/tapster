@@ -442,14 +442,14 @@ export class FakeHub {
         r.env.custom = true;
         return json({});
       }
-      return r.env ? json({ deployment_branch_policy: r.env.custom ? { custom_branch_policies: true } : null }) : json({}, 404);
+      return r.env ? json({ deployment_branch_policy: r.env.custom ? { protected_branches: false, custom_branch_policies: true } : null }) : json({}, 404);
     }
     if (/^\/environments\/\w+\/deployment-branch-policies/.test(rest)) {
       if (!r.env) return json({}, 404);
       if (method === "POST") r.env.policies.push(String(body.name));
       return json({ branch_policies: r.env.policies.map((name, id) => ({ id, name, type: "branch" })) });
     }
-    const envList = /^\/environments\/tapster\/(variables|secrets)$/.exec(rest);
+    const envList = /^\/environments\/(?:tapster|release)\/(variables|secrets)$/.exec(rest);
     if (envList) {
       if (!r.env) return json({}, 404);
       return json(envList[1] === "variables" ? { variables: [...r.env.vars].map(([name, value]) => ({ name, value })) } : { secrets: [...r.env.secrets].map((name) => ({ name })) });

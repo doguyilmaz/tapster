@@ -15,6 +15,7 @@ import { configOf } from "./config";
 import { type Pull, proposal } from "./entry";
 import { checkHub, hubRunList, me, startHubRun } from "./hub";
 import { type HubChecks, hubChecks, reachOf, reachRoutes, stateOf } from "./reach";
+import { AUTO_FILE, autoMode } from "../../cli/auto";
 
 const HOMEBREW_KEYS = ["notarize", "homebrew_casks", "brews", "scoops"];
 
@@ -22,9 +23,23 @@ const or = (items: string[]) => (items.length < 2 ? (items[0] ?? "") : `${items.
 const list = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : typeof v === "string" ? [v] : []);
 
 // What starts the release workflow besides a version tag or a manual run; a merge that matches one starts a release.
-async function sinceTag(gh: GitHub, repo: string, tag: string, sha: string): Promise<string[]> {
-  const cmp = await gh.json<{ commits?: { commit: { message: string } }[] }>("GET", `/repos/${repo}/compare/${encodeURIComponent(tag)}...${sha}`);
-  return (cmp.commits ?? []).map((c) => c.commit.message);
+export async function sinceTag(gh: GitHub, repo: string, tag: string, sha: string, onRange?: (ahead: number) => void): Promise<string[]> {
+  const messages: string[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const cmp = await gh.json<{ status?: string; ahead_by?: number; total_commits?: number; commits?: { commit: { message: string } }[] }>("GET", `/repos/${repo}/compare/${encodeURIComponent(tag)}...${sha}?per_page=100&page=${page}`);
+    const ahead = cmp.ahead_by ?? cmp.total_commits;
+    // The count is known before pagination. Large ranges and a later API failure must not hide new commits.
+    if (page === 1 && cmp.status === "ahead" && ahead !== undefined && Number.isSafeInteger(ahead) && ahead > 0) onRange?.(ahead);
+    if (!Array.isArray(cmp.commits) || cmp.status === "diverged" || cmp.status === "behind") throw new Error("The version's commit range could not be read completely.");
+    messages.push(...cmp.commits.map((c) => c.commit.message));
+    if (cmp.total_commits !== undefined && (!Number.isSafeInteger(cmp.total_commits) || cmp.total_commits < 0 || cmp.total_commits > 1000)) break;
+    if (cmp.commits.length < 100) {
+      if (cmp.total_commits !== undefined && messages.length !== cmp.total_commits) throw new Error("GitHub returned an incomplete commit range.");
+      return messages;
+    }
+    if (messages.length === cmp.total_commits) return messages;
+  }
+  throw new Error("More than 1000 commits need analysis. Make a manual version decision.");
 }
 
 export function releaseTriggers(workflow: string): string[] {
@@ -173,19 +188,25 @@ async function projectStatus(sh: Shared, e: Listed, start: Start): Promise<Proje
             (err) => (err instanceof TapsterError ? { proposal: null, blocked: `${err.reason}. ${err.fix}` } : Promise.reject(err)),
           )
         : Promise.resolve({ proposal: null, blocked: null }),
+      read(AUTO_FILE).then(autoMode).catch(() => null),
     ]),
   );
   const project = await start.project;
   const branch = project.default_branch;
   const problemsP = early(e.protection === "off" ? Promise.resolve([]) : protectionProblems(gh, e.repo, branch, "admin", e.protection === "dependabot").catch(() => ["GitHub did not show the repository's rulesets"]));
-  const [[goreleaser, workflow, keys, releases, listed, secrets, proposed], tip] = await Promise.all([reads, start.tip]);
+  const [[goreleaser, workflow, keys, releases, listed, secrets, proposed, auto], tip] = await Promise.all([reads, start.tip]);
   const refs = listed ?? [];
   const latest = newest(releases.filter((r) => !r.draft));
   const draft = newest(releases.filter((r) => r.draft && TAG.test(r.tag_name) && (!latest || compareSemver(parseTag(r.tag_name)!, parseTag(latest.tag_name)!) > 0)));
   const highest = highestTag([...refs.map((r) => r.name), ...releases.map((r) => r.tag_name)]);
   const headP = early(withParentTag(gh, e.repo, tip, listed));
   const atHeadP = early(tip ? tagAt(gh, e.repo, refs, tip.sha) : Promise.resolve(null));
-  const suggestP = early(atHeadP.then((atHead) => (tip && highest && !atHead ? sinceTag(gh, e.repo, highest, tip.sha).then((m) => suggestBump(m, highest), () => null) : null)));
+  const comparisonP = early(atHeadP.then(async (atHead) => {
+    let changes: ProjectStatus["release"]["changes"] = null;
+    if (!tip || !highest || atHead) return { changes, suggest: null };
+    const messages = await sinceTag(gh, e.repo, highest, tip.sha, (commits) => { changes = { since: highest, commits }; }).catch(() => null);
+    return { changes, suggest: messages?.length ? suggestBump(messages, highest) : null };
+  }));
   const configP = early(
     e.state === "merged"
       ? Promise.all([sh.hubText, sh.facts]).then(([hubText, facts]) =>
@@ -195,7 +216,7 @@ async function projectStatus(sh: Shared, e: Listed, start: Start): Promise<Proje
         )
       : Promise.resolve(null),
   );
-  const [head, atHead, suggest, config, problems, state, facts, ownerId, checks] = await Promise.all([headP, atHeadP, suggestP, configP, problemsP, sh.state, sh.facts, sh.ownerId, sh.checks]);
+  const [head, atHead, comparison, config, problems, state, facts, ownerId, checks] = await Promise.all([headP, atHeadP, comparisonP, configP, problemsP, sh.state, sh.facts, sh.ownerId, sh.checks]);
   const published = state.packages[e.name] ?? [];
   const setup = setupProblems({ kind: e.kind, branch, workflowName: e.workflow, goreleaser, workflow });
   return {
@@ -213,9 +234,11 @@ async function projectStatus(sh: Shared, e: Listed, start: Start): Promise<Proje
       draft: draft ? { tag: draft.tag_name, url: draft.html_url, note: noteIn(draft.body) } : null,
       highest,
       next: nextTag(highest),
-      autoTag: keys.some((k) => k.title === "tapster tags"),
+      autoTag: auto === "daily" || auto === "push" || (auto !== "off" && keys.some((k) => k.title === "tapster tags")),
+      auto,
       atHead,
-      suggest,
+      suggest: comparison.suggest,
+      changes: comparison.changes,
       head,
     },
     secrets: { names: secrets, published: published.some((p) => p.status === "published") },

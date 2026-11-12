@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { HubView, ProjectStatus } from "../src/web/contract";
-import { bumps, canRelease, followSteps, highestTag, nextTag, suggestBump, projectNext, projectStop, projectSteps, tagCommand, tagProblem } from "../src/web/status";
+import { bumps, canRelease, followSteps, highestTag, nextTag, suggestBump, projectNext, projectStop, projectSteps, projectUpdates, releaseMode, tagCommand, tagProblem } from "../src/web/status";
 import { stops } from "../src/web/steps";
 
 const reach = (reaches: boolean | null): ProjectStatus["app"] => ({
@@ -47,6 +47,59 @@ test("a chosen version must have the tag shape and be higher than every tag", ()
   expect(tagProblem("v0.2.1", "v0.2.1")).toContain("higher than v0.2.1");
   expect(tagProblem("v0.1.5", "v0.2.1")).toContain("higher than v0.2.1");
   expect(tagProblem("v0.2.1-rc.1", "v0.2.1")).toContain("higher than v0.2.1");
+});
+
+test("a published release cannot hide new commits, and the selected minor bump is shown", () => {
+  const s = aims();
+  s.release = { ...s.release, latest: { tag: "v1.2.3", url: "u", byHub: true }, highest: "v1.2.3", next: "v1.2.4", changes: { since: "v1.2.3", commits: 3 }, suggest: { kind: "minor", reason: "feat" } };
+  expect(projectSteps(s).find((x) => x.id === "release")).toMatchObject({ state: "open", label: "Release v1.3.0" });
+  expect(projectUpdates(s)).toMatchObject([{ id: "commits", label: "New commits", detail: expect.stringContaining("3 commits") }]);
+  s.release.auto = "daily";
+  s.release.autoTag = true;
+  expect(projectSteps(s).find((x) => x.id === "release")).toMatchObject({ state: "open", label: "New commits on main" });
+  s.release.draft = { tag: "v1.3.0", url: "d", note: null };
+  expect(projectSteps(s).find((x) => x.id === "release")).toMatchObject({ state: "wait" });
+  expect(projectUpdates(s)).toHaveLength(1);
+  s.release.draft.note = "Missing asset";
+  expect(projectSteps(s).find((x) => x.id === "release")).toMatchObject({ state: "attention" });
+});
+
+test("an unpublished tag awaits a draft while a published tag has nothing new", () => {
+  const s = aims();
+  s.release = { ...s.release, latest: { tag: "v1.2.3", url: "u", byHub: true }, highest: "v1.2.4", atHead: "v1.2.4" };
+  expect(projectSteps(s).find((x) => x.id === "release")).toMatchObject({ state: "wait", label: "Tagged v1.2.4; awaiting draft" });
+  s.release.highest = s.release.atHead = "v1.2.3";
+  expect(projectSteps(s).find((x) => x.id === "release")).toMatchObject({ state: "done", label: "Published v1.2.3" });
+  expect(projectUpdates(s)).toEqual([]);
+});
+
+test("configuration changes and their pending PR remain visible independently from release state", () => {
+  const s = aims();
+  s.config = { entry: "old", update: "new", from: [], manual: [], pending: null };
+  expect(projectUpdates(s)).toMatchObject([{ id: "config", label: "Config update" }]);
+  s.config.pending = { pr: "https://github.com/o/tap/pull/1", head: "h", entry: "new", blocked: null };
+  expect(projectUpdates(s)).toMatchObject([{ id: "config", label: "Config PR" }]);
+  s.config.pending.blocked = "The entry changed";
+  expect(projectUpdates(s)).toMatchObject([{ id: "config", label: "Review config", tone: "warn" }]);
+  s.release.changes = { since: "v1.2.3", commits: 1 };
+  expect(projectUpdates(s).map((x) => x.id)).toEqual(["commits", "config"]);
+  s.unreadable = "Unavailable";
+  expect(projectUpdates(s)).toEqual([]);
+});
+
+test("the release mode distinguishes built-in automation, custom workflow tags and manual releases", () => {
+  const s = aims();
+  expect(releaseMode(s)?.label).toBe("Manual");
+  s.release.autoTag = true;
+  expect(releaseMode(s)?.label).toBe("Workflow tags");
+  s.release.auto = "daily";
+  expect(releaseMode(s)?.label).toBe("Auto · daily");
+  s.release.auto = "push";
+  expect(releaseMode(s)?.label).toBe("Auto · push");
+  s.release.auto = "off";
+  expect(releaseMode(s)?.label).toBe("Manual");
+  s.unreadable = "Unavailable";
+  expect(releaseMode(s)).toBeNull();
 });
 
 test("the tag command tags the commit on GitHub, never the local clone", () => {
@@ -102,10 +155,10 @@ test("a project GitHub does not show needs attention and offers no release", () 
   expect(projectStop([gone], 1)).toEqual({ done: false, status: "aims: GitHub did not show it" });
 });
 
-test("a default branch whose tip already carries a version tag has nothing to release", () => {
+test("a default branch whose tip already carries an unpublished version tag cannot be tagged again", () => {
   const done = aims({ release: { ...aims().release, highest: "v0.2.2", next: "v0.2.3", atHead: "v0.2.2" } });
   expect(canRelease(done)).toEqual({ ok: false, why: "Nothing new on main since v0.2.2." });
-  expect(projectSteps(done).find((x) => x.id === "release")).toEqual({ id: "release", state: "done", label: "Nothing new since v0.2.2" });
+  expect(projectSteps(done).find((x) => x.id === "release")).toEqual({ id: "release", state: "wait", label: "Tagged v0.2.2; awaiting draft" });
 });
 
 test("an App reach the hub has not checked yet is a step but blocks no release", () => {
@@ -173,7 +226,7 @@ test("the suggested bump follows Conventional Commits since the highest tag", ()
   expect(suggestBump(["feat: dark mode", "feat(ui): picker", "fix: x"], "v1.4.2")).toEqual({ kind: "minor", reason: "2 commits add features (feat:)" });
   expect(suggestBump(["feat!: drop the old config", "fix: x"], "v1.4.2")).toEqual({ kind: "major", reason: "1 commit marks a breaking change" });
   expect(suggestBump(["refactor: x\n\nBREAKING CHANGE: the flag is gone"], "v1.4.2")).toEqual({ kind: "major", reason: "1 commit marks a breaking change" });
-  expect(suggestBump(["feat!: drop it"], "v0.4.2")).toEqual({ kind: "minor", reason: "1 commit marks a breaking change; before 1.0 that bumps the minor version" });
+  expect(suggestBump(["feat!: drop it"], "v0.4.2")).toEqual({ kind: "minor", reason: "1 commit marks a breaking change; before 1.0.0 that bumps the minor version" });
   expect(suggestBump(["Say in setup whether moving the pin changes the hub"], "v1.6.3")).toEqual({ kind: "patch", reason: "no commit since v1.6.3 uses Conventional Commits types, so pick the bump yourself" });
   expect(suggestBump([], null).kind).toBe("patch");
 });

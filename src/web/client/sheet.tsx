@@ -184,6 +184,7 @@ const ONE_GO = "tapster.oneGo";
 function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: InspectView; hubName: string; status: ProjectStatus | null; onAdded: (a: AddView) => void; onOneGo: (o: AddOptionsView) => void; onCancel: (() => void) | null }) {
   const [workflow, setWorkflow] = useState(info.workflow ?? "release.yml");
   const [autoTag, setAutoTag] = useState(status?.release.autoTag ?? false);
+  const [auto, setAuto] = useState<AddOptionsView["auto"]>(info.auto ?? null);
   const [dependabot, setDependabot] = useState(info.dependabot);
   const [force, setForce] = useState(false);
   const [oneGo, setOneGo] = useState(recall(ONE_GO) === "1");
@@ -191,11 +192,12 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
   const [busy, setBusy] = useState<"add" | "preview" | null>(null);
   const [problem, setProblem] = useState<ProblemView | null>(null);
   const noWorkflow = info.kind === "go" && info.workflows.length === 0;
-  const options = { workflow, autoTag, dependabot, force };
+  const automatic = auto === "daily" || auto === "push";
+  const options = { workflow, autoTag: automatic || (auto !== "off" && autoTag), auto, dependabot, force };
   const offered = !status || status.entry.state === "missing";
   const refusal = offered && oneGo ? oneGoRefusal(info) : null;
   const inOneGo = offered && oneGo && !refusal;
-  useEffect(() => setPreview(null), [workflow, autoTag, dependabot, force]);
+  useEffect(() => setPreview(null), [workflow, autoTag, auto, dependabot, force]);
   const act = async (what: "add" | "preview", f: () => Promise<void>) => {
     setBusy(what);
     setProblem(null);
@@ -272,9 +274,24 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
             .github/workflows/release.yml exists and tapster does not recognize it. Without this, tapster only adds the step that rings the hub, if the workflow opens a draft release.
           </Switch>
         )}
-        <Switch checked={autoTag} onChange={setAutoTag} title="Let the release workflow push tags">
-          For workflows that decide the version and tag by themselves. tapster adds a deploy key that only the default branch's release environment can use; the rulesets let deploy keys tag.
-        </Switch>
+        <div class="field">
+          <label for="auto-release">Release mode</label>
+          <select id="auto-release" class="input" value={auto ?? "keep"} onChange={(e) => {
+            const mode = (e.currentTarget as HTMLSelectElement).value;
+            setAuto(mode === "keep" ? null : mode as "daily" | "push" | "off");
+          }}>
+            {!info.auto && <option value="keep">Keep the current release process</option>}
+            <option value="daily">Automatic, once a day</option>
+            <option value="push">Automatic, after each push</option>
+            <option value="off">Manual</option>
+          </select>
+          <p class="muted small">Automatic mode picks the version from commits on the default branch. Documentation and CI changes are skipped. Major releases require a Release: major commit trailer.</p>
+        </div>
+        {!automatic && auto !== "off" && (
+          <Switch checked={autoTag} onChange={setAutoTag} title="Let the release workflow push tags">
+            For workflows that decide the version and tag by themselves. tapster adds a deploy key that only the default branch's release environment can use; the rulesets let deploy keys tag.
+          </Switch>
+        )}
         <Switch checked={dependabot} onChange={setDependabot} title="Keep Dependabot's pull requests">
           {info.dependabot ? "This clone uses Dependabot. " : ""}Branches named dependabot/... stay open to anything with write access, the hub's App included, so a stolen App key could run your workflows on its own code there.
         </Switch>
@@ -294,10 +311,16 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
             <Icon name="right" />
             <span>{status && status.entry.state !== "missing" ? `Keeps the project's entry in ${hubName} as it is.` : `Proposes the project's entry to ${hubName} as a pull request.`}</span>
           </li>
-          {autoTag && (
+          {(automatic || (autoTag && auto !== "off")) && (
             <li>
               <Icon name="right" />
               <span>Adds the deploy key "tapster tags" and a release environment.</span>
+            </li>
+          )}
+          {auto && (
+            <li>
+              <Icon name="right" />
+              <span>{automatic ? "Writes tapster-auto.yml to analyze versions and push release tags without per-release approval." : "Disables tapster's automatic release workflow. The existing tag key and repository rules are kept."}</span>
             </li>
           )}
           {inOneGo && (
@@ -463,7 +486,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
     }
     return <span class="muted small">{info.branch === info.defaultBranch ? `The clone has tapster's files. Push ${info.branch}, then check again.` : `The clone's branch ${info.branch} has tapster's files. Merge it into ${info.defaultBranch} on GitHub.`}</span>;
   };
-  const card = status && <StatusCard s={status} onStatus={setStatus} fix={fix} />;
+  const card = status && <StatusCard s={status} onStatus={setStatus} fix={fix} onSettings={info && !addFixes && !added ? () => setEditing(true) : undefined} />;
   return (
     <Frame title={target.repo} sub={path ? tilde(path) : "No clone on this computer"} onClose={onClose}>
       {path && !info && !problem && (
