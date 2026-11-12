@@ -77,13 +77,63 @@ test("macOS work waits for Apple credentials and a certificate that has not expi
   const ok = appleGate(all, cfg.packages, { team: "ABCDE12345", expires: "2031-10-19" }, now);
   expect(ok.items).toHaveLength(3);
   expect(ok.macos).toBe(true);
-  expect(ok.warning).toBeNull();
+  expect(ok.warnings).toEqual([]);
   const soon = appleGate(all, cfg.packages, { team: "ABCDE12345", expires: "2026-11-01" }, now);
-  expect(soon.warning).toEqual({ reason: "the Developer ID certificate expires on 2026-11-01", fix: "Create a new Developer ID Application certificate, then run tapster init --rotate certificate." });
+  expect(soon.warnings).toEqual([{ reason: "the Developer ID certificate expires on 2026-11-01", fix: "Create a new Developer ID Application certificate, then run tapster init --rotate certificate." }]);
   const expired = appleGate(all, cfg.packages, { team: "ABCDE12345", expires: "2026-10-01" }, now);
   expect(expired.failed.map((f) => f.name)).toEqual(["mac", "app"]);
   expect(expired.failed[0]!.error.reason).toContain("expired");
+  expect(expired.failed[0]!.error.reason).toBe("the Developer ID certificate expired on 2026-10-01");
   expect(appleGate([item("lin")], cfg.packages, { team: "", expires: "" }, now).macos).toBe(false);
+});
+
+const labeled = parseConfig(
+  `version: 1
+tap: o/tap
+packages:
+  - { name: mac, repo: o/mac, binaries: [mac], assets: { darwin-arm64: "m_{version}.tar.gz" } }
+  - { name: acme, repo: o/acme, binaries: [acme], certificate: acme, assets: { darwin-arm64: "a_{version}.tar.gz" } }
+  - { name: app, repo: o/app, kind: app, app: A.app, bundle_id: com.o.A, certificate: beta, assets: { darwin-arm64: "A-{version}.tar.gz" }, dmg: { name: "A-{version}.dmg" } }
+`,
+  "o",
+);
+
+test("a package that names a certificate waits for that certificate only", () => {
+  const all = [item("mac"), item("acme"), item("app")];
+  const hub = { team: "ABCDE12345", expires: "2031-10-19" };
+  const unstored = appleGate(all, labeled.packages, hub, now);
+  expect(unstored.items.map((i) => i.package)).toEqual(["mac"]);
+  expect(unstored.failed.map((f) => [f.name, f.error.reason])).toEqual([
+    ["acme", "acme signs with the certificate acme, which this hub has not stored"],
+    ["app", "app signs with the certificate beta, which this hub has not stored"],
+  ]);
+  expect(unstored.failed[0]!.error.fix).toBe("Run tapster init --certificate acme in the hub clone or store it in tapster setup (Optional extras), which also passes it to the workflow.");
+  expect(unstored.macos).toBe(true);
+  const certificates = { acme: { team: "FGHIJ67890", expires: "2026-10-01" }, beta: { team: "KLMNO12345", expires: "2031-10-19" } };
+  const mixed = appleGate(all, labeled.packages, { team: "", expires: "" }, now, certificates);
+  expect(mixed.items.map((i) => i.package)).toEqual(["app"]);
+  expect(mixed.failed.map((f) => [f.name, f.error.reason])).toEqual([
+    ["mac", "mac ships macOS code, but this hub has no Apple credentials"],
+    ["acme", "the Developer ID certificate acme expired on 2026-10-01"],
+  ]);
+  expect(mixed.failed[1]!.error.fix).toBe("Create a new Developer ID Application certificate, then run tapster init --certificate acme.");
+  const fine = appleGate(all, labeled.packages, hub, now, { ...certificates, acme: { team: "FGHIJ67890", expires: "2031-10-19" } });
+  expect(fine.items).toHaveLength(3);
+  expect(fine.failed).toEqual([]);
+  expect(fine.warnings).toEqual([]);
+});
+
+test("every certificate that expires within 30 days is warned about", () => {
+  const soon = appleGate([item("mac")], labeled.packages, { team: "ABCDE12345", expires: "2026-11-01" }, now, {
+    acme: { team: "FGHIJ67890", expires: "2026-11-02" },
+    beta: { team: "KLMNO12345", expires: "2031-10-19" },
+    unused: { team: "PQRST12345", expires: "2026-11-03" },
+  });
+  expect(soon.warnings).toEqual([
+    { reason: "the Developer ID certificate expires on 2026-11-01", fix: "Create a new Developer ID Application certificate, then run tapster init --rotate certificate." },
+    { reason: "the Developer ID certificate acme expires on 2026-11-02", fix: "Create a new Developer ID Application certificate, then run tapster init --certificate acme." },
+  ]);
+  expect(soon.items.map((i) => i.package)).toEqual(["mac"]);
 });
 
 test("init repairs a weakened hub ruleset and extra branch rules instead of leaving them", async () => {

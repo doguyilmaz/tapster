@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import type { HubView } from "../src/web/contract";
-import { installStep, landing, linuxWrite, stops, toolState } from "../src/web/steps";
+import type { CertificateView, HubView } from "../src/web/contract";
+import { extrasState, installStep, landing, linuxWrite, stops, toolState } from "../src/web/steps";
 
-const hub = (o: { apple?: Partial<HubView["apple"]>; files?: Partial<HubView["files"]> } = {}): HubView => ({
+const hub = (o: { apple?: Partial<HubView["apple"]>; files?: Partial<HubView["files"]>; certificates?: CertificateView[] } = {}): HubView => ({
   name: "octo/homebrew-tap",
   url: "u",
   private: false,
@@ -14,7 +14,7 @@ const hub = (o: { apple?: Partial<HubView["apple"]>; files?: Partial<HubView["fi
   packages: [],
   invalid: [],
   issue: null,
-  extras: { doorbell: { on: false, origin: null, app: null, install: null, key: false, cloudflare: null, accounts: null, tokenPage: "" }, linux: { wanted: false, stored: false, gpg: false, keystore: null, maintainer: null, tools: [], left: [] }, sparkle: [] },
+  extras: { doorbell: { on: false, origin: null, app: null, install: null, key: false, cloudflare: null, accounts: null, tokenPage: "" }, linux: { wanted: false, stored: false, gpg: false, keystore: null, maintainer: null, tools: [], left: [] }, sparkle: [], certificates: o.certificates ?? [] },
 });
 
 const status = (h: HubView, id: string) => stops(h, null).find((s) => s.id === id)!.status;
@@ -64,6 +64,18 @@ test("the Linux button says what it writes to tapster.yml", () => {
   expect(linuxWrite(false, 1)).toBe("Write 1 tool to tapster.yml");
   expect(linuxWrite(true, 2)).toBe("Write the maintainer and 2 tools to tapster.yml");
   expect(linuxWrite(false, 0)).toBe("Nothing to write");
+});
+
+test("Optional extras needs attention while a certificate a package names is missing or expires soon", () => {
+  const now = Date.parse("2099-01-01T00:00:00Z");
+  const cert = (label: string, o: Partial<CertificateView> = {}): CertificateView => ({ label, packages: ["pix"], stored: true, team: "5MYT4VYJFC", expires: "2100-01-01", notary: "hub", wired: true, ...o });
+  expect(extrasState(hub(), now)).toEqual({ attention: false, status: "Doorbell, apt and dnf, Sparkle, certificates" });
+  expect(extrasState(hub({ certificates: [cert("acme"), cert("beta", { notary: "own" })] }), now).attention).toBe(false);
+  expect(extrasState(hub({ certificates: [cert("acme", { stored: false, team: null, expires: null, notary: null })] }), now)).toEqual({ attention: true, status: "Certificate acme: not stored yet" });
+  expect(extrasState(hub({ certificates: [cert("acme", { notary: "needed" })] }), now).status).toBe("Certificate acme: needs a notarization key");
+  expect(extrasState(hub({ certificates: [cert("acme", { expires: "2099-01-20" })] }), now).status).toBe("Certificate acme: renew it soon");
+  expect(extrasState(hub({ certificates: [cert("acme", { wired: false, expires: "2099-01-20" })] }), now)).toEqual({ attention: true, status: "Certificate acme: not in the hub workflow" });
+  expect(extrasState(hub({ certificates: [cert("acme", { notary: "needed" }), cert("beta", { stored: false })] }), now)).toEqual({ attention: true, status: "2 certificates need you" });
 });
 
 test("each tool's switch reads as text, including what a write changes", () => {

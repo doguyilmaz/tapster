@@ -2,7 +2,7 @@
 title: "Use tapster with an AI assistant"
 description: "Connect tapster's MCP server and skills so an assistant can read your hub and explain a stuck release."
 sidebar:
-  order: 10
+  order: 11
 ---
 
 An AI assistant such as Claude Code can read your hub, its runs and your projects' releases through tapster's MCP

@@ -11,7 +11,8 @@ Run each command with `bunx @doguyilmaz/tapster <command>`. Every command takes 
 
 Opens the setup in your browser: choosing the hub, its protection, the GitHub App, the Apple credentials, the hub files,
 the projects on your computer and the hub's health. Under **Optional extras** it also deploys the
-[doorbell](/guides/doorbell/), makes the [apt and dnf](/guides/linux/) key and stores Sparkle keys. It does what `init`,
+[doorbell](/guides/doorbell/), makes the [apt and dnf](/guides/linux/) key and stores Sparkle keys and the
+[certificates of single apps](/guides/certificates/). It does what `init`,
 `add` and `doctor` do. It needs no clone of the hub. See [Create the hub](/tutorial/hub/).
 
 | Option | What it does |
@@ -57,6 +58,8 @@ rewrite the hub workflow for the tapster that runs them; review the diff before 
 | `init --rotate app` | Stores a new private key for the hub's App. |
 | `init --rotate certificate` | Stores a new Developer ID certificate. |
 | `init --rotate notary` | Stores a new App Store Connect API key. |
+| `init --certificate <label>` | Stores the Developer ID certificate of the packages with `certificate: <label>`. For a certificate of another team it also asks for that team's App Store Connect API key. Adds the certificate to the hub workflow; commit and push it. See [Sign apps with another certificate](/guides/certificates/). |
+| `init --certificate <label> --notary` | Stores a new App Store Connect API key for that certificate's team. |
 | `init --rotate doorbell` | Gives the doorbell a new key and redeploys it with the tapster you run and the hub's schedule. Asks for the token the same way. |
 | `init --rotate linux` | Makes a new Linux key. The old one keeps signing next to it. |
 | `init --rotate linux --finish` | Stops signing with the previous Linux key. |

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
-import type { AppStart, BellCloud, BellInstallView, DoorbellDone, HubView, LinuxChange, Problem as ProblemView } from "../contract";
-import { installStep, linuxWrite, toolState } from "../steps";
+import type { AppStart, BellCloud, BellInstallView, CertificateView, DoorbellDone, HubView, LinuxChange, Problem as ProblemView } from "../contract";
+import { expiresSoon, installStep, linuxWrite, toolState } from "../steps";
+import { CertificateForm, NotaryForm } from "./apple";
 import { ApiError, post } from "./api";
 import { doorbellResult, loadHub, problemOf, say, setCloud } from "./state";
 import { KIND } from "./status";
@@ -568,11 +569,138 @@ function SparkleKey({ h, label }: { h: HubView; label: string }) {
   );
 }
 
+type Opened = { label: string; what: "certificate" | "notary" };
+
+const NOTARY: Record<"own" | "hub" | "needed", string> = { own: "A key stored for this certificate", hub: "The hub's key, of the same team", needed: "Missing" };
+
+// What a certificate still needs before its entries can sign; null when it needs nothing.
+const certificateGap = (c: CertificateView) => (!c.stored ? "Not stored" : c.notary === "needed" ? "Key missing" : !c.wired ? "Not in the workflow" : null);
+
+function notaryText(h: HubView, c: CertificateView): string {
+  if (c.notary === "needed") return `Missing: tapster needs a key of team ${c.team}`;
+  if (c.notary === "hub" && !h.apple.notary) return "The hub's key, of the same team. The hub has no notarization key yet; store it under Notarization key.";
+  return NOTARY[c.notary ?? "needed"];
+}
+
+function LabelCertificate({ h, c, open, picked, onOpen, onClose }: { h: HubView; c: CertificateView; open: Opened["what"] | null; picked: boolean; onOpen: (what: Opened["what"]) => void; onClose: (next: Opened["what"] | null) => void }) {
+  const hubTeam = h.apple.certificate?.team ?? null;
+  const gap = certificateGap(c);
+  const cancel = picked ? () => onClose(null) : undefined;
+  return (
+    <div class="card pad stack tight">
+      <div class="spread">
+        <strong>
+          Certificate <code>{c.label}</code>
+        </strong>
+        <Badge tone={gap ? "warn" : "ok"}>{gap ?? "Stored"}</Badge>
+      </div>
+      <p class="muted small">It signs {c.packages.join(", ")}.</p>
+      {c.stored && (
+        <dl class="facts">
+          <dt>Team</dt>
+          <dd class="mono">{c.team}</dd>
+          <dt>Expires</dt>
+          <dd>
+            {c.expires ?? "Unknown"} {c.expires && expiresSoon(c.expires) && <Badge tone="error">Renew it soon</Badge>}
+          </dd>
+          <dt>Notarization key</dt>
+          <dd>{notaryText(h, c)}</dd>
+        </dl>
+      )}
+      {c.stored && !c.wired && (
+        <Note tone="warn" title="The hub workflow does not pass it">
+          <span>The workflow on main lacks this certificate, so its entries cannot sign. Update the workflow under Hub files or store the certificate again here; both add it.</span>
+        </Note>
+      )}
+      {open === "certificate" ? (
+        <CertificateForm h={h} label={c.label} guide={!c.stored} onDone={(s) => onClose(s.notary === "needed" ? "notary" : null)} onCancel={cancel} />
+      ) : open === "notary" && c.team ? (
+        <>
+          <p class="muted small">
+            {hubTeam && hubTeam !== c.team
+              ? `The certificate ${c.label} belongs to team ${c.team}, not to the hub's team ${hubTeam}. tapster notarizes it with an App Store Connect key of team ${c.team}.`
+              : `tapster notarizes it with an App Store Connect key of team ${c.team}, the team of the certificate ${c.label}.`}
+          </p>
+          <NotaryForm h={h} label={c.label} guide={c.notary !== "own"} onDone={() => onClose(null)} onCancel={cancel} />
+        </>
+      ) : (
+        <div class="row">
+          {!c.stored ? (
+            <button type="button" class="btn secondary" onClick={() => onOpen("certificate")}>
+              Store this certificate
+            </button>
+          ) : (
+            <>
+              <button type="button" class="btn secondary" onClick={() => onOpen("certificate")}>
+                Replace the certificate
+              </button>
+              {c.notary !== "hub" && (
+                <button type="button" class={c.notary === "needed" ? "btn secondary" : "btn quiet"} onClick={() => onOpen("notary")}>
+                  {c.notary === "needed" ? "Store its notarization key" : "Replace its notarization key"}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One form at a time, so a password manager saves each certificate under its own name. The first certificate that
+// misses something opens by itself.
+function Certificates({ h }: { h: HubView }) {
+  const list = h.extras.certificates;
+  const [picked, setPicked] = useState<Opened | null>(null);
+  const first = list.find((c) => !c.stored || c.notary === "needed");
+  const open: Opened | null = picked ?? (first ? { label: first.label, what: first.stored ? "notary" : "certificate" } : null);
+  const missing = list.filter((c) => certificateGap(c) !== null).length;
+  // An update that changes the hub's code may be the one that brings certificate labels, so an older pin could refuse them.
+  const older = h.files.workflow === "older" && h.files.update !== "optional";
+  return (
+    <section class="stack tight anchor" id="certificates">
+      <div class="spread">
+        <h3 class="section-title">Certificates for single apps</h3>
+        <Badge tone={missing ? "warn" : "ok"}>{missing ? `${missing} missing` : "All stored"}</Badge>
+      </div>
+      <p class="muted">
+        A package signs with the hub's Developer ID certificate unless its entry in tapster.yml says <code>certificate: &lt;label&gt;</code>. You choose that in the entry, under Configuration on the Projects page. Store each certificate here; tapster passes it to the hub workflow on main too.
+      </p>
+      {older && (
+        <Note tone="warn" title="Update the hub workflow too">
+          <span>The hub runs tapster {h.files.pinned}, older than this one. An older tapster may refuse entries with certificate:, so update the workflow under Hub files.</span>
+        </Note>
+      )}
+      {!h.protect.environment ? (
+        <Note tone="info" title="Protect the hub first">
+          <span>The certificates go into {h.name}'s tapster environment.</span>
+        </Note>
+      ) : (
+        list.map((c) => (
+          <LabelCertificate
+            key={c.label}
+            h={h}
+            c={c}
+            open={open?.label === c.label ? open.what : null}
+            picked={picked?.label === c.label}
+            onOpen={(what) => setPicked({ label: c.label, what })}
+            onClose={(next) => setPicked(next ? { label: c.label, what: next } : null)}
+          />
+        ))
+      )}
+      <a href={`${GUIDE}certificates/`} target="_blank" rel="noopener noreferrer" class="small">
+        Read the certificates guide
+      </a>
+    </section>
+  );
+}
+
 export function Extras({ h }: { h: HubView }) {
   const missing = h.extras.sparkle.filter((s) => !s.stored);
   return (
     <div class="panel">
       <Head title="Optional extras" lead="The hub works without these. Each one runs from this page; the terminal commands do the same." />
+      {h.extras.certificates.length > 0 && <Certificates h={h} />}
       <Doorbell h={h} />
       <Linux h={h} />
       {h.extras.sparkle.length > 0 && (
@@ -592,6 +720,15 @@ export function Extras({ h }: { h: HubView }) {
             .
           </p>
         </section>
+      )}
+      {h.extras.certificates.length === 0 && h.apple.needed && (
+        <p class="faint small">
+          To sign an app with another Developer ID certificate, add <code>certificate: &lt;label&gt;</code> to its entry in tapster.yml (Configuration on the Projects page); see the{" "}
+          <a href={`${GUIDE}certificates/`} target="_blank" rel="noopener noreferrer">
+            certificates guide
+          </a>
+          .
+        </p>
       )}
     </div>
   );

@@ -61,4 +61,8 @@ command `tapster add` prints, which tags the default branch's latest commit on G
 - A project's settings in the hub (its entry in `tapster.yml`) change from tapster setup: open the project under
   Projects and use Configuration. tapster proposes what the entry lacks and merges an edit only when it changes that
   entry alone.
+- An app of another Apple team (such as a client's) signs with its own certificate: its entry gets
+  `certificate: <label>`, then the user stores that `.p12` in tapster setup (Optional extras, Certificates for single
+  apps) or with `tapster init --certificate <label>` in the hub clone. See
+  https://tapster.doguyilmaz.com/guides/certificates/.
 - Problems with a release: use the tapster-releases skill.

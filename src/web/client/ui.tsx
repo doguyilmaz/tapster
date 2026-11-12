@@ -163,12 +163,13 @@ export function Out({ href, children, class: cls = "btn secondary", onClick }: {
   );
 }
 
-export function FileDrop(props: { name: string; accept: string; label: string; hint: ComponentChildren; file: File | null; onFile: (f: File | null) => void }) {
+export function FileDrop(props: { name: string; id?: string; accept: string; label: string; hint: ComponentChildren; file: File | null; onFile: (f: File | null) => void }) {
   const [over, setOver] = useState(false);
   const pick = (files: FileList | null) => props.onFile(files && files[0] ? files[0] : null);
+  const id = props.id ?? props.name;
   return (
     <div class="field">
-      <span class="label" id={`${props.name}-label`}>
+      <span class="label" id={`${id}-label`}>
         {props.label}
       </span>
       <label
@@ -184,7 +185,7 @@ export function FileDrop(props: { name: string; accept: string; label: string; h
           pick(e.dataTransfer?.files ?? null);
         }}
       >
-        <input type="file" name={props.name} accept={props.accept} aria-labelledby={`${props.name}-label`} onChange={(e) => pick((e.currentTarget as HTMLInputElement).files)} />
+        <input type="file" name={props.name} accept={props.accept} aria-labelledby={`${id}-label`} onChange={(e) => pick((e.currentTarget as HTMLInputElement).files)} />
         <Icon name={props.file ? "check" : "upload"} />
         <span>
           {props.file ? (

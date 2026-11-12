@@ -1,9 +1,12 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { parseHub } from "../src/config";
 import { run } from "../src/run";
 import { useGhWrite } from "../src/cli/gh";
+import { FLOW, patchCertificateEnv } from "../src/cli/hubfiles";
 import { newSparkleKey } from "../src/cli/keystore";
+import { certificateViews } from "../src/web/api/hub";
 import type { AddView, FilesView, HubView, InspectView, ScanView } from "../src/web/contract";
 import { sampleHome } from "../scripts/demo";
 import { FakeHub } from "./helpers/fakehub";
@@ -259,6 +262,150 @@ test("a Sparkle key goes to the hub only after the user pasted the very key the 
   expect(hub.env!.secrets.has("SPARKLE_KEY_PIX")).toBe(true);
   expect(hub.files!.get(".github/workflows/tapster.yml")).toContain('SPARKLE_KEY_PIX: "${{ secrets.SPARKLE_KEY_PIX }}"');
   expect((await call("POST", "/api/hub/sparkle/store", { hub: "octo/homebrew-tap", label: "pix", pasted: sparkle.seed })).status).toBe(400);
+});
+
+const labeledApps = `version: 1\ntap: octo/tap\npackages:
+  - { name: pix, repo: octo/pix, kind: app, app: Pix.app, bundle_id: com.octo.Pix, certificate: acme, assets: { darwin-arm64: "Pix-{version}.app.tar.gz" }, dmg: { name: "Pix-{version}.dmg" } }
+  - { name: note, repo: octo/note, kind: app, app: Note.app, bundle_id: com.octo.Note, certificate: beta, assets: { darwin-arm64: "Note-{version}.app.tar.gz" }, dmg: { name: "Note-{version}.dmg" } }
+  - { name: tool, repo: octo/tool, binaries: [tool], certificate: acme, assets: { darwin-arm64: "tool_{version}.tar.gz" } }
+`;
+
+// Records the names gh writes, so a test sees that the hub's own certificate names stay untouched.
+const recordWrites = () => {
+  const names: string[] = [];
+  useGhWrite(async (args, stdin) => {
+    names.push(`${args[0]} ${args[1]} ${args[2]}`);
+    return fake.ghWrite(args, stdin);
+  });
+  return names;
+};
+
+const labeledP12 = (label: string | null, file: string, password = "right") => {
+  const f = new FormData();
+  f.set("hub", "octo/homebrew-tap");
+  f.set("password", password);
+  f.set("p12", new File([readFileSync(join(home, file))], "cert.p12"));
+  if (label !== null) f.set("label", label);
+  return f;
+};
+
+const labeledKey = (label: string) => {
+  const f = new FormData();
+  f.set("hub", "octo/homebrew-tap");
+  f.set("keyId", "QWERT67890");
+  f.set("issuerId", "00000000-0000-4000-8000-000000000001");
+  f.set("p8", new File(["-----BEGIN PRIVATE KEY-----\nMIG\n-----END PRIVATE KEY-----\n"], "AuthKey_QWERT67890.p8"));
+  f.set("label", label);
+  return f;
+};
+
+test("a labeled .p12 goes to the label's names and the hub workflow on main passes it", async () => {
+  const hub = fake.get("octo/homebrew-tap")!;
+  hub.files!.set("tapster.yml", labeledApps);
+  const before = hub.files!.get(FLOW)!;
+  const hubVars = [hub.env!.vars.get("TAPSTER_TEAM_ID"), hub.env!.vars.get("TAPSTER_CERT_EXPIRES")];
+  expect((await hubView()).extras.certificates).toEqual([
+    { label: "acme", packages: ["pix", "tool"], stored: false, team: null, expires: null, notary: null, wired: false },
+    { label: "beta", packages: ["note"], stored: false, team: null, expires: null, notary: null, wired: false },
+  ]);
+  const writes = recordWrites();
+  const refused = async (label: string, reason: string) => {
+    const res = await call("POST", "/api/hub/certificate", labeledP12(label, "t.p12"));
+    expect(res.status).toBe(400);
+    expect((res.data.error as { reason: string }).reason).toBe(reason);
+  };
+  await refused("gamma", "no package in octo/homebrew-tap's tapster.yml signs with the certificate gamma");
+  await refused("id", "the label id is reserved");
+  await refused("Acme", "Acme is not a valid label");
+  await refused("", "the form named no certificate label");
+  expect((await call("POST", "/api/hub/certificate", labeledP12("acme", "t.p12", "wrong"))).status).toBe(400);
+  expect(writes).toEqual([]);
+  expect([...hub.env!.secrets].filter((s) => /_(ACME|BETA|GAMMA)$/.test(s) || s === "MACOS_SIGN_P12_ID")).toEqual([]);
+  const stored = await call("POST", "/api/hub/certificate", labeledP12("acme", "t.p12"));
+  expect(stored.data).toMatchObject({ team: "ABCDE12345", workflow: "committed", notary: "hub", removed: false });
+  expect(writes).toEqual(["secret set MACOS_SIGN_P12_ACME", "secret set MACOS_SIGN_PASSWORD_ACME", "variable set TAPSTER_TEAM_ID_ACME", "variable set TAPSTER_CERT_EXPIRES_ACME"]);
+  expect(hub.env!.vars.get("TAPSTER_TEAM_ID_ACME")).toBe("ABCDE12345");
+  expect(hub.env!.vars.get("TAPSTER_CERT_EXPIRES_ACME")).toBe(stored.data.expires as string);
+  expect([hub.env!.vars.get("TAPSTER_TEAM_ID"), hub.env!.vars.get("TAPSTER_CERT_EXPIRES")]).toEqual(hubVars);
+  expect(hub.files!.get(FLOW)).toBe(patchCertificateEnv(before, ["acme", "beta"]));
+  expect(hub.files!.get(FLOW)).toContain("MACOS_SIGN_P12_ACME: ${{ secrets.MACOS_SIGN_P12_ACME }}");
+  expect((await call("POST", "/api/hub/certificate", labeledP12("acme", "t.p12"))).data).toMatchObject({ workflow: "unchanged", notary: "hub" });
+  const view = (await hubView()).extras.certificates;
+  expect(view[0]).toEqual({ label: "acme", packages: ["pix", "tool"], stored: true, team: "ABCDE12345", expires: stored.data.expires as string, notary: "hub", wired: true });
+  expect(view[1]!.stored).toBe(false);
+  useGhWrite(fake.ghWrite);
+});
+
+test("a certificate of another team asks for that team's notary key, stored under the label's names", async () => {
+  const hub = fake.get("octo/homebrew-tap")!;
+  await run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(home, "k2.pem"), "-out", join(home, "c2.pem"), "-days", "30", "-subj", "/CN=Developer ID Application: Other (QWERT67890)/OU=QWERT67890"]);
+  await run("openssl", ["pkcs12", "-export", "-in", join(home, "c2.pem"), "-inkey", join(home, "k2.pem"), "-out", join(home, "t2.p12"), "-passout", "pass:right"]);
+  expect((await call("POST", "/api/hub/certificate", labeledP12("beta", "t2.p12"))).data).toMatchObject({ team: "QWERT67890", workflow: "unchanged", notary: "needed", removed: false });
+  expect((await hubView()).extras.certificates[1]).toMatchObject({ label: "beta", stored: true, team: "QWERT67890", notary: "needed" });
+  const key = labeledKey;
+  const writes = recordWrites();
+  expect((await call("POST", "/api/hub/notary", key("gamma"))).status).toBe(400);
+  expect((await call("POST", "/api/hub/notary", key("id"))).status).toBe(400);
+  expect(writes).toEqual([]);
+  expect((await call("POST", "/api/hub/notary", key("beta"))).data).toEqual({ checked: false });
+  expect(writes).toEqual(["secret set MACOS_NOTARY_KEY_BETA", "secret set MACOS_NOTARY_KEY_ID_BETA", "secret set MACOS_NOTARY_ISSUER_ID_BETA"]);
+  expect((await hubView()).extras.certificates[1]!.notary).toBe("own");
+  writes.length = 0;
+  expect((await call("POST", "/api/hub/certificate", labeledP12("beta", "t.p12"))).data).toMatchObject({ team: "ABCDE12345", notary: "hub", removed: true });
+  expect(writes.slice(0, 3)).toEqual(["secret delete MACOS_NOTARY_KEY_BETA", "secret delete MACOS_NOTARY_KEY_ID_BETA", "secret delete MACOS_NOTARY_ISSUER_ID_BETA"]);
+  expect(writes.slice(3)).toEqual(["secret set MACOS_SIGN_P12_BETA", "secret set MACOS_SIGN_PASSWORD_BETA", "variable set TAPSTER_TEAM_ID_BETA", "variable set TAPSTER_CERT_EXPIRES_BETA"]);
+  expect((await hubView()).extras.certificates[1]).toMatchObject({ team: "ABCDE12345", notary: "hub" });
+  useGhWrite(fake.ghWrite);
+});
+
+test("a certificate moved to a third team removes the second team's key, so the card asks for the third team's key", async () => {
+  const hub = fake.get("octo/homebrew-tap")!;
+  await run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(home, "k3.pem"), "-out", join(home, "c3.pem"), "-days", "30", "-subj", "/CN=Developer ID Application: Third (THIRD00001)/OU=THIRD00001"]);
+  await run("openssl", ["pkcs12", "-export", "-in", join(home, "c3.pem"), "-inkey", join(home, "k3.pem"), "-out", join(home, "t3.p12"), "-passout", "pass:right"]);
+  const keyNames = ["MACOS_NOTARY_KEY_BETA", "MACOS_NOTARY_KEY_ID_BETA", "MACOS_NOTARY_ISSUER_ID_BETA"];
+  expect((await call("POST", "/api/hub/certificate", labeledP12("beta", "t2.p12"))).data).toMatchObject({ team: "QWERT67890", notary: "needed", removed: false });
+  expect((await call("POST", "/api/hub/notary", labeledKey("beta"))).data).toEqual({ checked: false });
+  expect(keyNames.every((s) => hub.env!.secrets.has(s))).toBe(true);
+  expect((await hubView()).extras.certificates[1]).toMatchObject({ team: "QWERT67890", notary: "own" });
+  const writes = recordWrites();
+  expect((await call("POST", "/api/hub/certificate", labeledP12("beta", "t3.p12"))).data).toMatchObject({ team: "THIRD00001", notary: "needed", removed: true });
+  expect(writes.slice(0, 3)).toEqual(keyNames.map((s) => `secret delete ${s}`));
+  expect(writes).toHaveLength(7);
+  expect(keyNames.some((s) => hub.env!.secrets.has(s))).toBe(false);
+  expect((await hubView()).extras.certificates[1]).toMatchObject({ team: "THIRD00001", notary: "needed" });
+  useGhWrite(fake.ghWrite);
+});
+
+test("a label's notary state needs all three of its secrets or none with the hub's team", () => {
+  const config = parseHub(labeledApps, "octo").config;
+  const vars: Record<string, string> = { TAPSTER_TEAM_ID: "ABCDE12345", TAPSTER_TEAM_ID_ACME: "ABCDE12345", TAPSTER_TEAM_ID_BETA: "QWERT67890" };
+  const v = (n: string) => vars[n] ?? null;
+  const stored = ["MACOS_SIGN_P12_ACME", "MACOS_SIGN_PASSWORD_ACME", "MACOS_SIGN_P12_BETA", "MACOS_SIGN_PASSWORD_BETA"];
+  expect(certificateViews(config, stored, v, null).map((c) => c.notary)).toEqual(["hub", "needed"]);
+  expect(certificateViews(config, [...stored, "MACOS_NOTARY_KEY_ACME"], v, null)[0]!.notary).toBe("needed");
+  expect(certificateViews(config, [...stored, "MACOS_NOTARY_KEY_BETA", "MACOS_NOTARY_KEY_ID_BETA", "MACOS_NOTARY_ISSUER_ID_BETA"], v, null)[1]!.notary).toBe("own");
+  expect(certificateViews(config, stored.slice(1), v, null)[0]).toMatchObject({ stored: false, notary: null });
+  expect(certificateViews(config, stored, (n) => (n === "TAPSTER_TEAM_ID_BETA" ? null : v(n)), null)[1]).toMatchObject({ stored: false, team: null, notary: null });
+});
+
+test("a hub whose macOS entries all name a certificate needs none of its own, and a card says when the workflow lacks one", async () => {
+  const files = fake.get("octo/homebrew-fresh")!.files!;
+  const config = files.get("tapster.yml")!;
+  const flow = files.get(FLOW)!;
+  const view = async () => (await call("GET", "/api/hub?hub=octo/homebrew-fresh")).data as unknown as HubView;
+  try {
+    files.set("tapster.yml", labeledApps);
+    const labeled = await view();
+    expect([labeled.apple.needed, labeled.apple.certificate, labeled.apple.notary]).toEqual([null, null, false]);
+    expect(labeled.extras.certificates.map((c) => c.wired)).toEqual([false, false]);
+    files.set(FLOW, patchCertificateEnv(flow, ["acme"]));
+    expect((await view()).extras.certificates.map((c) => c.wired)).toEqual([true, false]);
+    files.set("tapster.yml", `${labeledApps}  - { name: plain, repo: octo/plain, binaries: [plain], assets: { darwin-arm64: "plain_{version}.tar.gz" } }\n`);
+    expect((await view()).apple.needed).toBe(true);
+  } finally {
+    files.set("tapster.yml", config);
+    files.set(FLOW, flow);
+  }
 });
 
 test("the files step says whether moving the pin changes what runs in the hub", async () => {

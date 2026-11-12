@@ -2,6 +2,7 @@ import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { CERT_LABEL, certificateLabels, certificateNames } from "../certificates";
 import { type HubConfig, isApp, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import { GitHub } from "../github";
@@ -11,15 +12,15 @@ import { TAPSTER } from "../version";
 import { run } from "../run";
 import { appFromManifest, openUrl } from "./appflow";
 import { appInstallation, appManifest, storeApp } from "./hubapp";
-import { checkKeyId, checkP8, inspectP12, notaryKey, saveCertificate, saveNotary, verifyNotary } from "./apple";
+import { type Certificate, type LabelNotary, checkKeyId, checkP8, inspectP12, labelNotary, labelNotaryRemoved, notaryKey, saveCertificate, saveNotary, verifyNotary } from "./apple";
 import { doorbellRepos, rotateDoorbell, setupDoorbell } from "./doorbell";
-import { currentRepo, hubEnv, setEnvSecret, setEnvVariable, userGitHub } from "./gh";
+import { currentRepo, deleteEnvSecret, hubEnv, setEnvSecret, setEnvVariable, userGitHub } from "./gh";
 import { localStore, newSparkleKey, requireStore } from "./keystore";
 import { findGpg, finishLinuxRotation, linuxKeyAllowed, makeLinuxKey } from "./linuxkey";
 import { cleanPath, readInput } from "./paths";
 import { waitFor } from "./poll";
 import { cronFor, everyFromFlow } from "./schedule";
-import { FLOW, type Schedule, hubFiles, patchSparkleEnv, sparkleLabels, workflowFile } from "./hubfiles";
+import { FLOW, type HubLabels, PIN, type Schedule, hubFiles, hubLabels, patchCertificateEnv, patchSparkleEnv, pinState, sparkleLabels, workflowFile } from "./hubfiles";
 import { ask } from "./prompt";
 
 export function initSteps(have: { vars: string[]; secrets: string[] }, mac: boolean): string[] {
@@ -57,6 +58,12 @@ export function keyPins(config: HubConfig, label: string, publicKey: string): st
     users.push(p.name);
   }
   if (users.length === 0) throw new TapsterError(`no package in tapster.yml uses the Sparkle key ${label}`, "Add the package with its sparkle section first.");
+  return users;
+}
+
+export function certificateUsers(config: HubConfig, label: string): string[] {
+  const users = config.packages.filter((p) => p.certificate === label).map((p) => p.name);
+  if (users.length === 0) throw new TapsterError(`no package in tapster.yml signs with the certificate ${label}`, `Add certificate: ${label} to the packages that should use it first.`);
   return users;
 }
 
@@ -126,30 +133,38 @@ async function rotateAppKey(gh: GitHub, hub: string): Promise<void> {
   console.log(`Now delete every other key on that page so the old one stops working. Then delete ${path}.`);
 }
 
-async function storeCertificate(hub: string): Promise<void> {
-  console.log("Apple certificate: a Developer ID Application certificate exported as .p12. In Keychain Access, open My Certificates,");
+// The prompts and Apple's check of a notary key; tests replace them.
+export type StoreIO = { ask: typeof ask; verify: typeof verifyNotary };
+const PROMPTS: StoreIO = { ask, verify: verifyNotary };
+
+// label null stores the hub's own certificate. beforeSave runs once the .p12 is checked and before anything is stored.
+async function storeCertificate(hub: string, label: string | null = null, io = PROMPTS, beforeSave: (cert: Certificate) => Promise<void> = async () => {}): Promise<Certificate> {
+  console.log(`Apple certificate${label === null ? "" : ` ${label}`}: a Developer ID Application certificate exported as .p12. In Keychain Access, open My Certificates,`);
   console.log("right-click \"Developer ID Application: ...\", choose Export and save it as .p12 with a password. Create one at");
   console.log("https://developer.apple.com/account/resources/certificates if you have none. It stays in your hub's secrets only.");
-  const path = cleanPath(await ask(".p12 file (drag it here): "));
+  const path = cleanPath(await io.ask(".p12 file (drag it here): "));
   const data = await readInput(path, "the .p12 file");
-  const password = await ask(".p12 password: ", true);
+  const password = await io.ask(".p12 password: ", true);
   const cert = await inspectP12(data, password);
-  await saveCertificate(hub, data, password, cert);
-  console.log(`Certificate stored for team ${cert.team}. It expires on ${cert.expires}; the hub warns 30 days before.`);
+  await beforeSave(cert);
+  await saveCertificate(hub, data, password, cert, label);
+  console.log(`Certificate${label === null ? "" : ` ${label}`} stored for team ${cert.team}. It expires on ${cert.expires}; the hub warns 30 days before.`);
+  return cert;
 }
 
-async function storeNotary(hub: string): Promise<void> {
-  console.log("Notarization key: an App Store Connect API key. In App Store Connect open Users and Access, Integrations,");
+// label null stores the hub's notarization key; a label stores the key of that certificate's team.
+async function storeNotary(hub: string, label: string | null = null, io = PROMPTS): Promise<void> {
+  console.log(`Notarization key${label === null ? "" : ` for the certificate ${label}`}: an App Store Connect API key. In App Store Connect open Users and Access, Integrations,`);
   console.log("App Store Connect API, Team Keys; create a key with Developer access and download AuthKey_<id>.p8 (Apple offers");
   console.log("the download once). The Key ID is in the list and the Issuer ID above it. It stays in your hub's secrets only.");
-  const path = cleanPath(await ask(".p8 file (drag it here): "));
+  const path = cleanPath(await io.ask(".p8 file (drag it here): "));
   const p8 = await readInput(path, "the .p8 file");
   checkP8(p8);
-  const keyId = checkKeyId(await ask("Key ID: "));
-  const key = notaryKey(p8, keyId, await ask("Issuer ID: "));
-  console.log((await verifyNotary(key)) ? "Apple accepted the key." : "Not on macOS, so the key is checked at the first release instead.");
-  await saveNotary(hub, key);
-  console.log(`Notarization key stored. You may delete ${path} once you keep a backup.`);
+  const keyId = checkKeyId(await io.ask("Key ID: "));
+  const key = notaryKey(p8, keyId, await io.ask("Issuer ID: "));
+  console.log((await io.verify(key)) ? "Apple accepted the key." : "Not on macOS, so the key is checked at the first release instead.");
+  await saveNotary(hub, key, label);
+  console.log(`Notarization key${label === null ? "" : ` for the certificate ${label}`} stored. You may delete ${path} once you keep a backup.`);
 }
 
 export const HUB_RULESET = {
@@ -190,7 +205,7 @@ function hubConfig(dir: string, hub: string): HubConfig {
   return config;
 }
 
-async function writeWorkflow(gh: GitHub, dir: string, labels: string[], flag: string | null, schedule: Schedule): Promise<void> {
+async function writeWorkflow(gh: GitHub, dir: string, labels: HubLabels, flag: string | null, schedule: Schedule): Promise<void> {
   const before = existsSync(join(dir, FLOW)) ? readFileSync(join(dir, FLOW), "utf8") : null;
   const flow = await workflowFile(gh, before, labels, flag, schedule);
   await mkdir(join(dir, ".github/workflows"), { recursive: true });
@@ -250,6 +265,66 @@ async function createSparkleKey(dir: string, hub: string, label: string): Promis
   await setEnvSecret(hub, `SPARKLE_KEY_${label.toUpperCase()}`, key.seed);
   console.log(`Stored SPARKLE_KEY_${label.toUpperCase()} in the hub.`);
   await updateSparkleEnv(dir, [...new Set([...sparkleLabels(config), label])]);
+  console.log("Review and commit the workflow change, then push.");
+}
+
+// Stores the certificate of the packages with certificate: <label> (or with notaryOnly only its team's notary key)
+// and passes the label's secrets to the sign steps of the clone's workflow.
+export async function storeCertificateFor(gh: GitHub, dir: string, hub: string, label: string, notaryOnly: boolean, io = PROMPTS): Promise<void> {
+  const config = hubConfig(dir, hub);
+  const users = certificateUsers(config, label);
+  const path = join(dir, FLOW);
+  if (!existsSync(path)) throw new TapsterError(`${FLOW} is missing`, "Run tapster init --workflow first.");
+  const before = readFileSync(path, "utf8");
+  const after = patchCertificateEnv(before, certificateLabels(config));
+  console.log(`The certificate ${label} signs ${users.join(", ")}.`);
+  const vars = await hubEnv(gh, hub, "variables");
+  const secrets = (await hubEnv(gh, hub, "secrets")).map((s) => s.name);
+  const n = certificateNames(label);
+  const hubNames = certificateNames(null);
+  if (notaryOnly) {
+    const team = vars.find((v) => v.name === n.team)?.value;
+    if (team) console.log(`tapster notarizes it with an App Store Connect key of team ${team}, the team of the certificate ${label}.`);
+    await storeNotary(hub, label, io);
+  } else {
+    // The label's keys that cannot serve the new certificate go before the certificate is stored. Were one to survive a
+    // failed delete, a second run would find the new team stored and take the old team's key for the new team's.
+    const judged = { plan: "hub" as LabelNotary };
+    const cert = await storeCertificate(hub, label, io, async (c) => {
+      judged.plan = labelNotary(label, c.team, vars, secrets);
+      const gone = labelNotaryRemoved(label, judged.plan, secrets);
+      for (const s of gone) await deleteEnvSecret(hub, s);
+      if (!gone.length) return;
+      console.log(
+        judged.plan === "stale"
+          ? `Removed the notarization key stored for ${label}: it would win over the hub's key and may belong to another team.`
+          : `Removed the notarization key stored for ${label}: it may belong to another team than the new certificate's team ${c.team}.`,
+      );
+    });
+    const plan = judged.plan;
+    if (plan === "kept") {
+      if (vars.find((v) => v.name === n.team)?.value === cert.team) console.log(`The notarization key stored for ${label} belongs to team ${cert.team} too, so it stays.`);
+      else console.log(`The notarization key stored for ${label} stays, since the hub has no notarization key of its own. It should belong to team ${cert.team}.`);
+    } else if (plan === "needed") {
+      const hubTeam = vars.find((v) => v.name === hubNames.team)?.value;
+      const other = hubTeam && hubTeam !== cert.team ? `, not to the hub's team ${hubTeam}` : "";
+      console.log(`The certificate ${label} belongs to team ${cert.team}${other}. tapster notarizes it with an App Store Connect key of team ${cert.team}.`);
+      await storeNotary(hub, label, io);
+    } else {
+      console.log(`The hub's notarization key notarizes it too, since both belong to team ${cert.team}.`);
+      if (![hubNames.notaryKey, hubNames.notaryKeyId, hubNames.notaryIssuer].every((s) => secrets.includes(s))) console.log("The hub has no notarization key yet; store it with tapster init --rotate notary.");
+    }
+  }
+  // An Action from before certificate labels refuses the entries that name one, so the workflow's pin has to move too.
+  if (pinState(before, TAPSTER, null) === "older") {
+    console.log(`The hub workflow runs tapster ${PIN.exec(before)![2]}, older than this tapster v${TAPSTER.version}. An older tapster may refuse entries with certificate:, so run tapster init --workflow too.`);
+  }
+  if (after === before) {
+    console.log(`${FLOW} already passes the certificate ${label}.`);
+    return;
+  }
+  await writeFile(path, after);
+  console.log(`updated the sign steps in ${FLOW}`);
   console.log("Review and commit the workflow change, then push.");
 }
 
@@ -316,9 +391,16 @@ export type InitAction =
   | { kind: "linux" }
   | { kind: "sparkle"; label: string; account: string }
   | { kind: "sparkle-new"; label: string }
+  | { kind: "certificate"; label: string; notaryOnly: boolean }
   | { kind: "workflow" };
 
 const INIT_USAGE = "Run tapster init --help for the options.";
+
+export function certificateLabel(label: string): string {
+  if (label === "id") throw new TapsterError("the label id is reserved", "MACOS_NOTARY_KEY_ID already names the hub's key, so pick another label for certificate in tapster.yml.");
+  if (!CERT_LABEL.test(label)) throw new TapsterError(`${label} is not a valid label`, "Use up to 40 lowercase letters and digits, as in certificate in tapster.yml.");
+  return label;
+}
 
 export function initAction(args: string[]): InitAction {
   const [a, b, c, d] = args;
@@ -332,6 +414,11 @@ export function initAction(args: string[]): InitAction {
     if (args.length === 2) return { kind: "sparkle", label: b, account: "ed25519" };
     if (c === "--new" && args.length === 3) return { kind: "sparkle-new", label: b };
     if (c === "--account" && d && args.length === 4) return { kind: "sparkle", label: b, account: d };
+  }
+  if (a === "--certificate") {
+    if (!b || b.startsWith("-")) throw new TapsterError("--certificate needs a label", "Name the label the packages use, as in tapster init --certificate acme.");
+    if (args.length === 2) return { kind: "certificate", label: certificateLabel(b), notaryOnly: false };
+    if (c === "--notary" && args.length === 3) return { kind: "certificate", label: certificateLabel(b), notaryOnly: true };
   }
   throw new TapsterError(`unknown option ${args.join(" ")}`, INIT_USAGE);
 }
@@ -356,7 +443,10 @@ export async function init(argv: string[]): Promise<void> {
   const gh = await userGitHub();
   if (action.kind === "rotate") {
     if (action.what === "app") return rotateAppKey(gh, hub);
-    if (action.what === "certificate") return storeCertificate(hub);
+    if (action.what === "certificate") {
+      await storeCertificate(hub);
+      return;
+    }
     if (action.what === "notary") return storeNotary(hub);
     if (action.what === "doorbell") return rotateDoorbell(gh, hub, flowEvery(dir));
     if (action.what === "linux-finish") return finishRotation(gh, hub);
@@ -369,7 +459,8 @@ export async function init(argv: string[]): Promise<void> {
   if (action.kind === "linux") return setupLinux(gh, dir, hub, false);
   if (action.kind === "sparkle-new") return createSparkleKey(dir, hub, action.label);
   if (action.kind === "sparkle") return storeSparkleKey(gh, dir, hub, action.label, action.account);
-  if (action.kind === "workflow") return writeWorkflow(gh, dir, sparkleLabels(hubConfig(dir, hub)), flag, { every, isPrivate: (await gh.getRepo(hub)).private });
+  if (action.kind === "certificate") return storeCertificateFor(gh, dir, hub, action.label, action.notaryOnly);
+  if (action.kind === "workflow") return writeWorkflow(gh, dir, hubLabels(hubConfig(dir, hub)), flag, { every, isPrivate: (await gh.getRepo(hub)).private });
   const have = await hubState(gh, hub);
   await protectHub(gh, hub, have.private);
   const hasApple = have.vars.includes("TAPSTER_TEAM_ID") || have.secrets.includes("MACOS_NOTARY_KEY");

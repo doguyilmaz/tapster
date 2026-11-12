@@ -62,6 +62,7 @@ tapster setup and `tapster init` show the same messages for these.
 | `the .p12 holds the certificate but not its private key` | Export from **My Certificates** on the Mac that holds the key. See [Get your Apple credentials](/tutorial/apple/). |
 | `the certificate is "...", not a Developer ID Application certificate` | Apple Development and Developer ID Installer certificates cannot sign downloads. Create a Developer ID Application certificate. |
 | `Apple rejected the notary key (HTTP 401)` | Check the `.p8` file, the Key ID and the Issuer ID. A revoked key also gives 401. |
+| `no package in tapster.yml signs with the certificate <label>` | `init --certificate` reads the clone's `tapster.yml`. Add `certificate: <label>` to the entries that should use it, then run the command again. |
 | `no App was created within 30 minutes` | Run the command again. It starts a new page. |
 | `<hub> has no App yet` | Run `tapster init` in the hub clone first, then `tapster add` again. |
 | `.github/workflows/release.yml already exists` | Move your workflow aside. To replace it, run `tapster add --force`. |
@@ -93,6 +94,11 @@ These stop one project. The others still publish:
 | `you/project is not protected against a stolen App key: ...` | Run `tapster add` in the project. It restores the rules. |
 | `<name> ships macOS code, but this hub has no Apple credentials` | Run `tapster init --rotate certificate` and `tapster init --rotate notary`. |
 | `the Developer ID certificate expired on <date>` | Create a new certificate, then run `tapster init --rotate certificate`. |
+| `<name> signs with the certificate <label>, which this hub has not stored` | Store it in tapster setup under **Optional extras**. Or run `tapster init --certificate <label>` in the hub clone, then commit and push the workflow change. When it is stored already, the workflow on `main` does not pass it yet; `tapster doctor` says so. See [Sign apps with another certificate](/guides/certificates/). |
+| `the Developer ID certificate <label> expired on <date>` | Create a new certificate, then run `tapster init --certificate <label>`. |
+| `certificate <label>: the certificate belongs to team <team> and the hub has no notary key for that team` | The certificate belongs to another team than the hub's. tapster notarizes it only with a key of that team, so each team's notarization history stays in its own account. Store one with `tapster init --certificate <label> --notary` or in tapster setup under **Optional extras**. |
+| `certificate <label>: ... is not set` | The hub lacks a secret of that certificate. For a `MACOS_NOTARY_` name that ends in `_<LABEL>`, run `tapster init --certificate <label> --notary`. For the hub's own `MACOS_NOTARY_` names, run `tapster init --rotate notary`. Otherwise run `tapster init --certificate <label>`. |
+| `certificate <label>: ` and any other message | Signing or notarizing with the certificate `<label>` failed. The rest is the message the hub's certificate would give. Its fix names `tapster init --certificate <label>` where the hub's certificate needs `--rotate certificate`. A rejected key of the label names `--certificate <label> --notary`. |
 | `<name> is invalid: ...` or `<name>: ...` | Fix the entry in `tapster.yml`. See [tapster.yml](/reference/config/). |
 
 ## The issue "tapster: the hub needs attention"

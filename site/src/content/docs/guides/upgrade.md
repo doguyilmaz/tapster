@@ -2,7 +2,7 @@
 title: "Upgrade tapster"
 description: "Move your hub to a newer tapster release."
 sidebar:
-  order: 9
+  order: 10
 ---
 
 Your hub's workflow pins the exact tapster commit that wrote it. A new tapster release changes nothing in your hub until

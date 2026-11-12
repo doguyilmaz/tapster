@@ -19,6 +19,17 @@ export function parseIdentities(out: string): Identity[] {
   return ids;
 }
 
+// The command that stores the hub's certificate; a labeled certificate's failure names its own command instead.
+export const ROTATE_CERTIFICATE = "tapster init --rotate certificate";
+
+// The Developer ID Application identity among those the keychain found, which must belong to the expected team.
+export function developerIdentity(found: Identity[], expectedTeamId: string): Identity {
+  const id = found.find((i) => i.name.startsWith("Developer ID Application:"));
+  if (!id) throw new TapsterError("the certificate holds no valid Developer ID Application identity", `Export the Developer ID Application certificate with its private key as .p12; ${ROTATE_CERTIFICATE}.`);
+  if (id.teamId !== expectedTeamId) throw new TapsterError(`the certificate belongs to team ${id.teamId}, not ${expectedTeamId}`, `Use the team's certificate. To change teams, run ${ROTATE_CERTIFICATE}.`);
+  return id;
+}
+
 export function parseKeychainList(out: string): string[] {
   return out
     .split("\n")
@@ -60,10 +71,7 @@ export async function openKeychain(p12Base64: string, p12Password: string, expec
     await rm(wrapped);
     await run("security", ["set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", kcPass, path]);
     await run("security", ["list-keychains", "-d", "user", "-s", path, ...previous]);
-    const found = parseIdentities((await run("security", ["find-identity", "-v", "-p", "codesigning", path])).stdout);
-    const id = found.find((i) => i.name.startsWith("Developer ID Application:"));
-    if (!id) throw new TapsterError("the certificate holds no valid Developer ID Application identity", "Export the Developer ID Application certificate with its private key as .p12; tapster init --rotate certificate.");
-    if (id.teamId !== expectedTeamId) throw new TapsterError(`the certificate belongs to team ${id.teamId}, not ${expectedTeamId}`, "Use the team's certificate. To change teams, run tapster init --rotate certificate.");
+    const id = developerIdentity(parseIdentities((await run("security", ["find-identity", "-v", "-p", "codesigning", path])).stdout), expectedTeamId);
     return { path, identity: id.sha1, teamId: id.teamId, close };
   } catch (e) {
     await close();

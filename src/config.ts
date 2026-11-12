@@ -1,5 +1,6 @@
 import { parse } from "yaml";
 import { z } from "zod";
+import { CERT_LABEL } from "./certificates";
 import { TapsterError } from "./errors";
 import { descProblems } from "./render";
 
@@ -49,6 +50,11 @@ const common = {
   license: z.string().regex(/^[A-Za-z0-9.+-]+$/).optional(),
   attestation: z.enum(["auto", "off"]).default("auto"),
   protection: z.enum(["on", "off", "dependabot"]).default("on"),
+  certificate: z
+    .string()
+    .regex(CERT_LABEL, "must be 1 to 40 lowercase letters or digits")
+    .refine((l) => l !== "id", "id is reserved; pick another label")
+    .optional(),
 };
 
 const APP = /^[A-Za-z0-9 ._-]+\.app$/;
@@ -145,6 +151,9 @@ const issueText = (issues: z.core.$ZodIssue[]) => issues.map((i) => `${i.path.jo
 function checkPackage(p: PackageConfig, top: Omit<HubConfig, "packages">, hubOwner: string): void {
   if (isApp(p)) checkApp(p);
   else if (p.app) checkToolApp(p, p.app);
+  if (p.certificate !== undefined && !macosCode(p)) {
+    throw new TapsterError(`${p.name}: certificate picks the certificate for macOS code, but ${p.name} ships none`, "Map a darwin-* asset or remove certificate.");
+  }
   const post = p.cask.postflight;
   if (post && !linked(p).includes(post.binary)) {
     throw new TapsterError(`${p.name}: cask.postflight runs ${post.binary}, which the cask does not link`, `Name one of the commands the cask links: ${linked(p).join(", ") || "none yet"}.`);

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { certificateNames } from "../certificates";
 import { TapsterError } from "../errors";
 import { scrub } from "../mask";
 import { TOOLS, run, runPath } from "../run";
@@ -56,11 +57,44 @@ export async function inspectP12(data: Uint8Array, password: string, now = Date.
   return checkCertificate(subject, notAfter, now);
 }
 
-export async function saveCertificate(hub: string, data: Uint8Array, password: string, cert: Certificate): Promise<void> {
-  await setEnvSecret(hub, "MACOS_SIGN_P12", Buffer.from(data).toString("base64"));
-  await setEnvSecret(hub, "MACOS_SIGN_PASSWORD", password);
-  await setEnvVariable(hub, "TAPSTER_TEAM_ID", cert.team);
-  await setEnvVariable(hub, "TAPSTER_CERT_EXPIRES", cert.expires);
+// label null stores the hub's own certificate; a label stores the certificate of the packages that name it.
+export async function saveCertificate(hub: string, data: Uint8Array, password: string, cert: Certificate, label: string | null = null): Promise<void> {
+  const n = certificateNames(label);
+  await setEnvSecret(hub, n.p12, Buffer.from(data).toString("base64"));
+  await setEnvSecret(hub, n.password, password);
+  await setEnvVariable(hub, n.team, cert.team);
+  await setEnvVariable(hub, n.expires, cert.expires);
+}
+
+// How a labeled certificate of `team` gets notarized, judged from the hub's environment before the certificate is saved.
+// tapster notarizes it only with a key of its own team, so each team's notarization history stays in its own account;
+// Apple itself accepts a key of any team.
+// kept: the label's own key stays, since it was stored for this team or the hub has no key that could serve instead;
+// hub: the hub's key is of the same team; stale: the same, but a key stored for the label (maybe of another team) would
+// win over the hub's, so it goes; needed: tapster needs a key of this team (what the label stores may be of another one,
+// see labelNotaryRemoved).
+export type LabelNotary = "kept" | "hub" | "stale" | "needed";
+
+export function labelNotary(label: string, team: string, vars: { name: string; value?: string }[], secrets: string[]): LabelNotary {
+  const n = certificateNames(label);
+  const hub = certificateNames(null);
+  const value = (name: string) => vars.find((v) => v.name === name)?.value;
+  const own = [n.notaryKey, n.notaryKeyId, n.notaryIssuer].filter((s) => secrets.includes(s));
+  if (own.length === 3 && value(n.team) === team) return "kept";
+  if (team !== value(hub.team)) return "needed";
+  if (own.length === 0) return "hub";
+  // Removing the label's key is safe only when the hub's own key takes over.
+  if ([hub.notaryKey, hub.notaryKeyId, hub.notaryIssuer].every((s) => secrets.includes(s))) return "stale";
+  return own.length === 3 ? "kept" : "needed";
+}
+
+// The label's own notary secrets that must be deleted once its certificate is saved. stale: the hub's key takes over.
+// needed: what is stored may belong to the team the certificate left. The action would notarize with it unchecked
+// until the new team's key replaces it, so it goes before the new key is asked for.
+export function labelNotaryRemoved(label: string, plan: LabelNotary, secrets: string[]): string[] {
+  if (plan !== "stale" && plan !== "needed") return [];
+  const n = certificateNames(label);
+  return [n.notaryKey, n.notaryKeyId, n.notaryIssuer].filter((s) => secrets.includes(s));
 }
 
 export const notaryArgs = (keyPath: string, keyId: string, issuer: string) => ["notarytool", "history", "--key", keyPath, "--key-id", keyId, "--issuer", issuer, "--output-format", "json"];
@@ -111,8 +145,10 @@ export async function verifyNotary(key: NotaryKey): Promise<boolean> {
   }
 }
 
-export async function saveNotary(hub: string, key: NotaryKey): Promise<void> {
-  await setEnvSecret(hub, "MACOS_NOTARY_KEY", Buffer.from(key.p8).toString("base64"));
-  await setEnvSecret(hub, "MACOS_NOTARY_KEY_ID", key.keyId);
-  await setEnvSecret(hub, "MACOS_NOTARY_ISSUER_ID", key.issuer);
+// label null stores the hub's notarization key; a label stores the key of that certificate's team.
+export async function saveNotary(hub: string, key: NotaryKey, label: string | null = null): Promise<void> {
+  const n = certificateNames(label);
+  await setEnvSecret(hub, n.notaryKey, Buffer.from(key.p8).toString("base64"));
+  await setEnvSecret(hub, n.notaryKeyId, key.keyId);
+  await setEnvSecret(hub, n.notaryIssuer, key.issuer);
 }

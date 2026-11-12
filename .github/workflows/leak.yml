@@ -12,6 +12,11 @@ env:
     CANARY-notary-key-b81e44d0c9
     CANARY-key-id-55aa
     CANARY-issuer-0c4a72
+    CANARY-p12-leak-body-6a1d
+    CANARY-leak-password-5d0b8e
+    CANARY-leak-notary-key-a3f6c1
+    CANARY-leak-key-id-71c2
+    CANARY-leak-issuer-e94b07
     CANARY-github-token-91df3e
     ghs_CANARYq7Zx81mPkW3vT9yLr2dNf5bHj4
     CANARYsparkleSeedq7Zx81mPkW3vT9yLr2dNf5bHjA=
@@ -51,6 +56,23 @@ jobs:
           MACOS_NOTARY_KEY: CANARY-notary-key-b81e44d0c9
           MACOS_NOTARY_KEY_ID: CANARY-key-id-55aa
           MACOS_NOTARY_ISSUER_ID: CANARY-issuer-0c4a72
+      - name: one fake work item of the package with its own certificate
+        run: |
+          mkdir -p "$RUNNER_TEMP/tapster/leakcert/v0.0.1/bin/a"
+          printf 'int main(void){return 0;}\n' > "$RUNNER_TEMP/m.c" && clang -o "$RUNNER_TEMP/tapster/leakcert/v0.0.1/bin/a/fixture" "$RUNNER_TEMP/m.c"
+          printf '%s' '{"items":[{"package":"leakcert","tag":"v0.0.1","releaseId":1,"resume":false,"before":[],"checksums":[],"archives":[{"asset":"a","platform":"darwin-arm64","dir":"'"$RUNNER_TEMP"'/tapster/leakcert/v0.0.1/bin/a","binaries":["fixture"]}],"status":"fetched"}]}' > "$RUNNER_TEMP/tapster/manifest.json"
+      - name: sign (fake certificate of one app)
+        continue-on-error: true
+        uses: ./
+        with: { mode: sign, template: 2, config: tests/leak/hub/certificate.yml }
+        env:
+          TAPSTER_TEAM_ID: CANARY0001
+          TAPSTER_TEAM_ID_LEAK: CANARY0002
+          MACOS_SIGN_P12_LEAK: Q0FOQVJZLXAxMi1sZWFrLWJvZHktNmExZA==
+          MACOS_SIGN_PASSWORD_LEAK: CANARY-leak-password-5d0b8e
+          MACOS_NOTARY_KEY_LEAK: CANARY-leak-notary-key-a3f6c1
+          MACOS_NOTARY_KEY_ID_LEAK: CANARY-leak-key-id-71c2
+          MACOS_NOTARY_ISSUER_ID_LEAK: CANARY-leak-issuer-e94b07
       - name: render (fake token)
         continue-on-error: true
         uses: ./
@@ -201,7 +223,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/tapster/fixture/v0.0.1/bin/a"
           printf 'int main(void){return 0;}\n' > "$RUNNER_TEMP/m.c" && clang -o "$RUNNER_TEMP/tapster/fixture/v0.0.1/bin/a/fixture" "$RUNNER_TEMP/m.c"
           printf '%s' '{"items":[{"package":"fixture","tag":"v0.0.1","releaseId":1,"resume":false,"before":[],"checksums":[],"archives":[{"asset":"a","platform":"darwin-arm64","dir":"'"$RUNNER_TEMP"'/tapster/fixture/v0.0.1/bin/a","binaries":["fixture"]}],"status":"fetched"}]}' > "$RUNNER_TEMP/tapster/manifest.json"
-      - name: sign (canary certificate, fails on purpose at the team check)
+      - name: sign (canary certificate, fails on purpose at the signature check)
         continue-on-error: true
         uses: ./
         with: { mode: sign, template: 2, config: tests/leak/hub/tapster.yml }
@@ -212,6 +234,22 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.CI_CANARY_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.CI_CANARY_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.CI_CANARY_NOTARY_ISSUER_ID }}
+      - name: one fake work item of the package with its own certificate
+        run: |
+          mkdir -p "$RUNNER_TEMP/tapster/leakcert/v0.0.1/bin/a"
+          printf 'int main(void){return 0;}\n' > "$RUNNER_TEMP/m.c" && clang -o "$RUNNER_TEMP/tapster/leakcert/v0.0.1/bin/a/fixture" "$RUNNER_TEMP/m.c"
+          printf '%s' '{"items":[{"package":"leakcert","tag":"v0.0.1","releaseId":1,"resume":false,"before":[],"checksums":[],"archives":[{"asset":"a","platform":"darwin-arm64","dir":"'"$RUNNER_TEMP"'/tapster/leakcert/v0.0.1/bin/a","binaries":["fixture"]}],"status":"fetched"}]}' > "$RUNNER_TEMP/tapster/manifest.json"
+      - name: sign (canary certificate of one app, fails on purpose at the signature check)
+        continue-on-error: true
+        uses: ./
+        with: { mode: sign, template: 2, config: tests/leak/hub/certificate.yml }
+        env:
+          TAPSTER_TEAM_ID_LEAK: CANARY0001
+          MACOS_SIGN_P12_LEAK: ${{ secrets.CI_CANARY_P12 }}
+          MACOS_SIGN_PASSWORD_LEAK: ${{ secrets.CI_CANARY_P12_PASSWORD }}
+          MACOS_NOTARY_KEY_LEAK: ${{ secrets.CI_CANARY_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID_LEAK: ${{ secrets.CI_CANARY_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID_LEAK: ${{ secrets.CI_CANARY_NOTARY_ISSUER_ID }}
       - name: three sealed app items for sparkle
         run: bun tests/leak/sparkle.ts "$RUNNER_TEMP"
       - name: sparkle (two canary keys, one app pinned to the other key)
@@ -321,9 +359,9 @@ jobs:
           EXTRA_CANARIES: ${{ needs.plain-api.outputs.canaries }}
           EXTRA_CANARIES_LINUX: ${{ needs.plain-linux.outputs.canaries }}
           EXPECT_STAGES: >-
-            {"plain":["Set up this hub on your computer with bunx @doguyilmaz/tapster setup", "tapster: failed (openssl exited with", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
+            {"plain":["Set up this hub on your computer with bunx @doguyilmaz/tapster setup", "fixture v0.0.1: failed (openssl exited with", "leakcert v0.0.1: failed (certificate leak: openssl exited with", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
             "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "leakseed v1.0.0: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
-            "masked":["fixture-linux v0.0.9: published", "fixture v0.0.1: failed (", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
+            "masked":["fixture-linux v0.0.9: published", "fixture v0.0.1: failed (fixture is not signed as expected", "leakcert v0.0.1: failed (certificate leak: fixture is not signed as expected", "leakseed v1.0.0: signed the DMG and appcast.xml", "leakold v1.0.0: signed the DMG and appcast.xml",
             "leakwrong v1.0.0: failed (the Sparkle key leakseed does not belong", "leakseed v1.0.0: failed (SPARKLE_KEY_LEAKSEED: the Sparkle key is not base64"],
             "plain-linux":["linux: signed 1 checked package with key", "tapster: failed (gpg exited with"],
             "masked-linux":["linux: signed 1 checked package with key", "tapster: failed (gpg exited with"],

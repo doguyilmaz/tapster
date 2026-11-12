@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { AppStart, FilesView, HubView, InstallView, Problem as ProblemView } from "../contract";
-import { ApiError, post } from "./api";
-import { type Stop, type StopId, changedOnly, expiresSoon, firstOpen, installStep, lineDiff, macNeeded, stops } from "../steps";
+import { post } from "./api";
+import { type Stop, type StopId, changedOnly, expiresSoon, extrasState, firstOpen, installStep, lineDiff, macNeeded, stops } from "../steps";
+import { CertificateForm, NotaryForm } from "./apple";
 import { clonePaths, targetOf } from "./projects";
 import { type SheetTarget, ProjectSheet } from "./sheet";
 import { appResult, back, clones, go, hub, hubCached, hubError, hubLoading, hubName, loadClones, loadHub, loadStatuses, mac, macChoice, openStop, problemOf, say, setMac, statusCached, statusError, statuses } from "./state";
 import { StatusRows } from "./status";
 import { Extras } from "./extras";
 import { confirm } from "./confirm";
-import { Badge, Busy, Cmd, Done, Field, FileDrop, Head, Icon, ManifestForm, Note, Out, Password, Problem, Spinner, savedFor, useAction, useInstall } from "./ui";
+import { Badge, Busy, Cmd, Done, Head, Icon, ManifestForm, Note, Out, Problem, Spinner, useAction, useInstall } from "./ui";
 
 function Dot({ stop, index }: { stop: Stop; index: number }) {
   if (stop.state === "done") return <span class="dot"><Icon name="check" /></span>;
@@ -276,29 +277,9 @@ function Mac({ h, choice }: { h: HubView; choice: "yes" | "no" | null }) {
 }
 
 function Certificate({ h }: { h: HubView }) {
-  const [file, setFile] = useState<File | null>(null);
   const [replacing, setReplacing] = useState(false);
-  const [busy, problem, run] = useAction();
   const cert = h.apple.certificate;
   const showForm = !cert || !h.apple.certificateStored || replacing;
-  const submit = async (e: Event) => {
-    e.preventDefault();
-    const form = e.currentTarget as HTMLFormElement;
-    if (!(await confirm(`Store the certificate in ${h.name}?`, <p>tapster stores the .p12 and its password as secrets of the hub's tapster environment. Only hub workflows on main can use them.</p>, "Store the certificate"))) return;
-    void run(async () => {
-      if (!file) throw new ApiError({ reason: "no .p12 file is chosen", fix: "Drop the .p12 you exported from Keychain Access." }, 0);
-      const data = new FormData(form);
-      data.delete("username");
-      data.set("hub", h.name);
-      data.set("p12", file);
-      const stored = await post<{ team: string; expires: string; name: string }>("/api/hub/certificate", data);
-      savedFor("certificate");
-      setReplacing(false);
-      setFile(null);
-      await loadHub();
-      say("ok", `Certificate stored for team ${stored.team}. It expires on ${stored.expires}.`);
-    });
-  };
   return (
     <div class="panel">
       <Head title="Apple certificate" lead="A Developer ID Application certificate, exported with its private key as a .p12 file. The hub signs your macOS code with it." />
@@ -322,73 +303,14 @@ function Certificate({ h }: { h: HubView }) {
           )}
         </>
       )}
-      {showForm && (
-        <>
-          <details class="card pad" open={!cert}>
-            <summary>
-              <strong>How to get the .p12</strong>
-            </summary>
-            <ol class="stack tight" style="margin: 0.8rem 0 0; padding-left: 1.2rem">
-              <li>
-                No certificate yet? Create a <strong>Developer ID Application</strong> certificate at{" "}
-                <a href="https://developer.apple.com/account/resources/certificates" target="_blank" rel="noopener noreferrer">
-                  developer.apple.com
-                </a>
-                .
-              </li>
-              <li>
-                In Keychain Access, open <strong>My Certificates</strong>, right-click <strong>Developer ID Application: …</strong> and choose <strong>Export</strong>.
-              </li>
-              <li>Save it as .p12 with a password. Your password manager can make one.</li>
-            </ol>
-          </details>
-          <form class="secret" onSubmit={submit} autoComplete="on">
-            <Field name="username" label="Name in your password manager" value={`${h.name}: Developer ID certificate`} autoComplete="username" hint="Your password manager saves the .p12 password under this name, so it can fill it in next time." />
-            <FileDrop name="p12" accept=".p12,application/x-pkcs12" label="The .p12 file" file={file} onFile={setFile} hint="It stays in memory on this computer until tapster stores it in the hub." />
-            <Password name="password" label="Its password" hint="The password you set when exporting it." />
-            <Note tone="keys" title="Where it goes">
-              <span>tapster opens the file with your password on this computer to check it is a Developer ID Application certificate that has not expired. Then the file and its password become secrets of the tapster environment in {h.name}. Keep your own backup: GitHub never shows a secret again.</span>
-            </Note>
-            <Problem problem={problem} />
-            <div class="row">
-              <Busy busy={busy} holds={(v) => [v.apple, v.protect.environment]} class="btn primary" type="submit">
-                Check and store
-              </Busy>
-              {replacing && (
-                <button type="button" class="btn quiet" onClick={() => setReplacing(false)}>
-                  Cancel
-                </button>
-              )}
-            </div>
-          </form>
-        </>
-      )}
+      {showForm && <CertificateForm h={h} guide={!cert} onDone={() => setReplacing(false)} onCancel={replacing ? () => setReplacing(false) : undefined} />}
     </div>
   );
 }
 
 function Notary({ h }: { h: HubView }) {
-  const [file, setFile] = useState<File | null>(null);
   const [replacing, setReplacing] = useState(false);
-  const [busy, problem, run] = useAction();
   const showForm = !h.apple.notary || replacing;
-  const submit = async (e: Event) => {
-    e.preventDefault();
-    const form = e.currentTarget as HTMLFormElement;
-    if (!(await confirm(`Store the notarization key in ${h.name}?`, <p>tapster stores the .p8 key, its ID and the issuer ID as secrets of the hub's tapster environment. Only hub workflows on main can use them.</p>, "Store the key"))) return;
-    void run(async () => {
-      if (!file) throw new ApiError({ reason: "no .p8 file is chosen", fix: "Drop the AuthKey_….p8 you downloaded from App Store Connect." }, 0);
-      const data = new FormData(form);
-      data.set("hub", h.name);
-      data.set("p8", file);
-      const done = await post<{ checked: boolean }>("/api/hub/notary", data);
-      savedFor("notary");
-      setReplacing(false);
-      setFile(null);
-      await loadHub();
-      say("ok", done.checked ? "Apple accepted the key and tapster stored it." : "Key stored. Apple checks it at the first release.");
-    });
-  };
   return (
     <div class="panel">
       <Head title="Notarization key" lead="An App Store Connect API key. The hub sends your signed code to Apple with it; Apple notarizes it." />
@@ -402,49 +324,7 @@ function Notary({ h }: { h: HubView }) {
           </div>
         </>
       )}
-      {showForm && (
-        <>
-          <details class="card pad" open={!h.apple.notary}>
-            <summary>
-              <strong>How to get the key</strong>
-            </summary>
-            <ol class="stack tight" style="margin: 0.8rem 0 0; padding-left: 1.2rem">
-              <li>
-                In{" "}
-                <a href="https://appstoreconnect.apple.com/access/integrations/api" target="_blank" rel="noopener noreferrer">
-                  App Store Connect
-                </a>
-                , open <strong>Users and Access</strong>, <strong>Integrations</strong>, <strong>App Store Connect API</strong>, <strong>Team Keys</strong>.
-              </li>
-              <li>
-                Create a key with <strong>Developer</strong> access and download <code>AuthKey_….p8</code>. Apple offers the download once.
-              </li>
-              <li>The Key ID is in the list; the Issuer ID is above it.</li>
-            </ol>
-          </details>
-          <form class="secret" onSubmit={submit} autoComplete="off">
-            <FileDrop name="p8" accept=".p8" label="The .p8 file" file={file} onFile={setFile} hint="It stays in memory on this computer until tapster stores it in the hub." />
-            <div class="grid2">
-              <Field name="keyId" label="Key ID" mono placeholder="ABCDE12345" />
-              <Field name="issuerId" label="Issuer ID" mono placeholder="00000000-0000-0000-0000-000000000000" />
-            </div>
-            <Note tone="keys" title="Where it goes">
-              <span>On a Mac, tapster asks Apple whether the key works before storing it. The key and its two IDs become secrets of the tapster environment in {h.name}.</span>
-            </Note>
-            <Problem problem={problem} />
-            <div class="row">
-              <Busy busy={busy} holds={(v) => [v.apple, v.protect.environment]} class="btn primary" type="submit">
-                Check with Apple and store
-              </Busy>
-              {replacing && (
-                <button type="button" class="btn quiet" onClick={() => setReplacing(false)}>
-                  Cancel
-                </button>
-              )}
-            </div>
-          </form>
-        </>
-      )}
+      {showForm && <NotaryForm h={h} guide={!h.apple.notary} onDone={() => setReplacing(false)} onCancel={replacing ? () => setReplacing(false) : undefined} />}
     </div>
   );
 }
@@ -734,6 +614,7 @@ export function Setup() {
   }
   const choice = mac(h.name);
   const list = stops(h, choice, Date.now(), statuses.value?.hub === h.name ? statuses.value.list : null);
+  const extras = extrasState(h);
   const first = appResult.value?.kind === "created" ? "app" : firstOpen(list);
   if (hubCached.value || statusCached.value) kept.current = first;
   else if (kept.current === first) kept.current = null;
@@ -791,14 +672,14 @@ export function Setup() {
               </button>
             </li>
           ))}
-          <li class={`extra${current === "extras" ? " open" : ""}`}>
-            <button type="button" onClick={() => pick("extras")} aria-current={current === "extras" ? "step" : undefined}>
+          <li class={`extra${extras.attention ? " attention" : ""}${current === "extras" ? " open" : ""}`}>
+            <button type="button" onClick={() => pick("extras")} aria-current={current === "extras" ? "step" : undefined} aria-label={extras.attention ? `Optional extras: ${extras.status}. Needs you` : undefined}>
               <span class="dot">
-                <Icon name="plus" />
+                <Icon name={extras.attention ? "alert" : "plus"} />
               </span>
               <span>
                 <span class="stop-name">Optional extras</span>
-                <span class="stop-state">Doorbell, apt and dnf, Sparkle</span>
+                <span class="stop-state">{extras.status}</span>
               </span>
             </button>
           </li>

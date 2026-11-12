@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openKeychain, parseIdentities, parseKeychainList } from "../src/keychain";
+import { developerIdentity, openKeychain, parseIdentities, parseKeychainList } from "../src/keychain";
 import { run } from "../src/run";
 import { TapsterError } from "../src/errors";
 
@@ -15,6 +15,14 @@ test("parses find-identity output", () => {
     { sha1: "0123456789ABCDEF0123456789ABCDEF01234567", name: "Apple Development: Dogu Yilmaz (83LUCZ63JD)", teamId: "83LUCZ63JD" },
     { sha1: "89ABCDEF0123456789ABCDEF0123456789ABCDEF", name: "Developer ID Application: Dogu Kaan Yilmaz (5MYT4VYJFC)", teamId: "5MYT4VYJFC" },
   ]);
+});
+
+test("the keychain's Developer ID identity must belong to the expected team", () => {
+  const dev = { sha1: "8".repeat(40), name: "Developer ID Application: Dogu Kaan Yilmaz (5MYT4VYJFC)", teamId: "5MYT4VYJFC" };
+  const apple = { sha1: "0".repeat(40), name: "Apple Development: Dogu Yilmaz (83LUCZ63JD)", teamId: "83LUCZ63JD" };
+  expect(developerIdentity([apple, dev], "5MYT4VYJFC")).toEqual(dev);
+  expect(() => developerIdentity([apple], "5MYT4VYJFC")).toThrow("the certificate holds no valid Developer ID Application identity");
+  expect(() => developerIdentity([dev], "83LUCZ63JD")).toThrow("the certificate belongs to team 5MYT4VYJFC, not 83LUCZ63JD");
 });
 
 test("parses the keychain search list", () => {

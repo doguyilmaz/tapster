@@ -14,7 +14,7 @@ export type Check = { label: string; ok: boolean };
 export type OtherWorkflow = { file: string; actions: string[] };
 
 // Bump on any change to HubView: the page keeps the last one in localStorage and paints it before GitHub answers.
-export const HUB_VIEW_VERSION = 1;
+export const HUB_VIEW_VERSION = 2;
 
 export type HubView = {
   name: string;
@@ -28,8 +28,18 @@ export type HubView = {
   packages: { name: string; repo: string; kind: string }[];
   invalid: { name: string; reason: string }[];
   issue: { url: string; number: number; updated: string; body: string } | null;
-  extras: { doorbell: DoorbellView; linux: LinuxView; sparkle: { label: string; stored: boolean }[] };
+  extras: { doorbell: DoorbellView; linux: LinuxView; sparkle: { label: string; stored: boolean }[]; certificates: CertificateView[] };
 };
+
+// A certificate that packages name with certificate: <label>. stored: its .p12, password and team are in the hub.
+// notary (once stored): own when the label has its three notary secrets, hub when the hub's key is of the same team,
+// needed when tapster needs a key of the label's team. wired: false when the hub workflow on main does not pass it.
+export type CertificateView = { label: string; packages: string[]; stored: boolean; team: string | null; expires: string | null; notary: "own" | "hub" | "needed" | null; wired: boolean };
+
+// What POST /api/hub/certificate answers. A labeled certificate also says whether the hub workflow on main changed and
+// how it is notarized; removed: tapster deleted the label's own notary key, either because the hub's key of the same team
+// serves it or, with notary needed, because the key may belong to the team the certificate left.
+export type StoredCertificate = { team: string; expires: string; name: string; workflow?: "committed" | "unchanged"; notary?: "own" | "hub" | "needed"; removed?: boolean };
 
 export type DoorbellView = {
   on: boolean;

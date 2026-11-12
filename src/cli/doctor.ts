@@ -1,4 +1,5 @@
 import { parse } from "yaml";
+import { certificateLabels, certificateNames } from "../certificates";
 import { type HubConfig, isApp, linuxUrl, macosCode, parseHub } from "../config";
 import { GitHubError, TapsterError } from "../errors";
 import { readHubFile } from "../hubcommit";
@@ -8,7 +9,7 @@ import { type GitHub, early, limited } from "../github";
 import { currentRepo, userGitHub } from "./gh";
 import hubWorkflow from "../../templates/hub/tapster.yml" with { type: "text" };
 import pinsJson from "../../templates/pins.json";
-import { PIN, fillWorkflow, sparkleLabels } from "./hubfiles";
+import { PIN, fillWorkflow, flowCertificateLabels, sparkleLabels } from "./hubfiles";
 import { releaseSecrets } from "./hubpr";
 import { everyFromFlow } from "./schedule";
 
@@ -75,9 +76,10 @@ export function linuxCheck(config: HubConfig, hub: string, secrets: string[], pa
 const APPLE_SECRETS = ["MACOS_SIGN_P12", "MACOS_SIGN_PASSWORD", "MACOS_NOTARY_KEY", "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER_ID"];
 const SECRETS = [...APPLE_SECRETS, "TAPSTER_APP_PRIVATE_KEY"];
 
+// The hub's own Apple credentials sign the macOS packages without a certificate label; certificateCheck covers the labeled ones.
 export function credentialsCheck(config: HubConfig | null, secrets: string[], vars: string[]): Check {
   const name = "the credentials this hub needs are stored";
-  const mac = config?.packages.some(macosCode) ?? false;
+  const mac = config?.packages.some((p) => macosCode(p) && !p.certificate) ?? false;
   const missing = [
     ...["TAPSTER_APP_PRIVATE_KEY", ...(mac ? APPLE_SECRETS : [])].filter((x) => !secrets.includes(x)),
     ...["TAPSTER_APP_ID", "TAPSTER_APP_SLUG", ...(mac ? ["TAPSTER_TEAM_ID"] : [])].filter((x) => !vars.includes(x)),
@@ -91,6 +93,48 @@ export function credentialsCheck(config: HubConfig | null, secrets: string[], va
   return bad(name, `Missing: ${missing.join(", ")}. Run ${fixes.join(" and ")}.`);
 }
 
+// Every label the packages name needs its certificate, a notary key of its team (its own or the hub's) and its lines in the workflow.
+export function certificateCheck(config: HubConfig, secrets: string[], vars: { name: string; value: string }[], workflow: string): Check {
+  const name = "every certificate the packages name is stored and passed to the workflow";
+  const value = (n: string) => vars.find((v) => v.name === n)?.value;
+  const hub = certificateNames(null);
+  const fixes: string[] = [];
+  for (const label of certificateLabels(config)) {
+    const n = certificateNames(label);
+    const team = value(n.team);
+    if (!secrets.includes(n.p12) || !secrets.includes(n.password) || !team) fixes.push(`Run tapster init --certificate ${label}.`);
+    else {
+      const own = [n.notaryKey, n.notaryKeyId, n.notaryIssuer].filter((s) => secrets.includes(s)).length;
+      if (own === 1 || own === 2 || (own === 0 && team !== value(hub.team))) fixes.push(`Run tapster init --certificate ${label} --notary.`);
+      else if (own === 0 && ![hub.notaryKey, hub.notaryKeyId, hub.notaryIssuer].every((s) => secrets.includes(s))) fixes.push("Run tapster init --rotate notary.");
+    }
+    if (!workflow.includes(`${n.p12}: \${{ secrets.${n.p12} }}`)) fixes.push(`The workflow does not pass ${n.p12}. Run tapster init --certificate ${label} or tapster init --workflow.`);
+  }
+  return fixes.length ? bad(name, [...new Set(fixes)].join(" ")) : ok(name);
+}
+
+// The hub's certificate and each labeled one the packages use, when it expires within 30 days.
+export function expiryChecks(config: HubConfig | null, vars: { name: string; value: string }[], now = Date.now()): Check[] {
+  return [null, ...(config ? certificateLabels(config) : [])].flatMap((label) => {
+    const expires = vars.find((v) => v.name === certificateNames(label).expires)?.value;
+    if (!expires || Date.parse(`${expires}T00:00:00Z`) - now >= 30 * 86_400_000) return [];
+    return label === null
+      ? [bad("the Developer ID certificate is valid for 30 more days", `It expires on ${expires}. Renew it at developer.apple.com, then run tapster init --rotate certificate.`)]
+      : [bad(`the Developer ID certificate ${label} is valid for 30 more days`, `It expires on ${expires}. Renew it at developer.apple.com, then run tapster init --certificate ${label}.`)];
+  });
+}
+
+// Variables are readable by anyone with access to the hub, so no credential may be one. Every MACOS_ name is a credential.
+export function exposedCheck(names: string[], labels: string[]): Check {
+  const name = "credentials are secrets, not variables";
+  const exposed = names.filter((n) => SECRETS.includes(n) || n.startsWith("MACOS_") || /^SPARKLE_KEY_/.test(n) || n.startsWith("TAPSTER_LINUX_KEY"));
+  if (exposed.length === 0) return ok(name);
+  const labeled = labels.filter((l) => Object.values(certificateNames(l)).some((n) => exposed.includes(n)));
+  const labeledNames = new Set(labeled.flatMap((l) => Object.values(certificateNames(l))));
+  const stores = [...(exposed.some((n) => !labeledNames.has(n)) ? ["tapster init --rotate"] : []), ...labeled.map((l) => `tapster init --certificate ${l}`)];
+  return bad(name, `Variables are readable by anyone with access; delete ${exposed.join(", ")} and store them with ${stores.join(" and ")}.`);
+}
+
 
 export function workflowCheck(text: string, me: { version: string; sha: string | null }): Check {
   const name = "the hub workflow is tapster's template";
@@ -99,7 +143,8 @@ export function workflowCheck(text: string, me: { version: string; sha: string |
   if (pin[1] !== me.sha) {
     return ok(name, `the hub runs tapster ${pin[2]} (${pin[1]!.slice(0, 7)}) and this is tapster ${me.version}; tapster init --workflow moves the hub to this one. The tapster that wrote the workflow checks it byte for byte`);
   }
-  const labels = [...text.matchAll(/SPARKLE_KEY_([A-Z0-9]+): "/g)].map((m) => m[1]!.toLowerCase());
+  const sparkle = [...text.matchAll(/SPARKLE_KEY_([A-Z0-9]+): "/g)].map((m) => m[1]!.toLowerCase());
+  const labels = { sparkle, certificates: flowCertificateLabels(text) };
   const expected = fillWorkflow(hubWorkflow, pinsJson, { sha: pin[1]!, tag: pin[2]! }, labels, everyFromFlow(text) ?? 10);
   return expected === text ? ok(name) : bad(name, "The workflow differs from the template; hand edits can reach the credentials. Run tapster init --workflow and review the diff.");
 }
@@ -227,15 +272,14 @@ async function apiChecks(gh: GitHub, hub: string, owner: string, setup: Promise<
   const secrets = await secretsP;
   const vars = await varsP;
   checks.push(credentialsCheck(config, secrets, vars.map((v) => v.name)));
-  const expires = vars.find((v) => v.name === "TAPSTER_CERT_EXPIRES")?.value;
-  if (expires && Date.parse(`${expires}T00:00:00Z`) - Date.now() < 30 * 86_400_000) checks.push(bad("the Developer ID certificate is valid for 30 more days", `It expires on ${expires}. Renew it at developer.apple.com, then run tapster init --rotate certificate.`));
+  checks.push(...expiryChecks(config, vars));
+  if (config && certificateLabels(config).length) checks.push(certificateCheck(config, secrets, vars, workflow));
   if (config && sparkleLabels(config).length) checks.push(sparkleCheck(config, secrets, workflow));
   if (config?.packages.some((p) => !isApp(p) && p.linux)) {
     checks.push(linuxCheck(config, hub, secrets, await pagesP));
     if (secrets.includes("TAPSTER_LINUX_KEY_PREVIOUS")) checks.push(ok("the Linux key rotation is running", "the previous Linux key still signs; once apt and dnf users have the new key, run tapster init --rotate linux --finish"));
   }
-  const exposed = [...vars, ...(await repoVarsP)].map((v) => v.name).filter((n) => SECRETS.includes(n) || /^SPARKLE_KEY_/.test(n) || n.startsWith("TAPSTER_LINUX_KEY"));
-  checks.push(exposed.length ? bad("credentials are secrets, not variables", `Variables are readable by anyone with access; delete ${exposed.join(", ")} and store them with tapster init --rotate.`) : ok("credentials are secrets, not variables"));
+  checks.push(exposedCheck([...vars, ...(await repoVarsP)].map((v) => v.name), config ? certificateLabels(config) : []));
   const doorbell = vars.find((v) => v.name === "TAPSTER_DOORBELL")?.value;
   const doorbellValues = await doorbellValuesP;
   if (doorbell && config && doorbellValues) {

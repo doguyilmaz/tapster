@@ -18,6 +18,7 @@ tapster reaches them only after you run `tapster init --workflow` and push the r
 | --- | --- | --- |
 | Developer ID certificate (`.p12`) and its password | Secrets of your hub's `tapster` environment | Hub workflows on `main` |
 | App Store Connect API key (`.p8`) | Secrets of your hub's `tapster` environment | Hub workflows on `main` |
+| Certificate of a single app (`certificate: <label>`) and its team's API key | Secrets of your hub's `tapster` environment | Only the steps that sign and notarize macOS code |
 | tapster App private key | Secret of your hub's `tapster` environment | Hub workflows on `main` |
 | Sparkle key of each app | Secret of the `tapster` environment and your login keychain | Only the step that signs the feed |
 | Linux signing key | Secret of the `tapster` environment and your login keychain | Only the job that signs packages |
@@ -128,7 +129,8 @@ you.
 ## How tapster checks itself
 
 On every change, tapster's own CI runs each stage with known fake credentials: the success path, GitHub errors, a broken
-certificate and a rejected signature. It searches every log line for the fake values, in plain text and encoded. A
-second run uses them as real secrets and fails if a tapster step prints anything the runner had to hide.
+certificate, the certificate of a single app and a rejected signature. It searches every log line for the fake values,
+in plain text and encoded. A second run uses them as real secrets and fails if a tapster step prints anything the runner
+had to hide.
 
 [`tapster doctor`](/reference/commands/#tapster-doctor) checks the settings this page depends on.

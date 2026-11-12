@@ -23,7 +23,7 @@ test("the hub workflow gets the schedule it is asked for", async () => {
   const template = await Bun.file("templates/hub/tapster.yml").text();
   const tapster = { sha: "f".repeat(40), tag: "v1.0.0" };
   expect(everyFromFlow(fillWorkflow(template, pins, tapster))).toBe(10);
-  expect(everyFromFlow(fillWorkflow(template, pins, tapster, [], 60))).toBe(60);
+  expect(everyFromFlow(fillWorkflow(template, pins, tapster, {}, 60))).toBe(60);
   expect(fillWorkflow(template, pins, tapster)).not.toContain("__");
 });
 

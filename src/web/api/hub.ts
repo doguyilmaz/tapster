@@ -8,18 +8,19 @@ import { GitHub } from "../../github";
 import { readHubFile } from "../../hubcommit";
 import { appJwt, installationRepos } from "../../token";
 import { TAPSTER } from "../../version";
-import { P12_LIMIT, P8_LIMIT, inspectP12, notaryKey, saveCertificate, saveNotary } from "../../cli/apple";
+import { certificateLabels, certificateNames } from "../../certificates";
+import { type Certificate, P12_LIMIT, P8_LIMIT, inspectP12, labelNotary, labelNotaryRemoved, notaryKey, saveCertificate, saveNotary } from "../../cli/apple";
 import { convertManifest, permissionLines } from "../../cli/appflow";
 import { doctorChecks, hubRulesetCheck, policyCheck } from "../../cli/doctor";
 import { installLink } from "../../cli/hubpr";
 import { appInstallation, appManifest, storeApp } from "../../cli/hubapp";
-import { FLOW, PIN, hubFiles, patchSparkleEnv, pinState, sparkleLabels, starterFiles } from "../../cli/hubfiles";
-import { keyPins } from "../../cli/init";
-import { setEnvSecret } from "../../cli/gh";
+import { FLOW, PIN, hubFiles, patchCertificateEnv, patchSparkleEnv, pinState, sparkleLabels, starterFiles } from "../../cli/hubfiles";
+import { certificateLabel, keyPins } from "../../cli/init";
+import { deleteEnvSecret, hubEnv, setEnvSecret } from "../../cli/gh";
 import { decodeSparkleKey } from "../../sparkle-key";
 import { protectHub } from "../../cli/init";
 import { everyFromFlow } from "../../cli/schedule";
-import type { AccountView, AppStart, FilePlan, FilesView, HealthView, HubCode, HubChoice, HubView, InstallView, OtherWorkflow } from "../contract";
+import type { AccountView, AppStart, CertificateView, FilePlan, FilesView, HealthView, HubCode, HubChoice, HubView, InstallView, OtherWorkflow, StoredCertificate } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
 import { checkHub, checkedMain, hubFrom, lockedEnvironment, me, or404, writeMain } from "./access";
 import { bellCallback, doorbellView } from "./doorbell";
@@ -145,6 +146,21 @@ const parsedHub = (config: string | null, hub: string) => {
   }
 };
 
+// A label's notary secrets win over the hub's key when any of them is set, so a partial set needs the rest stored.
+// flow is the hub workflow on main (null before Hub files writes it, with every label).
+export function certificateViews(config: HubConfig, secrets: string[], v: (name: string) => string | null, flow: string | null): CertificateView[] {
+  const hubTeam = v(certificateNames(null).team);
+  return certificateLabels(config).map((label) => {
+    const n = certificateNames(label);
+    const team = v(n.team) || null;
+    const stored = secrets.includes(n.p12) && secrets.includes(n.password) && team !== null;
+    const own = [n.notaryKey, n.notaryKeyId, n.notaryIssuer].filter((s) => secrets.includes(s)).length;
+    const notary = !stored ? null : own === 3 ? "own" : own === 0 && team === hubTeam ? "hub" : "needed";
+    const wired = flow === null || flow.includes(`${n.p12}: \${{ secrets.${n.p12} }}`);
+    return { label, packages: config.packages.filter((p) => p.certificate === label).map((p) => p.name), stored, team, expires: v(n.expires) || null, notary, wired };
+  });
+}
+
 // Each call starts as soon as what it needs is in. Reads of main and of the tapster environment start at once too; an
 // empty hub or one without the environment drops their answers.
 export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubView> {
@@ -221,7 +237,8 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
   ];
   const appId = v("TAPSTER_APP_ID");
   const held = s.apps.get(hub);
-  const macPackages = parsed?.config.packages.some(macosCode) ?? false;
+  // A package that names a certificate signs with it, not with the hub's own (as in doctor's credentialsCheck).
+  const macPackages = parsed?.config.packages.some((p) => macosCode(p) && !p.certificate) ?? false;
   const hasApple = Boolean(v("TAPSTER_TEAM_ID")) || names(secrets).includes("MACOS_NOTARY_KEY");
   const pinned = flow ? PIN.exec(flow) : null;
   const workflow = pinState(flow, TAPSTER, s.deps.pin);
@@ -256,6 +273,7 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
       doorbell: doorbellView(s, hub, v, { owner: repo.owner.id, hub: repo.id }),
       linux,
       sparkle: (parsed ? sparkleLabels(parsed.config) : []).map((label) => ({ label, stored: names(secrets).includes(`SPARKLE_KEY_${label.toUpperCase()}`) })),
+      certificates: parsed ? certificateViews(parsed.config, names(secrets), v, flow) : [],
     },
   };
 }
@@ -350,13 +368,53 @@ async function form(c: Ctx): Promise<Form> {
   }
 }
 
-async function certificate(c: Ctx) {
+type Labeled = { label: string; config: HubConfig };
+
+// The optional form field label names a certificate of the packages whose entry says certificate: <label>. Without it
+// the form stores the hub's own certificate or notarization key.
+async function labeledFor(gh: GitHub, hub: string, f: Form): Promise<Labeled | null> {
+  const value = f.get("label");
+  if (value === null) return null;
+  if (typeof value !== "string" || value === "") throw new TapsterError("the form named no certificate label", "Reload the page and try again.");
+  const label = certificateLabel(value);
+  const text = await readHubFile(gh, hub, "tapster.yml", "main");
+  const config = text === null ? null : parseHub(text, hub.split("/")[0]!).config;
+  if (!config || !certificateLabels(config).includes(label)) throw new TapsterError(`no package in ${hub}'s tapster.yml signs with the certificate ${label}`, `Add certificate: ${label} to the package's entry first.`);
+  return { label, config };
+}
+
+// Mirrors tapster init --certificate <label>: the notary plan is judged before saving. A label key that would win over
+// the hub's key of the same team goes. So does one that may belong to the team the certificate left. Then the hub
+// workflow on main passes every label the packages name.
+async function storeLabeled(gh: GitHub, hub: string, login: string, { label, config }: Labeled, data: Uint8Array, password: string, cert: Certificate): Promise<StoredCertificate> {
+  const labels = certificateLabels(config);
+  const flow = await readHubFile(gh, hub, FLOW, "main");
+  if (flow !== null) patchCertificateEnv(flow, labels);
+  await checkedMain(gh, hub, login);
+  const [vars, secrets] = await Promise.all([hubEnv(gh, hub, "variables"), hubEnv(gh, hub, "secrets").then((xs) => xs.map((x) => x.name))]);
+  const plan = labelNotary(label, cert.team, vars, secrets);
+  // Before the certificate is stored: were a key to survive a failed delete, a second run would find the new team stored
+  // and take the old team's key for the new team's.
+  const stale = labelNotaryRemoved(label, plan, secrets);
+  for (const s of stale) await deleteEnvSecret(hub, s);
+  await saveCertificate(hub, data, password, cert, label);
+  const workflow = await writeMain(gh, hub, login, async (_, read) => {
+    const now = await read(FLOW);
+    const next = now === null ? null : patchCertificateEnv(now, labels);
+    return { message: `Pass the certificate ${label} to the hub workflow`, files: next === null || next === now ? [] : [{ path: FLOW, content: next }] };
+  });
+  return { ...cert, workflow, notary: plan === "kept" ? "own" : plan === "needed" ? "needed" : "hub", removed: stale.length > 0 };
+}
+
+async function certificate(c: Ctx): Promise<StoredCertificate> {
   const f = await form(c);
-  const { gh, hub } = await hubFrom(c, f.get("hub"));
+  const { gh, hub, login } = await hubFrom(c, f.get("hub"));
+  const labeled = await labeledFor(gh, hub, f);
   await lockedEnvironment(gh, hub);
   const data = await file(f, "p12", P12_LIMIT);
   const password = String(f.get("password") ?? "");
   const cert = await inspectP12(data, password);
+  if (labeled) return storeLabeled(gh, hub, login, labeled, data, password, cert);
   await saveCertificate(hub, data, password, cert);
   return cert;
 }
@@ -364,10 +422,11 @@ async function certificate(c: Ctx) {
 async function notary(c: Ctx) {
   const f = await form(c);
   const { gh, hub } = await hubFrom(c, f.get("hub"));
+  const labeled = await labeledFor(gh, hub, f);
   await lockedEnvironment(gh, hub);
   const key = notaryKey(await file(f, "p8", P8_LIMIT), String(f.get("keyId") ?? ""), String(f.get("issuerId") ?? ""));
   const checked = await c.s.deps.notary(key);
-  await saveNotary(hub, key);
+  await saveNotary(hub, key, labeled?.label ?? null);
   return { checked };
 }
 

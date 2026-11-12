@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { teamIdFromSubject } from "../src/cli/apple";
-import { appKeyFingerprint, keyPins } from "../src/cli/init";
+import { appKeyFingerprint, certificateUsers, initAction, keyPins } from "../src/cli/init";
 import { appManifest } from "../src/cli/hubapp";
 import { fillWorkflow, sparkleEnv, sparkleLabels } from "../src/cli/hubfiles";
 import { parseConfig } from "../src/config";
@@ -69,6 +69,48 @@ test("a stored Sparkle key must match every package that pins it", () => {
   expect(() => keyPins(apps, "other", K1)).toThrow(/no package/);
 });
 
+test("init --certificate takes one valid label and an optional --notary", () => {
+  expect(initAction(["--certificate", "acme"])).toEqual({ kind: "certificate", label: "acme", notaryOnly: false });
+  expect(initAction(["--certificate", "acme2", "--notary"])).toEqual({ kind: "certificate", label: "acme2", notaryOnly: true });
+  const refused = (args: string[]) => {
+    try {
+      initAction(args);
+    } catch (e) {
+      return e instanceof TapsterError ? `${e.reason} / ${e.fix}` : "not a TapsterError";
+    }
+    return "accepted";
+  };
+  expect(refused(["--certificate", "id"])).toBe("the label id is reserved / MACOS_NOTARY_KEY_ID already names the hub's key, so pick another label for certificate in tapster.yml.");
+  expect(refused(["--certificate", "Acme"])).toBe("Acme is not a valid label / Use up to 40 lowercase letters and digits, as in certificate in tapster.yml.");
+  expect(refused(["--certificate", "a".repeat(41)])).toContain("is not a valid label");
+  expect(refused(["--certificate", "ac-me", "--notary"])).toContain("is not a valid label");
+  expect(refused(["--certificate"])).toBe("--certificate needs a label / Name the label the packages use, as in tapster init --certificate acme.");
+  expect(refused(["--certificate", "--notary"])).toContain("--certificate needs a label");
+  expect(refused(["--certificate", "acme", "extra"])).toBe("unknown option --certificate acme extra / Run tapster init --help for the options.");
+  expect(refused(["--certificate", "acme", "--notary", "extra"])).toContain("unknown option");
+  expect(refused(["--certificate", "acme", "--new"])).toContain("unknown option");
+});
+
+test("a certificate label must be named by a package in tapster.yml", () => {
+  const cfg = parseConfig(
+    `version: 1
+tap: o/tap
+packages:
+  - { name: a, repo: o/a, binaries: [a], certificate: acme, assets: { darwin-arm64: "a.tar.gz" } }
+  - { name: b, repo: o/b, kind: app, app: B.app, bundle_id: com.o.B, certificate: acme, assets: { darwin-arm64: "B-{version}.tar.gz" }, dmg: { name: "B-{version}.dmg" } }
+  - { name: c, repo: o/c, binaries: [c], assets: { darwin-arm64: "c.tar.gz" } }
+`,
+    "o",
+  );
+  expect(certificateUsers(cfg, "acme")).toEqual(["a", "b"]);
+  expect(() => certificateUsers(cfg, "beta")).toThrow("no package in tapster.yml signs with the certificate beta");
+  try {
+    certificateUsers(cfg, "beta");
+  } catch (e) {
+    expect((e as TapsterError).fix).toBe("Add certificate: beta to the packages that should use it first.");
+  }
+});
+
 test("the hub files keep the Sparkle labels, even with an invalid package in tapster.yml, and only add missing files", async () => {
   const { hubFiles, FLOW } = await import("../src/cli/hubfiles");
   const gh = { json: async () => ({ status: "ahead" }) } as never;
@@ -87,4 +129,10 @@ packages:
   expect(set.kept).toEqual(["tapster.yml", "README.md"]);
   expect(set.files.map((f) => f.path)).toEqual([".tapster/state.json", FLOW]);
   expect(set.files[1]!.content).toContain('SPARKLE_KEY_SHARED: "${{ secrets.SPARKLE_KEY_SHARED }}"');
+  expect(set.files[1]!.content).not.toContain("_ACME");
+  const labeled = config.replace("sparkle: { key: shared", "certificate: acme, sparkle: { key: shared");
+  const withCert = await hubFiles(gh, "o/homebrew-tap", async (p) => (p === "tapster.yml" ? labeled : null), sha, { every: null, isPrivate: false });
+  const flow = withCert.files.find((f) => f.path === FLOW)!.content;
+  expect(flow).toBe(fillWorkflow(readFileSync("templates/hub/tapster.yml", "utf8"), pins, { sha, tag: "main" }, { sparkle: ["shared"], certificates: ["acme"] }, 10));
+  expect(flow.split("MACOS_SIGN_P12_ACME: ${{ secrets.MACOS_SIGN_P12_ACME }}").length).toBe(3);
 });
