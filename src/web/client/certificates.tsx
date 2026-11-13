@@ -3,9 +3,30 @@ import type { HubView } from "../contract";
 import { post } from "./api";
 import { confirm } from "./confirm";
 import { loadHub, loadStatuses, say } from "./state";
-import { Busy, DiffBlock, Field, Note, Out, Problem, useAction } from "./ui";
+import { Badge, Busy, DiffBlock, Field, Note, Out, Problem, useAction } from "./ui";
 
 export const validCertificateLabel = (label: string | null) => label === null || (/^[a-z0-9]{1,40}$/.test(label) && label !== "id");
+
+function missingCredentials(h: HubView, label: string | null): boolean {
+  const selected = h.extras.certificates.find((c) => c.label === label);
+  return label === null ? !h.apple.certificateStored || !h.apple.notary : !selected?.stored || selected.notary === "needed" || (selected.notary === "hub" && !h.apple.notary);
+}
+
+export function CertificateSettings({ h, project, onDone }: { h: HubView; project: HubView["packages"][number]; onDone: () => void }) {
+  const [editing, setEditing] = useState(false);
+  if (!project.macos) return null;
+  const label = project.certificate ?? null;
+  return <div class="stack tight macos-signing">
+    {editing ? <CertificateAssignment h={h} project={project} onDone={() => { setEditing(false); onDone(); }} onCancel={() => setEditing(false)} /> : <div class="card pad stack tight">
+      <div class="spread">
+        <strong>macOS signing</strong>
+        <button type="button" class="btn quiet small" onClick={() => setEditing(true)}>Change certificate</button>
+      </div>
+      <p class="muted small">{label ? `Certificate ${label}` : "Hub default certificate"} · Signs and notarizes this project's macOS builds.</p>
+      {missingCredentials(h, label) && <div><Badge tone="warn">Credentials needed</Badge></div>}
+    </div>}
+  </div>;
+}
 
 export function CertificateChoice({ h, id, value, onChange }: { h: HubView; id: string; value: string | null; onChange: (label: string | null) => void }) {
   const [adding, setAdding] = useState(false);
@@ -56,8 +77,7 @@ export function CertificateAssignment({ h, project, onDone, onCancel }: { h: Hub
     say("ok", label ? `${project.name} now uses certificate ${label}. Store any missing credentials in Certificates for single apps.` : `${project.name} now uses the hub's default certificate.`);
     onDone?.();
   });
-  const selected = h.extras.certificates.find((c) => c.label === label);
-  const missing = label === null ? !h.apple.certificateStored || !h.apple.notary : !selected?.stored || selected.notary === "needed" || (selected.notary === "hub" && !h.apple.notary);
+  const missing = missingCredentials(h, label);
   return <div class="card pad stack tight certificate-assignment">
     <strong>Signing certificate for {project.name}</strong>
     <CertificateChoice h={h} id={`certificate-choice-${project.name}`} value={label} onChange={setLabel} />

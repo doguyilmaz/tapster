@@ -8,7 +8,7 @@ import { TOOLS, runPath } from "../../run";
 import { addOptions, addProject, findApp, prepare, projectName } from "../../cli/add";
 import { binName, hubEntries, hubFacts } from "../../cli/hubpr";
 import type { AddView, CommitResult, DiffView, InspectView, ScanView, Unpushed } from "../contract";
-import { defaultRoots, insideHome, oneClonePerRepo, originRepo, projectKind, readSmall, scanClones } from "../scan";
+import { defaultRoots, insideHome, oneClonePerRepo, originRepo, projectKind, readSmall, releaseMacos, scanClones } from "../scan";
 import { type Ctx, type Routes, readJson } from "../server";
 import { checkHub, me } from "./hub";
 import { oneGoProblem } from "../oneclick";
@@ -156,6 +156,7 @@ async function inspect(c: Ctx): Promise<InspectView> {
     inHub: entry?.state === "merged",
     proposed: entry?.pr ?? null,
     apple: facts.apple || Boolean(entry?.certificate),
+    macos: releaseMacos(kind, local(".goreleaser.yaml") ?? local(".goreleaser.yml"), release),
     ready,
     ...(await unpushed(dir, project.default_branch)),
   };

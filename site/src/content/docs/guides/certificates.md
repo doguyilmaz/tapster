@@ -17,7 +17,9 @@ Several entries may share a label.
 In tapster setup, open **Optional extras → Certificates for single apps → Add a certificate**. Choose a project,
 select **Add an app-specific certificate** and enter its label. **Save certificate choice** shows the entry change
 before proposing and merging it. Its upload form then opens here. Existing projects also have this selector under
-**Projects → Configuration**; choose **Hub default** to switch back later.
+**Projects → Configuration → macOS signing → Change certificate**; choose **Hub default** to switch back later.
+Signing settings appear for projects that ship macOS code, including command line tools and tools bundled as an `.app`.
+Linux/Windows-only projects do not need a Developer ID certificate.
 
 When adding a new project, choose its certificate in the add form. This also includes its macOS builds when the hub
 has no default Apple credentials. Merge the hub entry, then upload the .p12 and any missing notarization key under

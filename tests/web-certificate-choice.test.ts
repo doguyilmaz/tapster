@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { addOptions, addProject } from "../src/cli/add";
+import { addOptions, addProject, bunWorkflow } from "../src/cli/add";
+import pins from "../templates/pins.json";
 import { AUTO_FILE, autoMode } from "../src/cli/auto";
 import { useGhWrite } from "../src/cli/gh";
 import { parseHub } from "../src/config";
@@ -90,6 +91,42 @@ test("certificate edits keep unrelated entry values, including flow lists and li
   expect(parse(entryWithCertificate(literal, "myapp"))[0]).toEqual({ ...parse(literal)[0], certificate: "myapp" });
 });
 
+test("inspection offers Apple signing for macOS Go targets, including later builds and implicit defaults", async () => {
+  const path = join(home, "Developer", "ebb");
+  const file = join(path, ".goreleaser.yaml");
+  const original = readFileSync(file, "utf8");
+  try {
+    for (const [config, macos] of [
+      ["builds: [{ goos: [linux, windows] }]", false],
+      ["builds: [{ goos: [linux] }, { goos: [darwin] }]", true],
+      ["builds: [{ binary: ebb }]", true],
+      ["builds: [{ goos: ['{{ .Env.GOOS }}'] }]", null],
+      ["builds: [", null],
+    ] as const) {
+      writeFileSync(file, config);
+      const result = await call("POST", "/api/projects/inspect", { hub: HUB, path });
+      expect(result.status).toBe(200);
+      expect(result.data.macos).toBe(macos);
+    }
+  } finally { writeFileSync(file, original); }
+});
+
+test("inspection distinguishes a new Bun CLI, a macOS build and an explicit Linux/Windows-only workflow", async () => {
+  const path = join(home, "Developer", "hafifpix");
+  const file = join(path, ".github", "workflows", "release.yml");
+  expect(existsSync(file)).toBe(false);
+  expect((await call("POST", "/api/projects/inspect", { hub: HUB, path })).data.macos).toBe(true);
+  mkdirSync(join(file, ".."), { recursive: true });
+  try {
+    for (const macos of [true, false]) {
+      writeFileSync(file, bunWorkflow("hafifpix", "src/cli.ts", pins, macos));
+      const result = await call("POST", "/api/projects/inspect", { hub: HUB, path });
+      expect(result.status).toBe(200);
+      expect(result.data.macos).toBe(macos);
+    }
+  } finally { rmSync(file, { force: true }); }
+});
+
 test("a new project can use a labeled certificate without requiring the hub's default credentials", async () => {
   const gh = new GitHub("fixture", fake.fetch, async () => {}, "user");
   const result = await addProject(gh, join(home, "Developer", "ebb"), "octo/ebb", HUB, { slug: "tapster-octo-tap", apple: false }, addOptions(["--certificate", "myapp"]), () => {});
@@ -119,6 +156,7 @@ test("an existing Mac app with its own certificate can switch to Auto without hu
   const inspected = await call("POST", "/api/projects/inspect", { hub: HUB, path: dir });
   expect(inspected.status).toBe(200);
   expect(inspected.data.apple).toBe(true);
+  expect(inspected.data.macos).toBe(true);
   const added = await call("POST", "/api/projects/add", { hub: HUB, path: dir, options: { workflow: "release.yml", autoTag: true, auto: "daily", dependabot: false, force: false } });
   expect(added.status).toBe(200);
   expect(autoMode(readFileSync(join(dir, AUTO_FILE), "utf8"))).toBe("daily");

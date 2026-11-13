@@ -3,11 +3,41 @@ import { findApp } from "../cli/add";
 import { readSmall } from "../cli/paths";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import type { LocalProject, ProjectKind } from "./contract";
+import { parse } from "yaml";
 
 const SKIP = new Set(["node_modules", "Library", "Applications", "Pictures", "Music", "Movies", "Documents", "Desktop", "Downloads", "Public", "vendor", "Pods", "DerivedData", "build", "dist", "target", "out"]);
 const HOME_ROOTS = ["Developer", "Projects", "projects", "code", "Code", "src", "dev", "git", "GitHub", "repos", "workspace", "work"];
 
 export { readSmall };
+
+// Used only to offer signing settings, never to decide which artifacts to build or sign. Unknown configurations
+// keep the option available; an explicit Linux/Windows-only release should not ask for Apple credentials.
+export function releaseMacos(kind: ProjectKind, goreleaser: string | null, workflow: string | null): boolean | null {
+  if (kind === "app" || (kind === "bun" && workflow === null)) return true;
+  try {
+    const config = parse((kind === "go" ? goreleaser : workflow) ?? "") as Record<string, unknown> | null;
+    if (!config || typeof config !== "object" || Array.isArray(config)) return null;
+    if (kind === "go") {
+      if (config.builds === undefined) return true; // GoReleaser's default includes darwin.
+      if (!Array.isArray(config.builds)) return null;
+      if (config.builds.length === 0) return true;
+      let unknown = false;
+      for (const build of config.builds) {
+        if (!build || typeof build !== "object") { unknown = true; continue; }
+        if (build.goos === undefined || (Array.isArray(build.goos) && build.goos.includes("darwin"))) return true;
+        if (!Array.isArray(build.goos) || build.goos.some((os: unknown) => typeof os !== "string" || /[{}$]/.test(os))) unknown = true;
+      }
+      return unknown ? null : false;
+    }
+    // Read parsed jobs so YAML comments and workflow titles cannot opt a project into macOS signing.
+    if (!config.jobs || typeof config.jobs !== "object") return null;
+    const jobs = JSON.stringify(config.jobs);
+    if (/\b(?:darwin|macos)(?:\b|[-_])/.test(jobs)) return true;
+    return /\b(?:linux|windows)[-_]/.test(jobs) ? false : null;
+  } catch {
+    return null;
+  }
+}
 
 const isFile = (path: string) => {
   try {
