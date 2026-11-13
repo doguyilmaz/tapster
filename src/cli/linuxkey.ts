@@ -69,10 +69,10 @@ export async function makeLinuxKey(gh: GitHub, hub: string, o: { gpg: string; st
 
 export async function finishLinuxRotation(gh: GitHub, hub: string, store: Store | null): Promise<boolean> {
   const secrets = (await hubEnv(gh, hub, "secrets")).map((x) => x.name);
+  const present = secrets.includes("TAPSTER_LINUX_KEY_PREVIOUS");
+  if (present) await deleteEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS");
   await store?.remove(linuxRef(hub, true));
-  if (!secrets.includes("TAPSTER_LINUX_KEY_PREVIOUS")) return false;
-  await deleteEnvSecret(hub, "TAPSTER_LINUX_KEY_PREVIOUS");
-  return true;
+  return present;
 }
 
 const linuxArchives = (p: PackageConfig) => Object.keys(p.assets).filter((k) => k.startsWith("linux-")).sort();

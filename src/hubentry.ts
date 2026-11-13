@@ -1,6 +1,7 @@
 import { isMap, isSeq, parse, parseDocument, type YAMLMap } from "yaml";
 import { parseHub } from "./config";
 import { TapsterError } from "./errors";
+import { CERT_LABEL } from "./certificates";
 
 type Spot = { start: number; end: number; indent: number; index: number };
 type Plain = Record<string, unknown>;
@@ -44,6 +45,21 @@ function readEntry(text: string, at: Spot): string | null {
 export function entryText(text: string, name: string): string | null {
   const at = spot(text, name);
   return at && readEntry(text, at);
+}
+
+// Edit one public setting without asking the user to write YAML. The caller still
+// validates the result in the complete hub with withEntryText before proposing it.
+export function entryWithCertificate(entry: string, label: string | null): string {
+  const wanted = { ...oneEntry(entry) };
+  if (label !== null && (!CERT_LABEL.test(label) || label === "id")) throw new TapsterError("that is not a certificate label", "Use 1–40 lowercase letters or digits, other than id.");
+  const doc = parseDocument(entry);
+  const before = doc.getIn([0, "certificate"]);
+  if ((before ?? null) === label) return entry;
+  if (label === null) { doc.deleteIn([0, "certificate"]); delete wanted.certificate; }
+  else { doc.setIn([0, "certificate"], label); wanted.certificate = label; }
+  const out = before === undefined && label !== null ? withAdditions(entry, { certificate: label }) : doc.toString({ lineWidth: 0 }).trimEnd();
+  if (out === null || !same(oneEntry(out), wanted)) throw new TapsterError("the certificate choice would change other entry values", "Use the Configuration editor to keep the entry's literal text unchanged.");
+  return out;
 }
 
 const tidy = (entry: string) => entry.replace(/\r\n?/g, "\n").replace(/\s+$/, "");

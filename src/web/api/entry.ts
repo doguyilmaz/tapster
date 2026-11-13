@@ -4,7 +4,7 @@ import { NAME, parseHub } from "../../config";
 import { GitHubError, TapsterError } from "../../errors";
 import type { GitHub } from "../../github";
 import { readHubFile } from "../../hubcommit";
-import { changedEntry, entryText, withEntryText } from "../../hubentry";
+import { changedEntry, entryText, entryWithCertificate, withEntryText } from "../../hubentry";
 import { addedEntry, proposeUpdate } from "../../cli/hubpr";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
 import { writeMain } from "./access";
@@ -150,9 +150,24 @@ async function propose(c: Ctx): Promise<{ pr: string; head: string; entry: strin
   return { pr: done.url, head: done.head, entry: done.entry };
 }
 
+async function certificatePreview(c: Ctx): Promise<{ before: string; entry: string }> {
+  const body = await readJson(c.req, z.object({ hub: entryBody.hub, name: entryBody.name, repo: entryBody.repo, label: z.string().max(40).nullable() }).strict());
+  const { gh, login } = await me(c.s);
+  const hub = checkHub(body.hub, login);
+  // This is a preview only. Propose and merge retain their existing identity,
+  // stale-entry, foreign-write and single-entry checks.
+  c.s.memo.delete(`hub-text:${hub}`);
+  const text = await mainText(c.s, gh, hub);
+  const before = listedAs(text, body.name, body.repo);
+  const entry = entryWithCertificate(before, body.label);
+  withEntryText(text, body.name, entry, login);
+  return { before, entry };
+}
+
 export const entryRoutes: Routes = {
   "POST /api/projects/merge": (c) => land(c, "add"),
   "POST /api/projects/entry/merge": (c) => land(c, "update"),
   "POST /api/projects/entry/check": check,
   "POST /api/projects/entry/propose": propose,
+  "POST /api/projects/entry/certificate": certificatePreview,
 };

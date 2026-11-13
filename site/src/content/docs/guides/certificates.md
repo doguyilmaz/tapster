@@ -12,7 +12,18 @@ certificate of its own. Entries that name none keep the hub's certificate.
 ## 1. Name it in the entry
 
 Give the certificate a **label**: up to 40 lowercase letters and digits, such as `acme`. The label `id` is reserved.
-Then add `certificate: <label>` to each entry that signs with it. Several entries may share a label.
+Several entries may share a label.
+
+In tapster setup, open **Optional extras → Certificates for single apps → Add a certificate**. Choose a project,
+select **Add an app-specific certificate** and enter its label. **Save certificate choice** shows the entry change
+before proposing and merging it. Its upload form then opens here. Existing projects also have this selector under
+**Projects → Configuration**; choose **Hub default** to switch back later.
+
+When adding a new project, choose its certificate in the add form. This also includes its macOS builds when the hub
+has no default Apple credentials. Merge the hub entry, then upload the .p12 and any missing notarization key under
+**Optional extras** before publishing. From a terminal, use `tapster add --certificate acme` for a new project.
+
+You can also add `certificate: <label>` by editing each entry directly:
 
 ```yaml
 version: 1
@@ -37,8 +48,8 @@ packages:
 `mytool` signs with the hub's certificate and `acmeapp` with the certificate `acme`. A certificate signs macOS code
 only, so the entry needs a `darwin-*` asset. `{team}` in the app's entitlements becomes the Team ID of its certificate.
 
-In tapster setup, open the project under **Projects**, click **Edit** under **Configuration**, add the line and click
-**Propose and merge**. In a clone of the hub, edit `tapster.yml` and commit it with the workflow change of step 2.
+For a manual edit, click **Edit** under **Configuration** and then **Propose and merge**. In a clone of the hub,
+edit `tapster.yml` and commit it with the workflow change of step 2.
 
 ## 2. Store the certificate
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { AppStart, FilesView, HubView, InstallView, Problem as ProblemView } from "../contract";
 import { post } from "./api";
 import { type Stop, type StopId, changedOnly, expiresSoon, extrasState, firstOpen, installStep, lineDiff, macNeeded, stops } from "../steps";
+import { AppKeyForm } from "./keys";
 import { CertificateForm, NotaryForm } from "./apple";
 import { clonePaths, targetOf } from "./projects";
 import { type SheetTarget, ProjectSheet } from "./sheet";
@@ -139,6 +140,7 @@ function ProtectFirst({ h, what, onGo }: { h: HubView; what: string; onGo: () =>
 }
 
 function App({ h }: { h: HubView }) {
+  const [replacing, setReplacing] = useState(false);
   const [start, setStart] = useState<AppStart | null>(null);
   const [problem, setProblem] = useState<ProblemView | null>(null);
   const [storing, storeProblem, store] = useAction();
@@ -178,9 +180,8 @@ function App({ h }: { h: HubView }) {
   if (h.app.id && !h.app.key) {
     return (
       <div class="panel">
-        <Head title="The App's key is missing" lead={`The hub knows its App (${h.app.slug ?? h.app.id}), but its private key is not stored. Generate a new key on GitHub and store it from a clone of the hub:`} />
-        <Cmd text="bunx @doguyilmaz/tapster init --rotate app" />
-        <Out href={`https://github.com/settings/apps/${h.app.slug ?? ""}`}>Open the App on GitHub</Out>
+        <Head title="The App's key is missing" lead={`The hub knows its App (${h.app.slug ?? h.app.id}), but its private key is not stored. Generate a replacement on GitHub, then store it here.`} />
+        <AppKeyForm h={h} onDone={() => setReplacing(false)} />
       </div>
     );
   }
@@ -207,6 +208,7 @@ function App({ h }: { h: HubView }) {
           . GitHub has no API for this.
         </p>
         <Installation h={h} slug={h.app.slug!} />
+        {replacing ? <AppKeyForm h={h} onDone={() => setReplacing(false)} onCancel={() => setReplacing(false)} /> : <button type="button" class="btn secondary small" onClick={() => setReplacing(true)}>Replace the App key</button>}
       </div>
     );
   }
@@ -245,8 +247,9 @@ function App({ h }: { h: HubView }) {
   );
 }
 
-function Mac({ h, choice }: { h: HubView; choice: "yes" | "no" | null }) {
+function Mac({ h, choice }: { h: HubView; choice: "yes" | "no" | "apps" | null }) {
   const needed = macNeeded(h, choice);
+  const apps = needed === false && (choice === "apps" || h.extras.certificates.length > 0);
   return (
     <div class="panel">
       <Head title="Will this hub sign macOS software?" lead="Mac apps and command line tools with macOS builds must be signed and notarized by Apple. That needs an Apple Developer Program membership and two files from Apple." />
@@ -263,11 +266,18 @@ function Mac({ h, choice }: { h: HubView; choice: "yes" | "no" | null }) {
               <span class="muted small">Next: your Developer ID certificate and a notarization key.</span>
             </span>
           </button>
-          <button type="button" class="choice" aria-pressed={needed === false} onClick={() => setMac(h.name, "no")}>
-            <Icon name={needed === false ? "check" : "circle"} />
+          <button type="button" class="choice" aria-pressed={apps} onClick={() => setMac(h.name, "apps")}>
+            <Icon name={apps ? "check" : "circle"} />
+            <span class="grow">
+              <strong>Use certificates for single apps</strong>
+              <span class="muted small">Choose each project's certificate when adding it. Upload it in Optional extras; no hub default is required.</span>
+            </span>
+          </button>
+          <button type="button" class="choice" aria-pressed={needed === false && !apps} onClick={() => setMac(h.name, "no")}>
+            <Icon name={needed === false && !apps ? "check" : "circle"} />
             <span class="grow">
               <strong>No, only Linux and Windows</strong>
-              <span class="muted small">The hub leaves macOS builds out. You can add Apple credentials later, here.</span>
+              <span class="muted small">You can add Apple credentials later, here.</span>
             </span>
           </button>
         </div>
@@ -524,7 +534,7 @@ function Projects({ h }: { h: HubView }) {
           <Spinner /> Reading where your projects stand
         </p>
       )}
-      {list !== null && list.length > 0 && <StatusRows list={list} paths={new Map([...local].map(([k, p]) => [k, p.path]))} onOpen={(s) => setOpen(targetOf(s, local))} />}
+      {list !== null && list.length > 0 && <StatusRows list={list} paths={new Map([...local].map(([k, p]) => [k, p.path]))} onOpen={(s) => setOpen(targetOf(s, local))} onSettings={(s) => setOpen(targetOf(s, local, true))} />}
       {open && <ProjectSheet key={open.repo} target={open} hubName={h.name} onClose={() => setOpen(null)} />}
       {h.invalid.length > 0 && (
         <Note tone="warn" title="The hub leaves these entries out">
@@ -555,7 +565,7 @@ function Ready({ h }: { h: HubView }) {
         <h2 class="section-title" style="font-size: 1.15rem">
           {h.name} is ready
         </h2>
-        <p class="muted">Open a project under Your projects and click Release: tapster tags its latest commit on GitHub and the hub signs and publishes it on its next run. Health shows how the hub is doing.</p>
+        <p class="muted">Each project shows its release mode and pending changes below. Release settings lets you choose daily Auto, Auto after each push or Manual. The hub signs and publishes new drafts; Health shows its runs.</p>
       </div>
     </div>
   );
@@ -629,7 +639,7 @@ export function Setup() {
   const panel: Record<StopId | "extras", preact.JSX.Element> = {
     extras: <Extras h={h} />,
     protect: <Protect h={h} />,
-    app: h.app.id || h.app.held || appResult.value?.kind === "unstored" ? <App h={h} /> : gate("Create the GitHub App", <App h={h} />),
+    app: h.app.id || h.app.held || appResult.value?.kind === "unstored" ? <App key={h.name} h={h} /> : gate("Create the GitHub App", <App key={h.name} h={h} />),
     macos: <Mac h={h} choice={choice} />,
     certificate: gate("Apple certificate", <Certificate h={h} />),
     notary: gate("Notarization key", <Notary h={h} />),

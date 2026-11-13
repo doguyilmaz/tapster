@@ -14,6 +14,11 @@ For a Mac app, the project builds the app and signs it ad hoc. The hub does the 
 5. it signs the DMG and the update feed with the app's Sparkle key;
 6. it publishes the DMG, the feed and `checksums.txt` and writes the cask.
 
+In **Setup → Optional extras → Sparkle keys**, **Create a Sparkle key** generates a key in your local keychain.
+Use a fresh label and copy the public key into the app and its entry under **Projects → Configuration**.
+Read that keychain account in the Sparkle section to make an offline backup and store the key in the hub.
+Existing key labels remain available in **Read or store a key**, including keys already stored in the hub.
+
 ## What the app needs
 
 In the app's `Info.plist`:

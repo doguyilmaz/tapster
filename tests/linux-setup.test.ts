@@ -107,7 +107,7 @@ const reason = (r: { data: Record<string, unknown> }) => (r.data.error as { reas
 test("the page lists the tools with Linux archives and says whether GnuPG is there", async () => {
   const saved = gpg;
   gpg = null;
-  expect(await linux()).toEqual({ wanted: true, stored: false, gpg: false, keystore: "keychain", maintainer: null, tools: [EBB, AIMS], left: [{ name: "maconly", why: "has no Linux archive" }] });
+  expect(await linux()).toEqual({ wanted: true, stored: false, previous: false, gpg: false, keystore: "keychain", maintainer: null, tools: [EBB, AIMS], left: [{ name: "maconly", why: "has no Linux archive" }] });
   expect(reason(await call("POST", "/api/hub/linux/key", { hub: HUB }))).toBe("GnuPG is not installed");
   gpg = saved;
 });

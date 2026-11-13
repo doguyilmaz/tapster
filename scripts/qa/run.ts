@@ -602,6 +602,6 @@ try {
   if (axe) console.log(findings.length ? `AXE VIOLATIONS:\n${findings.join("\n")}` : "no axe violations");
   console.log(wrong.length ? `RED SUCCESS MARKS:\n${wrong.join("\n")}` : "no red success marks");
   if (findings.length || wrong.length) process.exitCode = 1;
-  page.close();
+  await page.close();
   process.exit();
 }

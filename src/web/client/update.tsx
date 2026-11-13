@@ -5,12 +5,15 @@ import { confirm } from "./confirm";
 import { hub, loadHub, say, session } from "./state";
 import { Busy, Cmd, Note, Out, Problem, Spinner, useAction } from "./ui";
 
-const CHECK_EVERY = 6 * 3_600_000;
+const CHECK_EVERY = 60_000;
 const tapster = signal<TapsterView | null>(null);
 const restarting = signal<{ version: string; lost: ProblemView | null } | null>(null);
 
 async function loadTapster(): Promise<void> {
   try {
+    const current = await hello();
+    if (current.state !== "ok") return;
+    if (session.value && current.version !== session.value.version) return location.reload();
     tapster.value = await get<TapsterView>("/api/tapster");
   } catch {
     return;
@@ -80,6 +83,20 @@ function TapsterBanner({ t }: { t: TapsterView & { latest: string } }) {
       </Note>
     </div>
   );
+}
+
+function InstalledBanner({ t }: { t: TapsterView & { installed: string } }) {
+  const [busy, problem, run] = useAction();
+  const restart = () => run(async () => {
+    await post("/api/tapster/restart", { version: t.installed });
+    restarting.value = { version: t.installed, lost: null };
+    void waitFor(t.installed);
+  });
+  return <div class="banner"><Note tone="warn" title={`tapster ${t.installed} is installed; setup still runs ${t.running}`}>
+    <span>Restart setup to load the new interface and features. Your pairing is kept and this page reloads automatically.</span>
+    <div class="row"><Busy busy={busy} class="btn primary small" onClick={restart}>Restart with {t.installed}</Busy></div>
+    <Problem problem={problem} />
+  </Note></div>;
 }
 
 function Restarting({ r }: { r: { version: string; lost: ProblemView | null } }) {
@@ -152,7 +169,7 @@ export function Banners() {
   const h = hub.value;
   return (
     <>
-      {restarting.value ? <Restarting r={restarting.value} /> : t?.latest ? <TapsterBanner t={{ ...t, latest: t.latest }} /> : null}
+      {restarting.value ? <Restarting r={restarting.value} /> : t?.installed ? <InstalledBanner t={{ ...t, installed: t.installed }} /> : t?.latest ? <TapsterBanner t={{ ...t, latest: t.latest }} /> : null}
       {h && h.files.workflow === "older" && h.files.update && <HubBanner h={h} />}
     </>
   );

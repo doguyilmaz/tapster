@@ -13,6 +13,7 @@ import { here, installKind } from "../cli/upgrade";
 import { HUB } from "./api/access";
 import { hubRoutes, appCallback, warmStart } from "./api/hub";
 import { doorbellRoutes } from "./api/doorbell";
+import { keyRoutes } from "./api/keys";
 import { linuxRoutes } from "./api/linux";
 import { entryRoutes } from "./api/entry";
 import { projectRoutes } from "./api/projects";
@@ -21,7 +22,7 @@ import { updateRoutes } from "./api/update";
 import type { SessionView } from "./contract";
 import { respond } from "./http";
 import { type Deps, type Routes, type Session, handler, newSession } from "./server";
-import { PORT, askService, privateDir, readPort, serveSocket, serviceFiles, takeHandoff } from "./service";
+import { PORT, askService, privateDir, readPort, refreshService, serveSocket, serviceFiles, takeHandoff } from "./service";
 import { rememberTeam } from "./api/update";
 
 export { PORT };
@@ -51,6 +52,7 @@ export function routes(s: Session, quit: () => void): Routes {
     ...hubRoutes,
     ...doorbellRoutes,
     ...linuxRoutes,
+    ...keyRoutes,
     ...projectRoutes,
     ...statusRoutes,
     ...entryRoutes,
@@ -123,6 +125,7 @@ function listen(port: number, fetchHandler: (req: Request) => Promise<Response>)
 const STABLE = new Set(["brew", "bun", "npm"]);
 
 async function openService(d: Deps, open: boolean): Promise<boolean> {
+  if (TAPSTER.sha !== null) await refreshService(serviceFiles(d.home).sock, TAPSTER.version);
   const answer = (await askService(serviceFiles(d.home).sock, "pair")) as { link?: unknown } | null;
   const link = typeof answer?.link === "string" && /^http:\/\/127\.0\.0\.1:\d{4,5}\/#c=[0-9a-f]{32}$/.test(answer.link) ? answer.link : null;
   if (!link) return false;

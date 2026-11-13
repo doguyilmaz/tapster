@@ -5,8 +5,8 @@ sidebar:
   order: 9
 ---
 
-Each key has its own command. Run it in a clone of your hub. The old key keeps working until the new one is stored, so
-releases do not stop in between.
+Open **Setup** in `tapster setup` to replace keys in your browser. The terminal commands below do the same from a
+clone of your hub. The old key keeps working until the new one is stored, so releases do not stop in between.
 
 :::note[Where your keys go]{icon="padlock"}
 A new key goes the same way as the first: from your computer into your own hub or Cloudflare account, nowhere else.
@@ -46,6 +46,14 @@ bunx @doguyilmaz/tapster init --rotate notary
 Once tapster says `Notarization key stored`, revoke the old key in App Store Connect.
 
 ## The tapster App key
+
+In **Setup → Create the GitHub App**, choose **Replace the App key**. Open the App's settings, generate a private key
+and choose the downloaded `.pem` file. **Store the App key** verifies the App identity and its installation before
+replacing the secret. If the hub is missing its key, the same upload form appears automatically.
+
+After storage succeeds, revoke the old keys in GitHub and delete the downloaded file.
+
+From the terminal:
 
 ```sh
 bunx @doguyilmaz/tapster init --rotate app

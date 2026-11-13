@@ -1,6 +1,6 @@
 import { signal } from "@preact/signals";
 import { type AccountView, type BellCloud, type HubChoice, type HubView, type Problem, type ProjectStatus, type ScanView, type SessionView, type StatusView, HUB_VIEW_VERSION, STATUS_VIEW_VERSION } from "../contract";
-import type { Answer, Landing } from "../steps";
+import type { Answer, Landing, MacChoice } from "../steps";
 import { ApiError, get, post } from "./api";
 
 const HUB_KEY = "tapster.hub";
@@ -257,13 +257,14 @@ export async function loadHub(): Promise<void> {
 }
 
 const MAC_KEY = (name: string) => `tapster.mac.${name}`;
-export const macChoice = signal<Record<string, "yes" | "no">>({});
+export const macChoice = signal<Record<string, MacChoice>>({});
 
-export function mac(name: string): "yes" | "no" | null {
-  return macChoice.value[name] ?? ((saved(MAC_KEY(name)) as "yes" | "no" | null) || null);
+export function mac(name: string): MacChoice | null {
+  const value = macChoice.value[name] ?? saved(MAC_KEY(name));
+  return value === "yes" || value === "no" || value === "apps" ? value : null;
 }
 
-export function setMac(name: string, choice: "yes" | "no"): void {
+export function setMac(name: string, choice: MacChoice): void {
   remember(MAC_KEY(name), choice);
   macChoice.value = { ...macChoice.value, [name]: choice };
 }

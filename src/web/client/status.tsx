@@ -33,7 +33,7 @@ function UpdateBadges({ s }: { s: ProjectStatus }) {
   return <>{projectUpdates(s).map((update) => <Badge key={update.id} tone={update.tone} title={update.detail}>{update.label}</Badge>)}</>;
 }
 
-export function StatusRows({ list, paths, onOpen }: { list: ProjectStatus[]; paths: Map<string, string>; onOpen: (s: ProjectStatus) => void }) {
+export function StatusRows({ list, paths, onOpen, onSettings }: { list: ProjectStatus[]; paths: Map<string, string>; onOpen: (s: ProjectStatus) => void; onSettings?: (s: ProjectStatus) => void }) {
   return (
     <div class="card list">
       {list.map((s) => {
@@ -54,6 +54,7 @@ export function StatusRows({ list, paths, onOpen }: { list: ProjectStatus[]; pat
               <ReleaseModeBadge s={s} />
               <UpdateBadges s={s} />
               <StatusBadge s={s} />
+              {onSettings && <button type="button" class="btn secondary small" onClick={() => onSettings(s)} disabled={!path} title={path ? undefined : "Add this project’s clone folder in Projects to edit release settings"} aria-label={`Release settings for ${s.repo}`}>Release settings</button>}
             </span>
           </div>
         );

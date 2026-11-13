@@ -27,7 +27,7 @@ export const DEPENDABOT_BRANCHES = "refs/heads/dependabot/**";
 export function rulesetBodies(deployKeys: boolean, dependabot = false): [typeof TAG_RULESET, typeof BRANCH_RULESET] {
   const bypass_actors = deployKeys ? [...ADMIN_ONLY, DEPLOY_KEYS] : ADMIN_ONLY;
   const conditions = { ref_name: { include: ["~ALL"], exclude: dependabot ? [DEPENDABOT_BRANCHES] : [] } };
-  return [{ ...TAG_RULESET, bypass_actors }, { ...BRANCH_RULESET, bypass_actors, conditions }];
+  return [{ ...TAG_RULESET, bypass_actors }, { ...BRANCH_RULESET, conditions }];
 }
 
 type Ruleset = {

@@ -210,7 +210,7 @@ async function projectStatus(sh: Shared, e: Listed, start: Start): Promise<Proje
   const configP = early(
     e.state === "merged"
       ? Promise.all([sh.hubText, sh.facts]).then(([hubText, facts]) =>
-          configOf(gh, { hub: sh.hub, apple: facts?.apple ?? false, hubText, name: e.name, repo: e.repo, kind: e.kind, ref: tip?.sha ?? branch, goreleaser, workflow: workflow === null ? null : { name: `.github/workflows/${e.workflow}`, text: workflow }, releases, memo: sh.memo, pulls: sh.pulls }).catch((err) =>
+          configOf(gh, { hub: sh.hub, apple: (facts?.apple ?? false) || Boolean(e.certificate), hubText, name: e.name, repo: e.repo, kind: e.kind, ref: tip?.sha ?? branch, goreleaser, workflow: workflow === null ? null : { name: `.github/workflows/${e.workflow}`, text: workflow }, releases, memo: sh.memo, pulls: sh.pulls }).catch((err) =>
             err instanceof TapsterError || err instanceof GitHubError ? null : Promise.reject(err),
           ),
         )

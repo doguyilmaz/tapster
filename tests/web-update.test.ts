@@ -81,6 +81,7 @@ test("an update runs Homebrew, checks the new version and its Team ID, answers a
   const res = await call("POST", "/api/tapster/update", { version: "1.7.5" });
   expect(res.data).toEqual({ restarting: true, version: "1.7.5" });
   expect(ran).toEqual([
+    "/opt/homebrew/bin/tapster --version",
     "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/Caskroom/tapster/1.7.4/tapster",
     "brew update",
     "brew upgrade --cask tapster",
@@ -112,7 +113,7 @@ test("a Bun install gets the exact version and no codesign check", async () => {
   const { call, ran } = setupWith({ where: BUN });
   await call("GET", "/api/tapster");
   expect((await call("POST", "/api/tapster/update", { version: "1.7.5" })).status).toBe(200);
-  expect(ran).toEqual(["bun add -g @doguyilmaz/tapster@1.7.5", "/Users/me/.bun/bin/tapster --version"]);
+  expect(ran).toEqual(["/Users/me/.bun/bin/tapster --version", "bun add -g @doguyilmaz/tapster@1.7.5", "/Users/me/.bun/bin/tapster --version"]);
 });
 
 test.each([
@@ -161,7 +162,7 @@ test("only the release GitHub named can be installed", async () => {
   await call("GET", "/api/tapster");
   expect((await call("POST", "/api/tapster/update", { version: "9.9.9" })).status).toBe(400);
   expect((await call("POST", "/api/tapster/update", { version: "1.7.5; rm -rf /" })).status).toBe(400);
-  expect(ran).toEqual([]);
+  expect(ran).toEqual(["/opt/homebrew/bin/tapster --version"]);
 });
 
 test("Linux skips codesign; a Homebrew binary on macOS without a Team ID fails", async () => {
@@ -174,4 +175,44 @@ test("Linux skips codesign; a Homebrew binary on macOS without a Team ID fails",
   expect(await applyUpdate({ where: BREW, run }, "1.7.5", "linux", null)).toEqual({ ok: true });
   expect(ran.filter((r) => r.includes("codesign"))).toEqual([]);
   expect(await applyUpdate({ where: BREW, run }, "1.7.5", "darwin", null)).toMatchObject({ ok: false, changed: false });
+});
+
+
+test("an external upgrade is shown as installed and its restart never runs a package manager", async () => {
+  const { call, ran, exits } = setupWith();
+  expect((await call("GET", "/api/tapster")).data.installed).toBe("1.7.5");
+  await call("GET", "/api/tapster");
+  expect(ran).toEqual(["/opt/homebrew/bin/tapster --version"]);
+  expect((await call("POST", "/api/tapster/restart", { version: "1.7.5" })).data).toEqual({ restarting: true, version: "1.7.5" });
+  expect(ran.some((x) => x.startsWith("brew "))).toBe(false);
+  expect(ran).toContain("/usr/bin/codesign --verify --strict /opt/homebrew/bin/tapster");
+  await Bun.sleep(350);
+  expect(exits).toEqual([0]);
+  rmSync(serviceFiles(home).session, { force: true });
+});
+
+test.each([
+  ["signature", { "/usr/bin/codesign --verify --strict /opt/homebrew/bin/tapster": { code: 1, stdout: "", stderr: "bad signature" } }],
+  ["Team ID", { "/usr/bin/codesign -dv --verbose=2 /opt/homebrew/bin/tapster": { code: 0, stdout: "", stderr: "TeamIdentifier=OTHER" } }],
+] as const)("restart of an externally installed binary verifies its %s", async (_, answers) => {
+  rmSync(serviceFiles(home).session, { force: true });
+  const { call, exits, ran } = setupWith({ answers });
+  const res = await call("POST", "/api/tapster/restart", { version: "1.7.5" });
+  expect(res.status).toBe(400);
+  expect(exits).toEqual([]);
+  expect(existsSync(serviceFiles(home).session)).toBe(false);
+  expect(ran.some((x) => /^brew /.test(x))).toBe(false);
+  expect(ran).toContain(`launchctl disable gui/${process.getuid!()}/com.doguyilmaz.tapster`);
+  expect(JSON.stringify(res.data)).toContain("tapster service install");
+});
+
+test("restart rechecks the actual installed version and rejects one-shot setup", async () => {
+  const a = setupWith();
+  expect((await a.call("GET", "/api/tapster")).data.installed).toBe("1.7.5");
+  a.answers["/opt/homebrew/bin/tapster --version"] = { code: 0, stdout: "tapster 1.7.6 (x)\n", stderr: "" };
+  expect((await a.call("POST", "/api/tapster/restart", { version: "1.7.5" })).status).toBe(400);
+  expect(a.exits).toEqual([]);
+  const once = setupWith({ mode: "once" });
+  expect((await once.call("POST", "/api/tapster/restart", { version: "1.7.5" })).status).toBe(400);
+  expect(once.ran).toEqual([]);
 });

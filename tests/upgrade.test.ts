@@ -41,7 +41,7 @@ test("tapster upgrade runs Homebrew's commands in order and points to the hub's 
   const ran: string[] = [];
   const said: string[] = [];
   await upgrade([], { where: brew, run: async (argv) => (ran.push(argv.join(" ")), 0), say: (l) => said.push(l) });
-  expect(ran).toEqual(["brew update", "brew upgrade --cask tapster"]);
+  expect(ran).toEqual(["brew update", "brew upgrade --cask tapster", "/opt/homebrew/bin/tapster service restart"]);
   expect(said.join("\n")).toContain("Hub files");
 });
 
@@ -90,4 +90,11 @@ test("an update names the exact version where the install can", () => {
   expect(upgradeAdvice(KINDS.npm, "1.7.5").command).toBe("npm install -g @doguyilmaz/tapster@1.7.5");
   expect(upgradeAdvice(KINDS.brew, "1.7.5").run).toEqual([["brew", "update"], ["brew", "upgrade", "--cask", "tapster"]]);
   expect(upgradeAdvice(KINDS.bunx, "1.7.5").command).toBe("bunx @doguyilmaz/tapster@1.7.5");
+});
+
+
+test("an upgrade whose service restart fails explains how to recover the updated UI", async () => {
+  const ran: string[] = [];
+  await expect(upgrade([], { where: brew, run: async (argv) => (ran.push(argv.join(" ")), argv.includes("restart") ? 1 : 0), say: () => {} })).rejects.toThrow("setup service did not restart");
+  expect(ran).toHaveLength(3);
 });

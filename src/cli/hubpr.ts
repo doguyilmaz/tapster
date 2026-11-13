@@ -430,7 +430,7 @@ export async function proposeUpdate(gh: GitHub, hub: string, name: string, entry
   return { ...pr, entry: after };
 }
 
-export type HubEntry = { name: string; repo: string; kind: "go" | "bun" | "app"; workflow: string; protection: string; description: string | null; state: "merged" | "proposed"; pr: string | null };
+export type HubEntry = { name: string; repo: string; kind: "go" | "bun" | "app"; workflow: string; protection: string; description: string | null; certificate?: string; state: "merged" | "proposed"; pr: string | null };
 
 const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 
@@ -455,6 +455,7 @@ export function entriesIn(text: string | null, owner: string): Omit<HubEntry, "s
         workflow: typeof o.workflow === "string" && /^[A-Za-z0-9._-]+\.ya?ml$/.test(o.workflow) ? o.workflow : "release.yml",
         protection: o.protection === "off" || o.protection === "dependabot" ? o.protection : "on",
         description: typeof o.description === "string" ? o.description : null,
+        ...(typeof o.certificate === "string" && /^[a-z0-9]{1,40}$/.test(o.certificate) && o.certificate !== "id" ? { certificate: o.certificate } : {}),
       },
     ];
   });

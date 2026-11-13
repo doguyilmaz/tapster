@@ -17,6 +17,8 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run typecheck
       - run: bun test
+      - name: UI release settings and key maintenance
+        run: bun scripts/qa/features.ts "$RUNNER_TEMP/tapster-ui"
       - name: dist/ matches the source
         run: bun run build:action && bun run build:auto && git diff --exit-code dist/
   site:

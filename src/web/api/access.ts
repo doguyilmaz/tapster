@@ -99,3 +99,12 @@ export async function writeMain(
   }
   throw new TapsterError("the hub's main branch kept moving", "Nothing was written. Try again in a minute.");
 }
+
+// Keychain accounts can be shared by hubs. Serialize key writes across all tabs and hubs of this setup.
+export async function keyOperation<T>(s: Session, hub: string, work: () => Promise<T>): Promise<T> {
+  const key = "keys:writing";
+  if (s.memo.get(key)) throw new TapsterError(`a key operation is already running for ${s.memo.get(key)}`, "Wait for it to finish before starting another.");
+  s.memo.set(key, hub);
+  try { return await work(); }
+  finally { s.memo.delete(key); }
+}

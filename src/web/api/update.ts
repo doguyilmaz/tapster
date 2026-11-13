@@ -34,9 +34,22 @@ async function latest(s: Session): Promise<string | null> {
 
 const canUpdate = (s: Session) => s.mode === "service" && stableCommand(s.deps.where) !== null;
 
+async function installed(s: Session, fresh = false): Promise<string | null> {
+  if (!canUpdate(s)) return null;
+  const known = s.memo.get("tapster:installed") as Latest | undefined;
+  if (!fresh && known && Date.now() - known.at < 30_000) return known.version;
+  const stable = stableCommand(s.deps.where)!;
+  const said = await s.deps.run([stable, "--version"]).catch(() => null);
+  const version = said?.code === 0 ? /^tapster (\d+\.\d+\.\d+) /.exec(said.stdout)?.[1] ?? null : null;
+  const ours = parseTag(`v${TAPSTER.version}`);
+  const newer = version && ours && compareSemver(parseTag(`v${version}`)!, ours) > 0 ? version : null;
+  s.memo.set("tapster:installed", { at: Date.now(), version: newer } satisfies Latest);
+  return newer;
+}
+
 async function view(c: Ctx): Promise<TapsterView> {
-  const version = await latest(c.s);
-  return { running: TAPSTER.version, latest: version, update: canUpdate(c.s) ? "here" : "command", command: version ? upgradeAdvice(c.s.deps.where, version).command : null };
+  const [version, pending] = await Promise.all([latest(c.s), installed(c.s)]);
+  return { running: TAPSTER.version, latest: version, update: canUpdate(c.s) ? "here" : "command", command: version ? upgradeAdvice(c.s.deps.where, version).command : null, ...(pending ? { installed: pending } : {}) };
 }
 
 const team = async (run: Runner, path: string): Promise<string | null> => {
@@ -71,6 +84,15 @@ export async function applyUpdate(d: { where: Where; run: Runner }, version: str
     const r = await d.run(argv);
     if (r.code !== 0) return fail(`${argv.join(" ")} failed: ${excerpt(r.stderr || r.stdout) || `exit ${r.code}`}`, i === advice.run.length - 1);
   }
+  const checked = await verifyInstalled(d, version, platform, ours);
+  return checked.ok ? checked : { ...checked, changed: true };
+}
+
+async function verifyInstalled(d: { where: Where; run: Runner }, version: string, platform: NodeJS.Platform, ours: string | null): Promise<Updated> {
+  const stable = stableCommand(d.where)!;
+  const fail = (reason: string): Updated => ({ ok: false, reason, changed: false });
+  const sign = platform === "darwin" && installKind(d.where) === "brew";
+  if (sign && ours === null) return fail("the running tapster shows no Team ID to compare the new one with");
   const said = await d.run([stable, "--version"]);
   const now = /^tapster (\S+) /.exec(said.stdout)?.[1] ?? null;
   if (said.code !== 0 || now !== version) return fail(`the updated tapster reports ${now ?? "no version"}, not ${version}`);
@@ -109,7 +131,29 @@ async function update(c: Ctx) {
   return { restarting: true, version };
 }
 
+async function restartInstalled(c: Ctx) {
+  const { version } = await readJson(c.req, updateBody);
+  if (!canUpdate(c.s) || await installed(c.s, true) !== version) throw new TapsterError("no newer installed tapster matches this restart", "Reload the page to check the installed version again.");
+  if (c.s.memo.get("tapster:updating")) throw new TapsterError("an update already runs", "Wait for it to finish.");
+  c.s.memo.set("tapster:updating", true);
+  try {
+    const checked = await verifyInstalled(c.s.deps, version, c.s.deps.platform, await rememberTeam(c.s));
+    if (!checked.ok) {
+      const off = turnOff(c.s);
+      await c.s.deps.run(off).catch(() => undefined);
+      c.s.deps.log(`tapster setup: the installed ${version} failed its check (${checked.reason}), so tapster ran ${off.join(" ")}.`);
+      throw new TapsterError(checked.reason, "The current setup keeps running and turned the service off so the unchecked binary does not start automatically. Reinstall tapster with your package manager, then run tapster service install.");
+    }
+    handOff(c.s);
+    setTimeout(() => c.s.deps.exit(0), 300);
+    return { restarting: true, version };
+  } finally {
+    c.s.memo.delete("tapster:updating");
+  }
+}
+
 export const updateRoutes: Routes = {
   "GET /api/tapster": view,
   "POST /api/tapster/update": update,
+  "POST /api/tapster/restart": restartInstalled,
 };

@@ -6,11 +6,12 @@ import type { ProjectStepId } from "../status";
 import { notes } from "../steps";
 import { post } from "./api";
 import { confirm } from "./confirm";
-import { loadClones, loadHub, problemOf, recall, remember, say, statusCached, statusError, statuses, statusOf, tilde } from "./state";
+import { hub, loadClones, loadHub, problemOf, recall, remember, say, statusCached, statusError, statuses, statusOf, tilde } from "./state";
+import { CertificateChoice, validCertificateLabel } from "./certificates";
 import { KIND, Mark, StatusCard } from "./status";
 import { Badge, Busy, Cmd, DiffBlock, Icon, Note, Problem, Spinner, useTrap } from "./ui";
 
-export type SheetTarget = { repo: string; path: string | null; others: string[]; listed: boolean };
+export type SheetTarget = { repo: string; path: string | null; others: string[]; listed: boolean; settings?: boolean };
 
 function Frame({ title, sub, onClose, children }: { title: string; sub: ComponentChildren; onClose: () => void; children: ComponentChildren }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -187,17 +188,21 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
   const [auto, setAuto] = useState<AddOptionsView["auto"]>(info.auto ?? null);
   const [dependabot, setDependabot] = useState(info.dependabot);
   const [force, setForce] = useState(false);
+  const [certificate, setCertificate] = useState<string | null>(null);
   const [oneGo, setOneGo] = useState(recall(ONE_GO) === "1");
   const [preview, setPreview] = useState<DiffView | null>(null);
   const [busy, setBusy] = useState<"add" | "preview" | null>(null);
   const [problem, setProblem] = useState<ProblemView | null>(null);
   const noWorkflow = info.kind === "go" && info.workflows.length === 0;
   const automatic = auto === "daily" || auto === "push";
-  const options = { workflow, autoTag: automatic || (auto !== "off" && autoTag), auto, dependabot, force };
+  const certificateOffered = !info.inHub && !info.proposed;
+  const h = hub.value;
+  const badCertificate = certificateOffered && !validCertificateLabel(certificate);
+  const options = { workflow, autoTag: automatic || (auto !== "off" && autoTag), auto, dependabot, force, ...(certificateOffered && certificate ? { certificate } : {}) };
   const offered = !status || status.entry.state === "missing";
   const refusal = offered && oneGo ? oneGoRefusal(info) : null;
   const inOneGo = offered && oneGo && !refusal;
-  useEffect(() => setPreview(null), [workflow, autoTag, auto, dependabot, force]);
+  useEffect(() => setPreview(null), [workflow, autoTag, auto, dependabot, force, certificate]);
   const act = async (what: "add" | "preview", f: () => Promise<void>) => {
     setBusy(what);
     setProblem(null);
@@ -249,9 +254,13 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
           <span>The hub can publish it, but Homebrew, Scoop, apt and dnf users can only install from public projects. Its rulesets need a paid plan; without them the hub refuses it unless you accept the risk with protection: off.</span>
         </Note>
       )}
-      {!info.apple && <Note tone="info" title="The hub has no Apple credentials">tapster leaves the macOS builds out of this project's entry.</Note>}
+      {!info.apple && !certificate && <Note tone="info" title="The hub has no default Apple credentials">Choose an app-specific certificate below to include macOS builds or store the default under Apple certificate in Setup.</Note>}
       <div class="stack tight">
-        <h3 class="section-title">Options</h3>
+        <h3 class="section-title">{status ? "Release settings" : "Options"}</h3>
+        {certificateOffered && h && <>
+          <CertificateChoice h={h} id="add-certificate" value={certificate} onChange={setCertificate} />
+          {certificate && <p class="muted small">After merging the hub entry, store certificate {certificate} and any missing notarization key in Optional extras → Certificates for single apps before publishing.</p>}
+        </>}
         {info.kind === "go" &&
           (noWorkflow ? (
             <Note tone="error" title="No workflow runs GoReleaser">
@@ -285,7 +294,7 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
             <option value="push">Automatic, after each push</option>
             <option value="off">Manual</option>
           </select>
-          <p class="muted small">Automatic mode picks the version from commits on the default branch. Documentation and CI changes are skipped. Major releases require a Release: major commit trailer.</p>
+          <p class="muted small">Daily Auto checks at 03:23 UTC. Auto after each push checks the default branch immediately. Both choose the version from commits without per-release approval; any GitHub environment approval rules still apply. Documentation and CI changes are skipped. Major releases require a Release: major commit trailer.</p>
         </div>
         {!automatic && auto !== "off" && (
           <Switch checked={autoTag} onChange={setAutoTag} title="Let the release workflow push tags">
@@ -344,11 +353,11 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
       {inOneGo && preview && <Diff view={preview} />}
       <Problem problem={problem} />
       <div class="row">
-        <Busy busy={busy === "add"} class="btn primary" onClick={add} disabled={noWorkflow || busy !== null}>
+        <Busy busy={busy === "add"} class="btn primary" onClick={add} disabled={noWorkflow || badCertificate || busy !== null}>
           {inOneGo ? "Add, commit, push and merge" : status ? "Update the project" : `Add to ${hubName}`}
         </Busy>
         {inOneGo && !preview && (
-          <Busy busy={busy === "preview"} class="btn secondary" disabled={noWorkflow || busy !== null} onClick={() => act("preview", async () => setPreview(await post<DiffView>("/api/projects/preview", { hub: hubName, path: info.path, options })))}>
+          <Busy busy={busy === "preview"} class="btn secondary" disabled={noWorkflow || badCertificate || busy !== null} onClick={() => act("preview", async () => setPreview(await post<DiffView>("/api/projects/preview", { hub: hubName, path: info.path, options })))}>
             <Icon name="eye" />
             Check the changes first
           </Busy>
@@ -412,7 +421,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
   const [waiting, setWaiting] = useState(target.listed && !listed);
   const [info, setInfo] = useState<InspectView | null>(null);
   const [problem, setProblem] = useState<ProblemView | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(Boolean(target.settings && target.path));
   const [added, setAdded] = useState<AddView | null>(null);
   const [run, setRun] = useState<OneGo | null>(null);
   const cached = useRef(statusCached.value);
@@ -486,7 +495,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
     }
     return <span class="muted small">{info.branch === info.defaultBranch ? `The clone has tapster's files. Push ${info.branch}, then check again.` : `The clone's branch ${info.branch} has tapster's files. Merge it into ${info.defaultBranch} on GitHub.`}</span>;
   };
-  const card = status && <StatusCard s={status} onStatus={setStatus} fix={fix} onSettings={info && !addFixes && !added ? () => setEditing(true) : undefined} />;
+  const card = status && <StatusCard s={status} onStatus={setStatus} fix={fix} onSettings={info && !added ? () => setEditing(true) : undefined} />;
   return (
     <Frame title={target.repo} sub={path ? tilde(path) : "No clone on this computer"} onClose={onClose}>
       {path && !info && !problem && (
@@ -529,7 +538,7 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
           )}
           {!running && (card ?? <Spinner label="Reading the project's status" />)}
         </>
-      ) : status && !editing ? (
+      ) : status && (!editing || !info) ? (
         <>
           {card}
           {addFixes && info && (

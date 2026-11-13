@@ -12,13 +12,18 @@ export function expiresSoon(expires: string, now = Date.now()): boolean {
   return !Number.isNaN(end) && end - now < 30 * DAY;
 }
 
-export function macNeeded(h: HubView, choice: "yes" | "no" | null): boolean | null {
+export type MacChoice = "yes" | "no" | "apps";
+
+export function macNeeded(h: HubView, choice: MacChoice | null): boolean | null {
   if (h.apple.needed) return true;
-  return choice === null ? null : choice === "yes";
+  if (choice === "yes") return true;
+  if (h.extras.certificates.length) return false;
+  return choice === null ? null : false;
 }
 
-export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now(), projects: ProjectStatus[] | null = null): Stop[] {
+export function stops(h: HubView, choice: MacChoice | null, now = Date.now(), projects: ProjectStatus[] | null = null): Stop[] {
   const mac = macNeeded(h, choice);
+  const apps = mac === false && (choice === "apps" || h.extras.certificates.length > 0);
   const passed = h.protect.checks.filter((c) => c.ok).length;
   const mine = projectStop(projects, h.packages.length);
   const raw: { id: StopId; name: string; done: boolean; skipped?: boolean; attention?: boolean; status: string[] }[] = [
@@ -38,9 +43,9 @@ export function stops(h: HubView, choice: "yes" | "no" | null, now = Date.now(),
     {
       id: "macos",
       name: "macOS or not",
-      done: mac === true,
-      skipped: mac === false,
-      status: [mac === true ? "Signs macOS software" : mac === false ? "No macOS builds" : "Your answer"],
+      done: mac === true || apps,
+      skipped: mac === false && !apps,
+      status: [mac === true ? "Signs macOS software" : apps ? "App-specific certificates" : mac === false ? "No macOS builds" : "Your answer"],
     },
     {
       id: "certificate",

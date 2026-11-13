@@ -25,7 +25,7 @@ The new `.github/workflows/tapster-auto.yml` checks the default branch daily at 
 closed. GitHub may delay scheduled runs. You can also run **tapster auto** from GitHub Actions to check sooner.
 
 For a release after each push instead, use `tapster add --auto push`. The setup page offers the same choices under
-Projects, Release settings, Release mode (or Update the project when setup is incomplete). Choosing automatic mode authorizes releases from the default branch
+Projects → **Release settings** beside the project’s badges → **Release mode**. A local clone is required; add its folder in Projects if the button is disabled. Choosing automatic mode authorizes releases from the default branch
 without a separate approval for each version. Existing environment approval requirements are kept and still apply.
 
 The build workflow stays separate and starts from a version tag. Auto mode requires it to explicitly accept `v*`
@@ -113,7 +113,7 @@ tapster then:
 1. creates a `release` environment in the project that only the default branch may use;
 2. makes an SSH key, stores its private half as the `TAPSTER_TAG_KEY` secret of that environment and adds the public
    half as a deploy key named `tapster tags`;
-3. lets deploy keys pass the project's rules for tags and branches.
+3. lets deploy keys pass the project's tag rules. Branches remain restricted to the owner.
 
 :::note[Where your keys go]{icon="padlock"}
 The tag key lives only in the project's `release` environment. tapster makes it in a temporary folder and deletes the
@@ -122,7 +122,7 @@ folder right after. A workflow on another branch cannot read it.
 
 :::note
 Environments need a public project or GitHub Pro. If the project already has other deploy keys with write access,
-tapster names them: they can now tag and push to any branch too. Remove the ones you do not need.
+tapster names them: they can now push tags too. Remove the ones you do not need.
 :::
 
 ## Push tags with the key

@@ -155,16 +155,16 @@ async function inspect(c: Ctx): Promise<InspectView> {
     protected: problems.length === 0,
     inHub: entry?.state === "merged",
     proposed: entry?.pr ?? null,
-    apple: facts.apple,
+    apple: facts.apple || Boolean(entry?.certificate),
     ready,
     ...(await unpushed(dir, project.default_branch)),
   };
 }
 
-const options = z.object({ workflow: z.string().regex(/^[A-Za-z0-9._-]+\.ya?ml$/), autoTag: z.boolean(), auto: z.enum(["daily", "push", "off"]).nullable().optional(), dependabot: z.boolean(), force: z.boolean() }).strict();
+const options = z.object({ workflow: z.string().regex(/^[A-Za-z0-9._-]+\.ya?ml$/), autoTag: z.boolean(), auto: z.enum(["daily", "push", "off"]).nullable().optional(), certificate: z.string().regex(/^[a-z0-9]{1,40}$/).refine((v) => v !== "id").optional(), dependabot: z.boolean(), force: z.boolean() }).strict();
 const addBody = z.object({ ...hubBody, path: z.string(), options, oneGo: z.boolean().optional() }).strict();
 
-const optionsOf = (o: z.infer<typeof options>) => ({ ...addOptions([...(o.force ? ["--force"] : []), ...(o.autoTag ? ["--auto-tag"] : []), ...(o.auto ? ["--auto", o.auto] : []), ...(o.dependabot ? ["--allow-dependabot"] : []), "--workflow", o.workflow]), update: "show" as const });
+const optionsOf = (o: z.infer<typeof options>) => ({ ...addOptions([...(o.force ? ["--force"] : []), ...(o.autoTag ? ["--auto-tag"] : []), ...(o.auto ? ["--auto", o.auto] : []), ...(o.certificate ? ["--certificate", o.certificate] : []), ...(o.dependabot ? ["--allow-dependabot"] : []), "--workflow", o.workflow]), update: "show" as const });
 
 async function unpushed(dir: string, defaultBranch: string): Promise<{ ahead: number | null; unpushed: Unpushed[] }> {
   const known = async (rev: string) => (await git(dir, ["rev-parse", "--verify", "--quiet", rev])).code === 0;
@@ -205,8 +205,9 @@ async function preview(c: Ctx): Promise<DiffView> {
   const dir = clonePath(body.path, c.s.deps.home);
   const repo = cloneRepo(dir, login);
   const writes = new Map<string, string>();
-  const [facts, project] = await Promise.all([hubFacts(gh, hub), gh.getRepo(repo)]);
-  await prepare(dir, repo, projectName(repo), optionsOf(body.options), facts.apple, async (rel, content) => void writes.set(rel, content), project.default_branch);
+  const [facts, project, entries] = await Promise.all([hubFacts(gh, hub), gh.getRepo(repo), hubEntries(gh, hub)]);
+  const certificate = entries.find((p) => p.repo.toLowerCase() === repo.toLowerCase())?.certificate;
+  await prepare(dir, repo, projectName(repo), optionsOf(body.options), facts.apple || Boolean(certificate), async (rel, content) => void writes.set(rel, content), project.default_branch);
   const files: DiffView["files"] = [];
   for (const [path, after] of writes) {
     const before = await committed(dir, path);

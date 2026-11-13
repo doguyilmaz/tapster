@@ -85,5 +85,7 @@ export async function upgrade(args: string[], io: Io = {}): Promise<void> {
     say(`$ ${argv.join(" ")}`);
     if ((await (io.run ?? runInherited)(argv)) !== 0) throw new TapsterError(`${argv.join(" ")} failed`, `Run it yourself and read its output: ${advice.command}`);
   }
+  const stable = stableCommand(where);
+  if (stable && (await (io.run ?? runInherited)([stable, "service", "restart"])) !== 0) throw new TapsterError("tapster was upgraded, but its setup service did not restart", "Run tapster service restart, then tapster setup to open the updated page.");
   say("Upgraded. Run tapster -v to check. To move the hub to this version too, open tapster setup and write the Hub files.");
 }

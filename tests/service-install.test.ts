@@ -163,6 +163,14 @@ test("service logs shows the log file on macOS and the journal on Linux", async 
 });
 
 test("unknown service commands are refused", async () => {
-  await expect(service(["restart"], io().value)).rejects.toThrow(TapsterError);
+  await expect(service(["reload"], io().value)).rejects.toThrow(TapsterError);
   await expect(service([], io().value)).rejects.toThrow(TapsterError);
+});
+
+test("restart with no running service gives an install instruction without installing or changing anything", async () => {
+  const f = io();
+  await service(["restart"], f.value);
+  expect(f.said.join("\n")).toContain("tapster service install");
+  expect(f.ran).toEqual([]);
+  expect(existsSync(PLIST(f.home))).toBe(false);
 });

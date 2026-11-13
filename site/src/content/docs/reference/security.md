@@ -41,8 +41,7 @@ The tapster App can write releases to your projects. If someone stole its key, t
 hub sign it. Several checks stop that:
 
 - **Only you can tag.** `tapster add` gives each project rulesets so that only you can create, move or delete its tags
-  and branches. With `--auto-tag`, a deploy key that only the default branch's workflows can read may push tags and
-  branches too.
+  and branches. With `--auto-tag`, a deploy key that only the default branch's workflows can read may push tags. It does not bypass branch protection.
 - **The draft must come from the project.** The hub signs a draft only when its tag exists and the draft was opened by
   the project's own workflow or by you. Every file in it must have been uploaded the same way.
 - **Every file must match.** Each file must match `checksums.txt`. A public project must also attest its files in its
