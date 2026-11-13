@@ -5,8 +5,8 @@ sidebar:
   order: 12
 ---
 
-`tapster setup` normally runs while you need it and stops after two hours without use. The tapster service keeps it
-running on your computer instead: it starts when you log in, its page is always one `tapster setup` away and it tells
+`tapster` normally runs while you need it and stops after two hours without use. The tapster service keeps it
+running on your computer instead: it starts when you log in, its page is always one `tapster` away and it tells
 you when a new tapster is out. Your keys still go only to your own GitHub account and your own Cloudflare account.
 
 ## Install it
@@ -28,7 +28,7 @@ tapster service install
 ```
 
 :::tip[You should see]{icon="approve-check-circle"}
-`tapster setup now runs at http://127.0.0.1:8277 and starts when you log in. Open it with tapster setup.`
+`tapster setup now runs at http://127.0.0.1:8277 and starts when you log in. Open it with tapster.`
 :::
 
 On macOS this adds a LaunchAgent, `~/Library/LaunchAgents/com.doguyilmaz.tapster.plist`. On Linux it adds a systemd user
@@ -39,20 +39,20 @@ across upgrades. If another program holds port 8277, the service takes the next 
 ## Open the page
 
 ```sh
-tapster setup
+tapster
 ```
 
-With the service running, `tapster setup` asks it for a link that works once and opens it. The page then stays signed in
-in that browser for up to 30 days. After 12 hours without a click it locks. Then run `tapster setup` again.
+With the service running, `tapster` asks it for a link that works once and opens it. The page then stays signed in
+in that browser for up to 30 days. After 12 hours without a click it locks. Then run `tapster` again.
 
 ## Open it as an app
 
 The service's page can be installed as an app, so it opens in its own window from the Dock or Launchpad. In Chrome or
 Edge, open the page, then click the install icon at the right of the address bar and choose **Install**. The app is the same page from your computer, with the same checks; nothing is loaded from the
-internet. It shares the browser's sign-in, so a link from `tapster setup` that opened in the browser signs the app in
+internet. It shares the browser's sign-in, so a link from `tapster` that opened in the browser signs the app in
 too.
 
-Safari's **Add to Dock** keeps a separate store for the app, so the link `tapster setup` opens in Safari does not sign
+Safari's **Add to Dock** keeps a separate store for the app, so the link `tapster` opens in Safari does not sign
 it in. Use Chrome or Edge for the app.
 
 ## Update tapster
@@ -71,7 +71,7 @@ you update by hand, `tapster service install` turns it on again.
 
 If you upgraded from a terminal, the page detects that a newer version is already installed and offers **Restart
 with …**. It checks the installed binary before restarting and keeps the page's pairing. `tapster upgrade` also
-restarts the service after the package manager finishes. Opening `tapster setup` from a newer installed version
+restarts the service after the package manager finishes. Opening `tapster` from a newer installed version
 refreshes an older service before opening its page. The header shows the version serving the interface.
 
 You can also restart it yourself without reinstalling the service or changing its port:
@@ -103,6 +103,6 @@ tapster service uninstall
 ```
 
 This stops the service and removes the LaunchAgent or the unit and `~/.config/tapster`. tapster itself stays installed and
-`tapster setup` works as before.
+`tapster` works as before. The `tapster setup` alias also stays available.
 
 See [Security](/reference/security/#the-setup-page) for what the service lets a program on your computer do.

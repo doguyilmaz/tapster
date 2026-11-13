@@ -7,8 +7,8 @@ const root = join(import.meta.dir, "..");
 
 const logo = await Bun.file(join(root, "site", "public", "logo-512.png")).bytes();
 
-async function servesSetup(cmd: string[], cwd: string, port: number): Promise<string> {
-  const proc = Bun.spawn([...cmd, "setup", "--no-open", "--port", String(port)], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+async function servesSetup(cmd: string[], cwd: string, port: number, prefix: string[] = []): Promise<string> {
+  const proc = Bun.spawn([...cmd, ...prefix, "--no-open", "--port", String(port)], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   try {
     for (let i = 0; i < 100; i++) {
       const res = await fetch(`http://127.0.0.1:${port}/app.js`).catch(() => null);
@@ -18,9 +18,10 @@ async function servesSetup(cmd: string[], cwd: string, port: number): Promise<st
       }
       await Bun.sleep(100);
     }
-    throw new Error(`tapster setup did not answer: ${await new Response(proc.stderr).text()}`);
+    throw new Error("tapster did not serve the setup page in time");
   } finally {
     proc.kill();
+    await proc.exited;
   }
 }
 
@@ -34,6 +35,7 @@ test("the compiled CLI starts without the source tree and carries the setup page
   expect(res.stdout.toString()).toContain("tapster setup");
   expect(res.exitCode).toBe(0);
   expect(await servesSetup([out], dir, 18391)).toContain("Choose your hub");
+  expect(await servesSetup([out], dir, 18391, ["setup"])).toContain("Choose your hub");
 }, 90_000);
 
 test("the npm package is one bundled file with no dependencies to install", async () => {

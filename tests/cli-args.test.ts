@@ -1,16 +1,63 @@
 import { expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanupTemps, tempDir } from "../src/cli/temp";
 import { GitHub } from "../src/github";
 
 const cli = (args: string[], cwd = "/") => Bun.spawnSync([process.execPath, join(import.meta.dir, "../src/cli/main.ts"), ...args], { cwd });
 
-test.each([["init"], ["add"], ["doctor"]])("tapster %s --help explains the command and changes nothing", (cmd) => {
+test.each([["setup"], ["init"], ["add"], ["doctor"]])("tapster %s --help explains the command and changes nothing", (cmd) => {
   const res = cli([cmd, "--help"]);
   expect(res.exitCode).toBe(0);
   expect(res.stdout.toString()).toContain(`tapster ${cmd}`);
   expect(res.stderr.toString()).toBe("");
+});
+
+test.each(["--help", "-h", "help"])("tapster %s shows help without opening setup", (flag) => {
+  const res = cli([flag]);
+  expect(res.exitCode).toBe(0);
+  expect(res.stdout.toString()).toContain("tapster             open the setup in your browser");
+  expect(res.stdout.toString()).toContain("--no-open");
+  expect(res.stderr.toString()).toBe("");
+});
+
+test.each([
+  { args: [] },
+  { args: ["setup"] },
+  { args: ["--no-open", "--port", "9000", "--tapster", "a".repeat(40)] },
+  { args: ["setup", "--no-open", "--port", "9000"] },
+])("the CLI opens setup for $args and forwards its options", ({ args }) => {
+  const dir = mkdtempSync(join(tmpdir(), "cli-entry-"));
+  try {
+    // Keep routing checks in their own process, with no browser or credential access.
+    const preload = join(dir, "setup.ts");
+    const start = join(import.meta.dir, "../src/web/start.ts");
+    writeFileSync(preload, `import { mock } from "bun:test";
+const start = await import(${JSON.stringify(start)});
+mock.module(${JSON.stringify(start)}, () => ({ ...start, setup: async (args) => console.log(JSON.stringify({ setup: args })) }));
+`);
+    const res = Bun.spawnSync([process.execPath, "--preload", preload, join(import.meta.dir, "../src/cli/main.ts"), ...args], { cwd: "/" });
+    expect(res.stderr.toString()).toBe("");
+    expect(res.exitCode).toBe(0);
+    expect(JSON.parse(res.stdout.toString())).toEqual({ setup: args[0] === "setup" ? args.slice(1) : args });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test.each([["--bogus"], ["--port 80"], ["setup --bogus"], ["setup --port 80"]])("tapster %s refuses invalid setup options before starting", (line) => {
+  const res = cli(line.split(" "));
+  expect(res.exitCode).toBe(1);
+  expect(res.stderr.toString()).toContain("unknown option");
+  expect(res.stdout.toString()).toBe("");
+});
+
+test("unknown commands still fail instead of opening setup", () => {
+  const res = cli(["setpu"]);
+  expect(res.exitCode).toBe(1);
+  expect(res.stderr.toString()).toBe('tapster: unknown command "setpu"\n');
+  expect(res.stdout.toString()).toContain("tapster --help");
 });
 
 test.each([["init --bogus"], ["init --rotate everything"], ["add --bogus"], ["doctor --bogus"]])("tapster %s is refused before anything runs", (line) => {
