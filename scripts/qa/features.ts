@@ -2,7 +2,7 @@
 // Run: bun scripts/qa/features.ts <artifact-directory>
 import { strict as assert } from "node:assert";
 import { generateKeyPairSync } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AUTO_FILE, autoMode, autoWorkflow } from "../../src/cli/auto";
 import { useGhWrite } from "../../src/cli/gh";
@@ -49,6 +49,11 @@ aims.keys.push({ title: "tapster tags", read_only: false });
 aims.env = { policies: ["main"], custom: true, vars: new Map(), secrets: new Set(["TAPSTER_TAG_KEY"]) };
 const local = join(home, "Developer", "aims");
 writeFileSync(join(local, AUTO_FILE), autoWorkflow("daily", "main"));
+const linuxOnly = join(home, "Developer", "linuxonly");
+cpSync(join(home, "Developer", "ebb"), linuxOnly, { recursive: true });
+await run("git", ["-C", linuxOnly, "remote", "set-url", "origin", "git@github.com:octo/linuxonly.git"]);
+writeFileSync(join(linuxOnly, ".goreleaser.yaml"), "version: 2\nbuilds:\n  - binary: linuxonly\n    goos: [linux, windows]\n    goarch: [amd64]\n");
+fake.repo("linuxonly");
 // A listed repository without a local clone must remain visible and explain disabled settings.
 const config = repo.files!.get("tapster.yml")!;
 repo.files!.set("tapster.yml", config + "  - name: remoteonly\n    repo: octo/remoteonly\n    binaries: [remoteonly]\n    assets: { linux-amd64: 'remoteonly_{version}_linux_amd64.tar.gz' }\n");
@@ -93,6 +98,16 @@ try {
     await page.shot(join(out, `projects-${width}.png`));
   }
   check("project list fits desktop, 390px and 320px");
+  await page.clickText("remoteonly", ".project-item button");
+  await page.waitFor("document.querySelector('.sheet .config')");
+  assert(await page.eval("!document.querySelector('.sheet .macos-signing, .sheet .certificate-assignment')"), "non-macOS projects have no certificate settings");
+  await close();
+  await page.clickText("linuxonly", '[aria-labelledby="ready"] button');
+  await page.waitFor("document.querySelector('#auto-release')");
+  assert(await page.eval("!document.querySelector('#add-certificate')"), "Linux/Windows-only new projects have no Developer ID selector");
+  assert(await page.eval("!document.querySelector('.sheet').textContent.includes('The hub has no default Apple credentials')"), "non-macOS projects do not ask for Apple credentials");
+  await close();
+  check("Linux/Windows-only projects omit certificate settings in details and during setup");
   for (const mode of ["push", "off", "daily"] as const) {
     await page.clickText("Release settings", ".project-item button");
     await page.waitFor("document.querySelector('#auto-release')");
@@ -148,11 +163,26 @@ try {
   check("setup offers app-specific signing without requiring a default hub certificate");
   await page.click('nav a[href="/projects"]');
   await page.clickText("aims", ".project-item button");
+  await has("macOS signing");
+  assert(await page.eval("document.querySelector('.macos-signing').textContent.includes('Certificate teamapp') && !document.querySelector('.macos-signing').textContent.includes('Credentials needed')"), "summary identifies the stored certificate");
+  assert(await page.eval("!document.querySelector('#certificate-choice-aims')"), "project details keep the certificate editor closed");
+  for (const width of [1280, 390, 320]) {
+    await page.size(width, 900);
+    assert(await page.eval("document.querySelector('.sheet').scrollWidth <= document.querySelector('.sheet').clientWidth"), `signing summary overflow at ${width}`);
+    await page.eval("document.querySelector('.macos-signing').scrollIntoView({ block: 'center' })");
+    await page.shot(join(out, `macos-signing-${width}.png`));
+  }
+  await page.clickText("Change certificate", ".macos-signing button");
+  await has("Signing certificate for aims");
+  await page.clickText("Cancel", ".certificate-assignment button");
+  await page.waitFor("!document.querySelector('#certificate-choice-aims')");
+  await page.clickText("Change certificate", ".macos-signing button");
   await has("Signing certificate for aims");
   assert.equal(await page.eval("document.querySelector('#certificate-choice-aims').value"), "teamapp");
   await choose("#certificate-choice-aims", "");
   await page.clickText("Save certificate choice", ".certificate-assignment button"); await confirm("Save certificate choice");
-  await page.waitFor("document.querySelector('#certificate-choice-aims')?.value === ''");
+  await page.waitFor("document.querySelector('.macos-signing')?.textContent.includes('Hub default certificate') && !document.querySelector('#certificate-choice-aims')");
+  assert(await page.eval("document.querySelector('.macos-signing').textContent.includes('Credentials needed')"), "summary keeps missing default credentials visible");
   assert(!repo.files!.get("tapster.yml")!.includes("certificate: teamapp"));
   await close();
   await page.clickText("hafifpix", '[aria-labelledby="ready"] button');
@@ -170,7 +200,7 @@ try {
   assert(newEntry.includes("certificate: newapp"));
   assert(readFileSync(join(home, "Developer", "hafifpix", ".github", "workflows", "release.yml"), "utf8").includes("darwin-arm64"));
   await close();
-  check("existing projects can change certificate and new projects can select one without hub defaults");
+  check("macOS projects show a concise signing summary, allow changes on demand and offer certificates during setup");
   await page.click('nav a[href="/setup"]');
   await page.clickText("Optional extras", ".route button");
   await has("Create a Sparkle key");

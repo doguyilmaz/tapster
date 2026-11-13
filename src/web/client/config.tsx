@@ -4,7 +4,7 @@ import { capFirst } from "../steps";
 import { post } from "./api";
 import { confirm } from "./confirm";
 import { hub, hubName, problemOf, say, statusOf } from "./state";
-import { CertificateAssignment } from "./certificates";
+import { CertificateSettings } from "./certificates";
 import { Busy, DiffBlock, Icon, Note, Out, Problem, ofProject } from "./ui";
 
 type Opened = { pr: string; head: string; entry: string };
@@ -204,7 +204,7 @@ export function Configuration({ s, onStatus }: { s: ProjectStatus; onStatus: (s:
         </Note>
       )}
       <Problem problem={problem} />
-      {!editing && !p && h && certificateProject && <CertificateAssignment key={`${h.name}:${s.name}:${certificateProject.certificate ?? "default"}`} h={h} project={certificateProject} onDone={() => void refresh()} />}
+      {!editing && !p && h && certificateProject && <CertificateSettings key={`${h.name}:${s.name}:${certificateProject.certificate ?? "default"}`} h={h} project={certificateProject} onDone={() => void refresh()} />}
     </section>
   );
 }

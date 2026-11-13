@@ -103,6 +103,7 @@ export type InspectView = {
   inHub: boolean;
   proposed: string | null;
   apple: boolean;
+  macos: boolean | null;
   ready: boolean;
   ahead: number | null;
   unpushed: Unpushed[];

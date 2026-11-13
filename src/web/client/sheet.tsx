@@ -195,7 +195,8 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
   const [problem, setProblem] = useState<ProblemView | null>(null);
   const noWorkflow = info.kind === "go" && info.workflows.length === 0;
   const automatic = auto === "daily" || auto === "push";
-  const certificateOffered = !info.inHub && !info.proposed;
+  const macosOffered = info.macos !== false || (info.kind === "bun" && force);
+  const certificateOffered = macosOffered && !info.inHub && !info.proposed;
   const h = hub.value;
   const badCertificate = certificateOffered && !validCertificateLabel(certificate);
   const options = { workflow, autoTag: automatic || (auto !== "off" && autoTag), auto, dependabot, force, ...(certificateOffered && certificate ? { certificate } : {}) };
@@ -254,7 +255,7 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
           <span>The hub can publish it, but Homebrew, Scoop, apt and dnf users can only install from public projects. Its rulesets need a paid plan; without them the hub refuses it unless you accept the risk with protection: off.</span>
         </Note>
       )}
-      {!info.apple && !certificate && <Note tone="info" title="The hub has no default Apple credentials">Choose an app-specific certificate below to include macOS builds or store the default under Apple certificate in Setup.</Note>}
+      {macosOffered && !info.apple && !certificate && <Note tone="info" title="The hub has no default Apple credentials">{certificateOffered ? "Choose an app-specific certificate below to include macOS builds or store the default under Apple certificate in Setup." : "Store the default under Apple certificate in Setup or choose a certificate for this project in Optional extras."}</Note>}
       <div class="stack tight">
         <h3 class="section-title">{status ? "Release settings" : "Options"}</h3>
         {certificateOffered && h && <>
