@@ -217,3 +217,19 @@ test("setup options: --service stands alone", () => {
   expect(setupOptions(["--service"])).toEqual({ open: false, port: null, pin: null, service: true });
   expect(() => setupOptions(["--service", "--port", "9000"])).toThrow(TapsterError);
 });
+
+
+test("a supervised restart hands the authenticated page to the next process", async () => {
+  const home = newHome();
+  const { first, token } = await paired(home);
+  const f = serviceFiles(home);
+  privateDir(f.dir);
+  let stopped = false;
+  const sock = await serveSocket(f.sock, first, () => { stopped = true; });
+  try {
+    expect(await askService(f.sock, "restart")).toEqual({ stopping: true });
+    await Bun.sleep(100);
+    expect(stopped).toBe(true);
+    expect(await restart(home, token)).toBe(200);
+  } finally { sock.stop(); }
+});

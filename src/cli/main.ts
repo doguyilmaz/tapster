@@ -39,6 +39,7 @@ const help: Record<string, string> = {
 
   tapster service install     start it now and at every login (a LaunchAgent on macOS, a systemd user unit on Linux)
   tapster service uninstall   stop it and remove it; tapster itself stays installed
+  tapster service restart     load the installed version after an upgrade
   tapster service status      say whether it runs, which version and where
   tapster service logs        show its recent log
 
@@ -66,9 +67,10 @@ const help: Record<string, string> = {
   When the token reaches several accounts, tapster asks which one. CLOUDFLARE_ACCOUNT_ID answers that in advance.`,
   add: `tapster add: prepare this project clone and propose it to the hub
 
-  tapster add [--hub owner/repo] [--workflow file.yml] [--auto [daily|push|off]] [--auto-tag] [--allow-dependabot] [--force]
+  tapster add [--hub owner/repo] [--workflow file.yml] [--auto [daily|push|off]] [--auto-tag] [--certificate label] [--allow-dependabot] [--force]
     --hub               the hub that publishes this project (remembered in git config)
     --workflow          the workflow that runs GoReleaser, if not release.yml
+    --certificate       an app-specific Developer ID certificate label for a new hub entry
     --auto-tag          let the project's release workflow push tags with a deploy key
     --auto [daily|push|off]  pick versions and tag automatically (daily by default); off disables it
     --allow-dependabot  leave branches named dependabot/... open so Dependabot can open pull requests

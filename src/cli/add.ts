@@ -6,7 +6,8 @@ import { isMap, isSeq, parse, parseDocument, type Scalar, YAMLMap } from "yaml";
 import { appFromProjectYml, bundleIdOf, feedName, helpersOf, literal } from "../appsource";
 import { type EntrySources, deriveUpdate, refusedDraftApp } from "../entryupdate";
 import { readHubFile } from "../hubcommit";
-import { entryText } from "../hubentry";
+import { entryText, entryWithCertificate } from "../hubentry";
+import { CERT_LABEL } from "../certificates";
 import { changeText } from "../web/steps";
 import { openPull } from "../web/api/entry";
 import { BUNDLE_ID } from "../config";
@@ -273,7 +274,7 @@ export async function protectProject(gh: GitHub, repo: string, deployKeys = fals
 
 // update: what add does with an update of an entry the hub already has. The terminal proposes it; the setup page shows
 // it and leaves the click to the person.
-export type AddOptions = { hub: string | null; force: boolean; workflow: string; autoTag: boolean; auto: AutoMode | null; dependabot: boolean; update: "propose" | "show" };
+export type AddOptions = { hub: string | null; force: boolean; workflow: string; autoTag: boolean; auto: AutoMode | null; certificate?: string; dependabot: boolean; update: "propose" | "show" };
 
 export function addOptions(args: string[]): AddOptions {
   const opts: AddOptions = { hub: null, force: false, workflow: "release.yml", autoTag: false, auto: null, dependabot: false, update: "propose" };
@@ -288,6 +289,11 @@ export function addOptions(args: string[]): AddOptions {
       if (mode === "daily" || mode === "push" || mode === "off") i++;
     }
     else if (a === "--allow-dependabot") opts.dependabot = true;
+    else if (a === "--certificate") {
+      const label = args[++i];
+      if (!label || !CERT_LABEL.test(label) || label === "id") throw new TapsterError("that is not a certificate label", "Use 1–40 lowercase letters or digits, other than id.");
+      opts.certificate = label;
+    }
     else if (a === "--hub" && args[i + 1]) opts.hub = hubName(args[++i]!);
     else if (a === "--workflow" && args[i + 1] && /^[A-Za-z0-9._-]+\.ya?ml$/.test(args[i + 1]!)) opts.workflow = args[++i]!;
     else throw new TapsterError(`unknown option ${a}`, "Run tapster add --help for the options.");
@@ -330,7 +336,7 @@ type Prepared = { kind: "go" | "bun" | "app"; entry: string | null; reason: stri
 
 export async function prepare(dir: string, repo: string, name: string, opts: AddOptions, mac = true, write: Write = (rel, content) => writeInside(dir, rel, content), branch?: string): Promise<Prepared> {
   const writes = new Map<string, string>();
-  const prepared = await prepareRelease(dir, repo, name, opts, mac, async (rel, content) => void writes.set(rel, content));
+  const prepared = await prepareRelease(dir, repo, name, opts, mac || Boolean(opts.certificate), async (rel, content) => void writes.set(rel, content));
   if (opts.auto) {
     if (!branch) throw new TapsterError("the default branch is needed for automatic releases", "Read the repository's default branch from GitHub first.");
     const release = writes.get(`.github/workflows/${opts.workflow}`) ?? writes.get(".github/workflows/release.yml");
@@ -513,7 +519,10 @@ export type Added = { pr: string | null; head: string | null; entry: string | nu
 
 export async function addProject(gh: GitHub, dir: string, repo: string, hub: string, facts: { slug: string; apple: boolean }, opts: AddOptions, say: (line: string) => void): Promise<Added> {
   const name = projectName(repo);
-  const { slug, apple } = facts;
+  const { slug } = facts;
+  const existing = (await hubEntries(gh, hub)).find((e) => e.name === name || e.repo.toLowerCase() === repo.toLowerCase());
+  if (existing && opts.certificate) throw new TapsterError(`${name} already has a hub entry`, "Change its signing certificate under Configuration in tapster setup, or edit its hub entry. Release settings do not change an existing entry's certificate.");
+  const apple = facts.apple || Boolean(opts.certificate || existing?.certificate);
   const project = await gh.getRepo(repo);
   const prepared = await prepare(dir, repo, name, opts, apple, undefined, project.default_branch);
   for (const n of prepared.notes) say(n);
@@ -523,7 +532,6 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
     say("- Dependabot cannot open pull requests here now: GitHub does not let personal repositories exempt it from the rules.");
     say("  To keep it, run tapster add --allow-dependabot. Branches named dependabot/... then stay open to anything with write access, the hub's App included, so a stolen App key could run your workflows on its own code there.");
   }
-  const existing = (await hubEntries(gh, hub)).find((e) => e.name === name || e.repo.toLowerCase() === repo.toLowerCase());
   let { entry, reason } = prepared;
   const sources = localSources(gh, dir, repo, prepared, apple, opts);
   if (existing) {
@@ -563,6 +571,10 @@ export async function addProject(gh: GitHub, dir: string, repo: string, hub: str
       const more = await deriveUpdate(entry.replace(/^ {2}/gm, ""), sources);
       if (more.entry) entry = more.entry.replace(/^(?=.)/gm, "  ");
       for (const m of more.manual) say(byHand(m));
+    }
+    if (opts.certificate) {
+      entry = entryWithCertificate(entry.replace(/^ {2}/gm, ""), opts.certificate).replace(/^(?=.)/gm, "  ");
+      say(`- certificate ${opts.certificate} signs this project's macOS code; after merging the hub entry, store its .p12 under Optional extras in tapster setup (or tapster init --certificate ${opts.certificate}) before publishing`);
     }
     try {
       ({ url: pr, head } = await proposeEntry(gh, hub, name, repo, entry));

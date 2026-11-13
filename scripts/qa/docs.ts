@@ -108,6 +108,6 @@ try {
   process.exitCode = 1;
 } finally {
   if (page.errors.length) console.log(page.errors.join("\n"));
-  page.close();
+  await page.close();
   process.exit();
 }

@@ -3,7 +3,7 @@ export type Problem = { reason: string; fix: string };
 export type SessionView = { version: string; dev: boolean; service: boolean; platform: string; home: string; here: { hub: string | null; repo: string | null; path: string } };
 
 // update: "here" when this setup can update itself (the service of an installed tapster), "command" when the user runs the command.
-export type TapsterView = { running: string; latest: string | null; update: "here" | "command"; command: string | null };
+export type TapsterView = { installed?: string; running: string; latest: string | null; update: "here" | "command"; command: string | null };
 
 export type AccountView = { state: "no-gh" } | { state: "signed-out" } | { state: "ok"; login: string; missing: string[] };
 
@@ -14,7 +14,7 @@ export type Check = { label: string; ok: boolean };
 export type OtherWorkflow = { file: string; actions: string[] };
 
 // Bump on any change to HubView: the page keeps the last one in localStorage and paints it before GitHub answers.
-export const HUB_VIEW_VERSION = 2;
+export const HUB_VIEW_VERSION = 3;
 
 export type HubView = {
   name: string;
@@ -25,7 +25,7 @@ export type HubView = {
   app: { id: string | null; slug: string | null; key: boolean; held: boolean; install: string | null };
   apple: { needed: boolean | null; certificate: { team: string; expires: string } | null; certificateStored: boolean; notary: boolean };
   files: { config: boolean; state: boolean; readme: boolean; workflow: "missing" | "current" | "older" | "newer" | "other"; pinned: string | null; update: "needed" | "optional" | null; every: number | null };
-  packages: { name: string; repo: string; kind: string }[];
+  packages: { name: string; repo: string; kind: string; macos?: boolean; certificate?: string | null }[];
   invalid: { name: string; reason: string }[];
   issue: { url: string; number: number; updated: string; body: string } | null;
   extras: { doorbell: DoorbellView; linux: LinuxView; sparkle: { label: string; stored: boolean }[]; certificates: CertificateView[] };
@@ -58,7 +58,7 @@ export type DoorbellDone = { origin: string; rung: string[]; missed: string[] };
 
 export type LinuxTool = { name: string; repo: string; kind: "go" | "bun"; archives: string[]; on: boolean };
 
-export type LinuxView = { wanted: boolean; stored: boolean; gpg: boolean; keystore: "keychain" | "keyring" | null; maintainer: string | null; tools: LinuxTool[]; left: { name: string; why: string }[] };
+export type LinuxView = { wanted: boolean; stored: boolean; previous?: boolean; gpg: boolean; keystore: "keychain" | "keyring" | null; maintainer: string | null; tools: LinuxTool[]; left: { name: string; why: string }[] };
 
 export type LinuxChange = { before: string; after: string };
 
@@ -112,7 +112,7 @@ export type Unpushed = { sha: string; subject: string; tapster: boolean };
 
 export type CommitResult = { committed: boolean; ahead: number | null; unpushed: Unpushed[] };
 
-export type AddOptionsView = { workflow: string; autoTag: boolean; auto?: "daily" | "push" | "off" | null; dependabot: boolean; force: boolean };
+export type AddOptionsView = { workflow: string; autoTag: boolean; auto?: "daily" | "push" | "off" | null; certificate?: string; dependabot: boolean; force: boolean };
 
 export type AddView = { lines: string[]; pr: string | null; head: string | null; entry: string | null; installUrl: string; files: string[] };
 

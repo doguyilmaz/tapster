@@ -30,9 +30,9 @@ function Row({ p, onOpen }: { p: LocalProject; onOpen: (p: LocalProject) => void
 
 export const clonePaths = (list: LocalProject[]) => new Map(list.map((p) => [p.repo.toLowerCase(), p]));
 
-export function targetOf(s: ProjectStatus, local: Map<string, LocalProject>): SheetTarget {
+export function targetOf(s: ProjectStatus, local: Map<string, LocalProject>, settings = false): SheetTarget {
   const c = local.get(s.repo.toLowerCase());
-  return { repo: s.repo, path: c?.path ?? null, others: c?.others ?? [], listed: true };
+  return { repo: s.repo, path: c?.path ?? null, others: c?.others ?? [], listed: true, settings };
 }
 
 export function Projects() {
@@ -112,7 +112,7 @@ export function Projects() {
           <h2 id="in-hub" class="section-title">
             In the hub ({listed!.length})
           </h2>
-          <StatusRows list={listed!} paths={new Map([...local].map(([k, p]) => [k, p.path]))} onOpen={(s) => setOpen(targetOf(s, local))} />
+          <StatusRows list={listed!} paths={new Map([...local].map(([k, p]) => [k, p.path]))} onOpen={(s) => setOpen(targetOf(s, local))} onSettings={(s) => setOpen(targetOf(s, local, true))} />
         </section>
       )}
       {scan && (

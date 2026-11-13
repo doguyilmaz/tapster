@@ -75,6 +75,7 @@ hub. See [Add a project](/tutorial/project/).
 | --- | --- |
 | `--hub owner/repo` | The hub that publishes this project. `add` asks once and remembers it in the clone's git config. |
 | `--workflow file.yml` | The workflow that runs GoReleaser, when it is not `release.yml`. |
+| `--certificate label` | Selects an app-specific Developer ID certificate for a new hub entry, including macOS builds without hub default credentials. Upload it after merging the entry. For existing projects, change the choice under Configuration in setup. |
 | `--auto-tag` | Lets the project's release workflow push tags with a deploy key. See [Releases tagged by a workflow](/guides/auto-tag/). |
 | `--auto [daily\|push\|off]` | Picks versions and tags automatically. Daily at 03:23 UTC by default; `push` checks each default-branch push and `off` returns to manual releases. Includes the tag key when enabled. See [Automatic releases](/guides/auto-tag/). |
 | `--allow-dependabot` | Leaves branches named `dependabot/...` open so Dependabot can open pull requests. See [Dependabot](/guides/dependabot/). |

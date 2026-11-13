@@ -101,45 +101,17 @@ and have no release yet, tapster cannot guess the names: run `tapster add` again
 A release workflow that moves a branch after GoReleaser, for example so that a site deploys from it, fails after
 `tapster add`: the project's rules let only you move branches. `tapster add` names such a step. Instead:
 
-1. Run `tapster add --auto-tag`. It makes a deploy key that only the default branch's workflows can use and lets
-   deploy keys pass the rules. See [workflow tags](/guides/auto-tag/).
-2. Remove the step and add a workflow that moves the branch once the hub has published:
+The tag key created by `--auto` or `--auto-tag` may push tags only. It cannot move a release branch. For a site,
+prefer deploying build artifacts from a workflow triggered by `release: { types: [published] }`, which needs no
+branch write. If you keep a release branch, move it with your own GitHub sign-in after the hub has published:
 
-```yaml
-name: Follow releases
-on:
-  release: { types: [published] }
-  workflow_dispatch:
-permissions: {}
-jobs:
-  dispatch:
-    if: github.event_name == 'release'
-    runs-on: ubuntu-24.04
-    permissions: { actions: write }
-    steps:
-      - run: gh workflow run follow.yml --repo "$GITHUB_REPOSITORY" --ref main
-        env: { GH_TOKEN: "${{ github.token }}" }
-  move:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    environment: release
-    permissions: { contents: read }
-    steps:
-      - uses: actions/checkout@<commit> # <version>
-        with: { ssh-key: "${{ secrets.TAPSTER_TAG_KEY }}", fetch-depth: 0 }
-      - name: Move the release branch to the latest release
-        env: { GH_TOKEN: "${{ github.token }}" }
-        run: |
-          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
-          git push origin "$(git rev-parse "$tag^{commit}"):refs/heads/release"
+```sh
+git fetch origin --tags
+git push origin "v1.2.3^{commit}:refs/heads/release"
 ```
 
-Save it as `.github/workflows/follow.yml`. The hub publishes with its App, which starts the `dispatch` job. That job
-runs on the tag, which the `release` environment does not admit, so it starts `move` on `main`. `move` reads the
-latest published release itself, so the branch never runs ahead of what users can install.
-
-Without a workflow you can push the branch yourself with the tag:
-`git push origin v1.2.3 "v1.2.3^{commit}:refs/heads/release"`. The site then goes live before the hub publishes.
+The UI's release-setting updates keep branch protection in place. They do not grant the tag key permission to push
+project code.
 
 ## Docs changes
 

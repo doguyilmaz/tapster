@@ -6,6 +6,7 @@ import { GitHubError, TapsterError } from "../../errors";
 import { foreignWrites } from "../../foreign";
 import { GitHub } from "../../github";
 import { readHubFile } from "../../hubcommit";
+import { register } from "../../mask";
 import { appJwt, installationRepos } from "../../token";
 import { TAPSTER } from "../../version";
 import { certificateLabels, certificateNames } from "../../certificates";
@@ -22,7 +23,7 @@ import { protectHub } from "../../cli/init";
 import { everyFromFlow } from "../../cli/schedule";
 import type { AccountView, AppStart, CertificateView, FilePlan, FilesView, HealthView, HubCode, HubChoice, HubView, InstallView, OtherWorkflow, StoredCertificate } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
-import { checkHub, checkedMain, hubFrom, lockedEnvironment, me, or404, writeMain } from "./access";
+import { checkHub, checkedMain, hubFrom, keyOperation, lockedEnvironment, me, or404, writeMain } from "./access";
 import { bellCallback, doorbellView } from "./doorbell";
 import { linuxView } from "./linux";
 
@@ -266,7 +267,7 @@ export async function hubView(s: Session, gh: GitHub, hub: string): Promise<HubV
       update: code ? (code.changed.length ? "needed" : "optional") : null,
       every: flow ? everyFromFlow(flow) : null,
     },
-    packages: (parsed?.config.packages ?? []).map((p) => ({ name: p.name, repo: p.repo, kind: isApp(p) ? "app" : p.kind })),
+    packages: (parsed?.config.packages ?? []).map((p) => ({ name: p.name, repo: p.repo, kind: isApp(p) ? "app" : p.kind, macos: macosCode(p), certificate: p.certificate ?? null })),
     invalid: (parsed?.invalid ?? []).map((i) => ({ name: i.name, reason: i.reason })),
     issue: issue ? { url: issue.html_url, number: issue.number, updated: issue.updated_at, body: issue.body ?? "" } : null,
     extras: {
@@ -409,25 +410,35 @@ async function storeLabeled(gh: GitHub, hub: string, login: string, { label, con
 async function certificate(c: Ctx): Promise<StoredCertificate> {
   const f = await form(c);
   const { gh, hub, login } = await hubFrom(c, f.get("hub"));
-  const labeled = await labeledFor(gh, hub, f);
-  await lockedEnvironment(gh, hub);
-  const data = await file(f, "p12", P12_LIMIT);
-  const password = String(f.get("password") ?? "");
-  const cert = await inspectP12(data, password);
-  if (labeled) return storeLabeled(gh, hub, login, labeled, data, password, cert);
-  await saveCertificate(hub, data, password, cert);
-  return cert;
+  return keyOperation(c.s, hub, async () => {
+    const labeled = await labeledFor(gh, hub, f);
+    await lockedEnvironment(gh, hub);
+    const data = await file(f, "p12", P12_LIMIT);
+    const password = String(f.get("password") ?? "");
+    register(password);
+    register(Buffer.from(data).toString("base64"));
+    const cert = await inspectP12(data, password);
+    if (labeled) return storeLabeled(gh, hub, login, labeled, data, password, cert);
+    await saveCertificate(hub, data, password, cert);
+    return cert;
+  });
 }
 
 async function notary(c: Ctx) {
   const f = await form(c);
   const { gh, hub } = await hubFrom(c, f.get("hub"));
-  const labeled = await labeledFor(gh, hub, f);
-  await lockedEnvironment(gh, hub);
-  const key = notaryKey(await file(f, "p8", P8_LIMIT), String(f.get("keyId") ?? ""), String(f.get("issuerId") ?? ""));
-  const checked = await c.s.deps.notary(key);
-  await saveNotary(hub, key, labeled?.label ?? null);
-  return { checked };
+  return keyOperation(c.s, hub, async () => {
+    const labeled = await labeledFor(gh, hub, f);
+    await lockedEnvironment(gh, hub);
+    const p8 = await file(f, "p8", P8_LIMIT);
+    const keyId = String(f.get("keyId") ?? "");
+    const issuerId = String(f.get("issuerId") ?? "");
+    for (const value of [Buffer.from(p8).toString("utf8"), keyId, issuerId]) register(value);
+    const key = notaryKey(p8, keyId, issuerId);
+    const checked = await c.s.deps.notary(key);
+    await saveNotary(hub, key, labeled?.label ?? null);
+    return { checked };
+  });
 }
 
 const filesQuery = z.object({ hub: z.string(), every: z.number().int().nullable(), remove: z.array(z.string()).max(20), readme: z.boolean() }).strict();

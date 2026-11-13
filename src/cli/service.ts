@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { TapsterError } from "../errors";
+import { TAPSTER } from "../version";
 import { excerpt } from "../run";
-import { type Ask, LABEL, LAST_PORT, PORT, askService, privateDir, serviceFiles, writePrivate } from "../web/service";
+import { type Ask, LABEL, LAST_PORT, PORT, askService, privateDir, serviceFiles, refreshService, writePrivate } from "../web/service";
 
 export { LABEL };
 import { type Runner, realRunner } from "./runner";
@@ -165,6 +166,11 @@ async function status(io: ServiceIo): Promise<void> {
   else if (!answer) io.say("The tapster service is installed but does not answer. See tapster service logs.");
 }
 
+async function restart(io: ServiceIo): Promise<void> {
+  const next = await refreshService(serviceFiles(io.home).sock, TAPSTER.version, { ask: io.ask, pause: () => Bun.sleep(500) }, true);
+  io.say(next ? `tapster ${next.version} now runs at http://127.0.0.1:${next.port}. Open it with tapster setup.` : "No running tapster service to restart. Install it with tapster service install.");
+}
+
 async function logs(io: ServiceIo): Promise<void> {
   if (io.platform === "darwin") {
     const file = logFile(io.home);
@@ -191,10 +197,11 @@ export const realServiceIo = (): ServiceIo => ({
 
 export async function service(args: string[], io: ServiceIo = realServiceIo()): Promise<void> {
   const [what, ...rest] = args;
-  if (rest.length) throw new TapsterError(`unknown option ${rest.join(" ")}`, "tapster service takes install, uninstall, status or logs.");
+  if (rest.length) throw new TapsterError(`unknown option ${rest.join(" ")}`, "tapster service takes install, uninstall, restart, status or logs.");
   if (what === "install") return install(io);
   if (what === "uninstall") return uninstall(io);
   if (what === "status") return status(io);
+  if (what === "restart") return restart(io);
   if (what === "logs") return logs(io);
-  throw new TapsterError(what ? `unknown service command ${what}` : "tapster service needs a command", "Run tapster service install, uninstall, status or logs.");
+  throw new TapsterError(what ? `unknown service command ${what}` : "tapster service needs a command", "Run tapster service install, uninstall, restart, status or logs.");
 }

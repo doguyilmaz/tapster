@@ -162,6 +162,28 @@ test("a later setup resumes with a dropped .pem of the doorbell App", async () =
   expect(env.vars.get("TAPSTER_DOORBELL")).toBe(again.origin);
 });
 
+test("the browser rotates a working doorbell only at its existing address", async () => {
+  const pem = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString();
+  fake.bell!.pem = pem;
+  const data = () => {
+    const f = new FormData(); f.set("hub", HUB); f.set("pem", new File([pem], "replacement.pem")); f.set("rotate", "true"); return f;
+  };
+  expect((await call("POST", "/api/hub/doorbell/key", data())).status).toBe(200);
+  cf.subdomain = "another-account";
+  await call("POST", "/api/hub/doorbell/cloudflare", { hub: HUB, token: cf.token });
+  const writes = cf.calls.filter((x) => x.startsWith("PUT ")).length;
+  expect((await call("POST", "/api/hub/doorbell/deploy", { hub: HUB, rotate: true })).status).toBe(400);
+  expect(cf.calls.filter((x) => x.startsWith("PUT ")).length).toBe(writes);
+  expect(s.bells.has(HUB)).toBe(true);
+  cf.subdomain = "octo";
+  await call("POST", "/api/hub/doorbell/cloudflare", { hub: HUB, token: cf.token });
+  expect((await call("POST", "/api/hub/doorbell/deploy", { hub: HUB, rotate: true })).data).toEqual({ origin: "https://tapster-doorbell.octo.workers.dev", rung: [], missed: [] });
+  expect(cf.scripts.get("tapster-doorbell")!.secrets.get("APP_KEY")).toBe(createPrivateKey(pem).export({ type: "pkcs8", format: "pem" }).toString());
+  expect(s.bells.has(HUB)).toBe(false);
+  expect(s.cloudflare.has(HUB)).toBe(false);
+  expect(seen.join("\n")).not.toContain(pem.split("\n")[1]!);
+});
+
 test("no response or log line carries the token or a private key", () => {
   const all = seen.join("\n");
   expect(all).not.toContain(cf.token);

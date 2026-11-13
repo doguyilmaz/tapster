@@ -186,6 +186,7 @@ test("running add again keeps the deploy keys and the Dependabot branches it all
   const dependabotOnly = fake([tags({ bypass_actors: keys }), branch({ bypass_actors: keys })]);
   await createProtection(dependabotOnly.gh, "o/p", "main", false, true);
   const bodies = dependabotOnly.writes.map(([, , b]) => b as { bypass_actors: { actor_type: string }[]; conditions: { ref_name: { exclude: string[] } } });
-  expect(bodies.every((b) => b.bypass_actors.some((a) => a.actor_type === "DeployKey"))).toBe(true);
+  expect(bodies[0]!.bypass_actors.some((a) => a.actor_type === "DeployKey")).toBe(true);
+  expect(bodies[1]!.bypass_actors.some((a) => a.actor_type === "DeployKey")).toBe(false);
   expect(bodies[1]!.conditions.ref_name.exclude).toEqual(["refs/heads/dependabot/**"]);
 });

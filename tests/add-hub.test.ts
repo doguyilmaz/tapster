@@ -77,12 +77,11 @@ test("the install link preselects the project", () => {
 
 test("automatic tags add deploy keys to the bypass list and keep the admin", () => {
   const [tags, branches] = rulesetBodies(true);
-  for (const r of [tags!, branches!]) {
-    expect(r.bypass_actors).toEqual([
-      { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" },
-      { actor_id: null, actor_type: "DeployKey", bypass_mode: "always" },
-    ]);
-  }
+  expect(tags!.bypass_actors).toEqual([
+    { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" },
+    { actor_id: null, actor_type: "DeployKey", bypass_mode: "always" },
+  ]);
+  expect(branches!.bypass_actors).toEqual([{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }]);
   expect(rulesetBodies(false)[0]!.bypass_actors).toEqual([{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }]);
 });
 

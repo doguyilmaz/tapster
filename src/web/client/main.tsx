@@ -101,7 +101,7 @@ function Header() {
           }}
         >
           <img src="/logo.webp" alt="" width="28" height="28" />
-          tapster <small>setup</small>
+          tapster <small title={session.value ? `Running tapster ${session.value.version}` : undefined}>setup{session.value && ` · ${session.value.version}`}</small>
         </a>
         {hubName.value && (
           <nav class="nav" aria-label="Sections">

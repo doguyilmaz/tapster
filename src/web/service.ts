@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { TapsterError } from "../errors";
 import { TAPSTER } from "../version";
+import { compareSemver, parseTag } from "../semver";
 import type { Session } from "./server";
 
 export const PORT = 8277;
@@ -66,12 +67,38 @@ export function takeHandoff(s: Session): void {
   s.touched = saved.data.touched;
 }
 
-export type Ask = "pair" | "status" | "stop";
+export type Ask = "pair" | "status" | "stop" | "restart";
+
+const statusSchema = z.object({ version: z.string(), port: z.number().int().min(1024).max(65535), pid: z.number().int().positive() });
+export type ServiceStatus = z.infer<typeof statusSchema>;
+
+// Only the owner can reach this socket. Ask the supervised process to leave before pairing with the installed version.
+// Older services know stop but not restart; they require a fresh pairing, which setup obtains after the restart.
+export async function refreshService(sock: string, version: string, io: { ask: typeof askService; pause(): Promise<void> } = { ask: askService, pause: () => Bun.sleep(500) }, force = false): Promise<ServiceStatus | null> {
+  const read = async () => {
+    const answer = statusSchema.safeParse(await io.ask(sock, "status"));
+    return answer.success ? answer.data : null;
+  };
+  const first = await read();
+  if (!first) return null;
+  const wanted = parseTag(`v${version}`);
+  const current = parseTag(`v${first.version}`);
+  if (!wanted || !current || (!force && compareSemver(current, wanted) >= 0)) return first;
+  if (!(await io.ask(sock, "restart")) && !(await io.ask(sock, "stop"))) throw new TapsterError("the running tapster service could not restart", "Run tapster service restart, then open tapster setup again.");
+  const until = Date.now() + 30_000;
+  for (let i = 0; i < 60 && Date.now() < until; i++) {
+    await io.pause();
+    const next = await read();
+    const actual = next && parseTag(`v${next.version}`);
+    if (next && actual && compareSemver(actual, wanted) >= 0 && next.pid !== first.pid) return next;
+  }
+  throw new TapsterError(`tapster ${version}'s service did not come back`, "Run tapster service status. If it is stopped, run tapster service install, then open tapster setup again.");
+}
 
 export async function askService(sock: string, what: Ask): Promise<unknown | null> {
   if (!existsSync(sock)) return null;
   try {
-    const res = await fetch(`http://tapster/${what}`, { method: what === "stop" ? "POST" : "GET", unix: sock, signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`http://tapster/${what}`, { method: what === "stop" || what === "restart" ? "POST" : "GET", unix: sock, signal: AbortSignal.timeout(3000) });
     return res.ok ? await res.json() : null;
   } catch {
     return null;
@@ -90,7 +117,8 @@ export async function serveSocket(sock: string, s: Session, stop: () => void): P
       const what = `${req.method} ${new URL(req.url).pathname}`;
       if (what === "GET /pair") return Response.json({ link: s.link() });
       if (what === "GET /status") return Response.json({ version: TAPSTER.version, port: s.port, pid: process.pid });
-      if (what === "POST /stop") {
+      if (what === "POST /stop" || what === "POST /restart") {
+        if (what === "POST /restart") handOff(s);
         setTimeout(stop, 50);
         return Response.json({ stopping: true });
       }

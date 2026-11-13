@@ -1,7 +1,9 @@
 import { useEffect, useState } from "preact/hooks";
 import type { AppStart, BellCloud, BellInstallView, CertificateView, DoorbellDone, HubView, LinuxChange, Problem as ProblemView } from "../contract";
 import { expiresSoon, installStep, linuxWrite, toolState } from "../steps";
+import { NewSparkleKey } from "./keys";
 import { CertificateForm, NotaryForm } from "./apple";
+import { CertificateAssignment } from "./certificates";
 import { ApiError, post } from "./api";
 import { doorbellResult, loadHub, problemOf, say, setCloud } from "./state";
 import { KIND } from "./status";
@@ -94,7 +96,7 @@ function BellToken({ h }: { h: HubView }) {
   );
 }
 
-function BellApp({ h }: { h: HubView }) {
+function BellApp({ h, rotate = false }: { h: HubView; rotate?: boolean }) {
   const d = h.extras.doorbell;
   const [start, setStart] = useState<AppStart | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -124,6 +126,7 @@ function BellApp({ h }: { h: HubView }) {
         const data = new FormData();
         data.set("hub", h.name);
         data.set("pem", file);
+        if (rotate) data.set("rotate", "true");
         await post("/api/hub/doorbell/key", data);
         setFile(null);
         await loadHub();
@@ -131,7 +134,7 @@ function BellApp({ h }: { h: HubView }) {
     return (
       <>
         <p class="muted">
-          The hub knows the doorbell App <code>{d.app.slug}</code>, but this setup does not hold its key. GitHub hands a key over only once, so make a new one: open the App's settings, scroll to <strong>Private keys</strong> and click <strong>Generate a private key</strong>.
+          The hub knows the doorbell App <code>{d.app.slug}</code>. {rotate ? "Choose a replacement key to redeploy the existing doorbell." : "This setup does not hold its key."} GitHub hands a key over only once, so make a new one: open the App's settings, scroll to <strong>Private keys</strong> and click <strong>Generate a private key</strong>.
         </p>
         <div class="row">
           <Out href={`https://github.com/settings/apps/${d.app.slug}`}>Open the App's settings</Out>
@@ -222,6 +225,8 @@ function BellInstall({ h, watch }: { h: HubView; watch: Watch }) {
 const COST = "It costs nothing on Cloudflare's free plan, which allows 100,000 requests a day and 5 cron triggers. At a 10 minute interval the doorbell uses about 150 requests a day and one cron trigger.";
 
 function Doorbell({ h }: { h: HubView }) {
+  const [rotating, setRotating] = useState(false);
+  const [rotated, setRotated] = useState(false);
   const d = h.extras.doorbell;
   const watch = useInstall<BellInstallView>(d.key ? `/api/hub/doorbell/installation?hub=${encodeURIComponent(h.name)}` : null, (v) => v.id !== null && v.others.length === 0);
   const [busy, problem, run] = useAction();
@@ -229,10 +234,12 @@ function Doorbell({ h }: { h: HubView }) {
   const installed = d.key && bellStep(h, watch) === "done";
   const ready = Boolean(d.cloudflare && installed);
   const deploy = async () =>
-    (await confirm("Deploy the doorbell to Cloudflare?", <p>tapster deploys the Worker to your Cloudflare account and stores the doorbell App's key there as the Worker's secret.</p>, "Deploy")) &&
+    (await confirm(rotating ? "Replace the doorbell's key?" : "Deploy the doorbell to Cloudflare?", <p>tapster deploys the Worker to your Cloudflare account and stores the doorbell App's key there as the Worker's secret. {rotating && "The existing address stays the same. Revoke the old App key after deployment succeeds."}</p>, rotating ? "Replace and deploy" : "Deploy")) &&
     run(async () => {
-      const res = await post<DoorbellDone>("/api/hub/doorbell/deploy", { hub: h.name });
+      const res = await post<DoorbellDone>("/api/hub/doorbell/deploy", { hub: h.name, rotate: rotating });
       setDone(res);
+      setRotated(rotating);
+      setRotating(false);
       doorbellResult.value = null;
       await loadHub();
       say("ok", `The doorbell answers at ${res.origin}.`);
@@ -245,7 +252,8 @@ function Doorbell({ h }: { h: HubView }) {
       </div>
       <p class="muted">A small Worker on your own Cloudflare account starts the hub as soon as a project opens its draft, instead of at the next scheduled run.</p>
       <p class="muted small">{COST}</p>
-      {d.on ? (
+      {rotated && <Note tone="ok" title="The doorbell uses the replacement key">Delete the downloaded .pem file and revoke older keys in the doorbell App's settings.</Note>}
+      {d.on && !rotating ? (
         <>
           <dl class="facts">
             <dt>Address</dt>
@@ -264,9 +272,7 @@ function Doorbell({ h }: { h: HubView }) {
               </ul>
             </Note>
           )}
-          <p class="faint small">
-            To give it a new key, run <code>bunx @doguyilmaz/tapster init --rotate doorbell</code> in a clone of the hub.
-          </p>
+          <button type="button" class="btn secondary small" onClick={() => setRotating(true)}>Replace the doorbell key</button>
         </>
       ) : !h.protect.environment ? (
         <Note tone="info" title="Protect the hub first">
@@ -278,7 +284,7 @@ function Doorbell({ h }: { h: HubView }) {
             <BellToken h={h} />
           </Step>
           <Step n={2} title="The doorbell App" done={d.key}>
-            <BellApp h={h} />
+            <BellApp h={h} rotate={rotating} />
           </Step>
           <Step n={3} title="Install it on the hub only" done={installed}>
             <BellInstall h={h} watch={watch} />
@@ -288,8 +294,9 @@ function Doorbell({ h }: { h: HubView }) {
             <Problem problem={problem} />
             <div class="row">
               <Busy busy={busy} holds={(v) => v.extras.doorbell} class="btn primary" disabled={!ready} onClick={deploy}>
-                Deploy the doorbell
+                {rotating ? "Replace the key and redeploy" : "Deploy the doorbell"}
               </Busy>
+              {rotating && <button type="button" class="btn quiet small" onClick={() => setRotating(false)} disabled={busy}>Cancel</button>}
             </div>
           </Step>
         </ol>
@@ -406,11 +413,14 @@ function Linux({ h }: { h: HubView }) {
   const l = h.extras.linux;
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [making, makeProblem, make] = useAction();
-  const makeKey = async () =>
-    (await confirm(`Make the Linux signing key for ${h.name}?`, <p>tapster makes a key, stores it as a secret of the hub's tapster environment and keeps a copy on this computer, because GitHub never gives a secret back.</p>, "Make and store the key")) &&
+  const [finishing, finishProblem, finish] = useAction();
+  const [missingPrevious, setMissingPrevious] = useState(false);
+  const makeKey = async (rotate = false) =>
+    (await confirm(rotate ? `Rotate the Linux signing key for ${h.name}?` : `Make the Linux signing key for ${h.name}?`, <p>tapster makes a key, stores it as a secret of the hub's tapster environment and keeps a copy on this computer. {rotate && "The previous key keeps signing alongside it while apt and dnf users fetch the new key. If the previous key is absent from this computer's keychain, those users must refresh their trust manually."}</p>, rotate ? "Rotate the key" : "Make and store the key")) &&
     make(async () => {
-      const res = await post<{ fingerprint: string; keychain: boolean }>("/api/hub/linux/key", { hub: h.name });
+      const res = await post<{ fingerprint: string; keychain: boolean; previous: "kept" | "missing" | null }>("/api/hub/linux/key", { hub: h.name, rotate });
       setFingerprint(res.fingerprint);
+      setMissingPrevious(res.previous === "missing");
       await loadHub();
       say("ok", `Stored the Linux signing key in the hub and in your ${res.keychain ? "login keychain" : "keyring"}.`);
     });
@@ -460,7 +470,7 @@ function Linux({ h }: { h: HubView }) {
             </Note>
             <Problem problem={makeProblem} />
             <div class="row">
-              <Busy busy={making} holds={(v) => v.extras.linux.stored} class="btn primary" onClick={makeKey}>
+              <Busy busy={making} holds={(v) => v.extras.linux.stored} class="btn primary" onClick={() => makeKey()}>
                 <Icon name="key" />
                 Make the signing key
               </Busy>
@@ -477,13 +487,16 @@ function Linux({ h }: { h: HubView }) {
           ) : (
             <Done text="The signing key is stored" />
           )}
-          <p class="faint small">
-            To replace it, run <code>bunx @doguyilmaz/tapster init --rotate linux</code> in a clone of the hub. The{" "}
-            <a href={`${GUIDE}linux/#rotate-the-key`} target="_blank" rel="noopener noreferrer">
-              guide
-            </a>{" "}
-            explains how users move to the new key.
-          </p>
+          {missingPrevious && <Note tone="warn" title="The previous key was not in this computer's keychain">Existing apt and dnf users must fetch the new public key before updating.</Note>}
+          {l.previous && <Note tone="info" title="Linux key rotation in progress">The previous key still signs alongside the new one. Finish only after users have fetched the new public key.</Note>}
+          <Problem problem={makeProblem ?? finishProblem} />
+          <div class="row">
+            <Busy busy={making} holds={(v) => v.extras.linux} class="btn secondary small" disabled={Boolean(l.previous) || !l.gpg || !l.keystore || !h.protect.environment} onClick={() => makeKey(true)}>Rotate the Linux key</Busy>
+            {l.previous && <Busy busy={finishing} holds={(v) => v.extras.linux} class="btn secondary small" onClick={async () => {
+              if (!await confirm("Stop signing with the previous Linux key?", <p>Only users who have fetched the new key can verify future packages. This removes the previous key from the hub and this computer's keychain.</p>, "Finish rotation")) return;
+              void finish(async () => { await post("/api/hub/linux/finish", { hub: h.name }); await loadHub(); say("ok", "Linux key rotation finished."); });
+            }}>Finish Linux key rotation</Busy>}
+          </div>
           {h.files.config ? (
             <LinuxTools h={h} />
           ) : (
@@ -574,7 +587,7 @@ type Opened = { label: string; what: "certificate" | "notary" };
 const NOTARY: Record<"own" | "hub" | "needed", string> = { own: "A key stored for this certificate", hub: "The hub's key, of the same team", needed: "Missing" };
 
 // What a certificate still needs before its entries can sign; null when it needs nothing.
-const certificateGap = (c: CertificateView) => (!c.stored ? "Not stored" : c.notary === "needed" ? "Key missing" : !c.wired ? "Not in the workflow" : null);
+const certificateGap = (c: CertificateView, h: HubView) => (!c.stored ? "Not stored" : c.notary === "needed" || (c.notary === "hub" && !h.apple.notary) ? "Key missing" : !c.wired ? "Not in the workflow" : null);
 
 function notaryText(h: HubView, c: CertificateView): string {
   if (c.notary === "needed") return `Missing: tapster needs a key of team ${c.team}`;
@@ -584,7 +597,7 @@ function notaryText(h: HubView, c: CertificateView): string {
 
 function LabelCertificate({ h, c, open, picked, onOpen, onClose }: { h: HubView; c: CertificateView; open: Opened["what"] | null; picked: boolean; onOpen: (what: Opened["what"]) => void; onClose: (next: Opened["what"] | null) => void }) {
   const hubTeam = h.apple.certificate?.team ?? null;
-  const gap = certificateGap(c);
+  const gap = certificateGap(c, h);
   const cancel = picked ? () => onClose(null) : undefined;
   return (
     <div class="card pad stack tight">
@@ -634,9 +647,9 @@ function LabelCertificate({ h, c, open, picked, onOpen, onClose }: { h: HubView;
               <button type="button" class="btn secondary" onClick={() => onOpen("certificate")}>
                 Replace the certificate
               </button>
-              {c.notary !== "hub" && (
+              {(c.notary !== "hub" || !h.apple.notary) && (
                 <button type="button" class={c.notary === "needed" ? "btn secondary" : "btn quiet"} onClick={() => onOpen("notary")}>
-                  {c.notary === "needed" ? "Store its notarization key" : "Replace its notarization key"}
+                  {c.notary === "needed" || (c.notary === "hub" && !h.apple.notary) ? "Store its notarization key" : "Replace its notarization key"}
                 </button>
               )}
             </>
@@ -651,21 +664,31 @@ function LabelCertificate({ h, c, open, picked, onOpen, onClose }: { h: HubView;
 // misses something opens by itself.
 function Certificates({ h }: { h: HubView }) {
   const list = h.extras.certificates;
+  const [assigning, setAssigning] = useState(false);
+  const [projectName, setProjectName] = useState("");
+  const projects = h.packages.filter((p) => p.macos);
+  const project = projects.find((p) => p.name === projectName) ?? projects[0];
   const [picked, setPicked] = useState<Opened | null>(null);
-  const first = list.find((c) => !c.stored || c.notary === "needed");
+  const first = list.find((c) => !c.stored || c.notary === "needed" || (c.notary === "hub" && !h.apple.notary));
   const open: Opened | null = picked ?? (first ? { label: first.label, what: first.stored ? "notary" : "certificate" } : null);
-  const missing = list.filter((c) => certificateGap(c) !== null).length;
+  const missing = list.filter((c) => certificateGap(c, h) !== null).length;
   // An update that changes the hub's code may be the one that brings certificate labels, so an older pin could refuse them.
   const older = h.files.workflow === "older" && h.files.update !== "optional";
   return (
     <section class="stack tight anchor" id="certificates">
       <div class="spread">
         <h3 class="section-title">Certificates for single apps</h3>
-        <Badge tone={missing ? "warn" : "ok"}>{missing ? `${missing} missing` : "All stored"}</Badge>
+        <Badge tone={missing ? "warn" : list.length ? "ok" : undefined}>{missing ? `${missing} missing` : list.length ? "All stored" : "None added"}</Badge>
       </div>
       <p class="muted">
-        A package signs with the hub's Developer ID certificate unless its entry in tapster.yml says <code>certificate: &lt;label&gt;</code>. You choose that in the entry, under Configuration on the Projects page. Store each certificate here; tapster passes it to the hub workflow on main too.
+        Choose a project and a certificate label, then upload its Developer ID .p12 here. You can change an existing project's choice here or under Configuration on the Projects page. The .p8 notarization key is separate; a different Apple team needs its own key.
       </p>
+      {!assigning ? <div class="row"><button type="button" class="btn secondary" onClick={() => setAssigning(true)} disabled={!h.protect.environment}>Add a certificate</button></div> : project ? <div class="stack tight">
+        <div class="field"><label for="certificate-project">Project</label><select id="certificate-project" class="input" value={project.name} onChange={(e) => setProjectName((e.currentTarget as HTMLSelectElement).value)}>
+          {projects.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+        </select></div>
+        <CertificateAssignment key={`${h.name}:${project.name}:${project.certificate ?? "default"}`} h={h} project={project} onDone={() => setAssigning(false)} onCancel={() => setAssigning(false)} />
+      </div> : <Note tone="info" title="Add a macOS project first"><span>Choose an app-specific certificate while adding the project on the Projects page. After merging its hub entry, upload the .p12 here.</span><button type="button" class="btn quiet small" onClick={() => setAssigning(false)}>Cancel</button></Note>}
       {older && (
         <Note tone="warn" title="Update the hub workflow too">
           <span>The hub runs tapster {h.files.pinned}, older than this one. An older tapster may refuse entries with certificate:, so update the workflow under Hub files.</span>
@@ -696,40 +719,32 @@ function Certificates({ h }: { h: HubView }) {
 }
 
 export function Extras({ h }: { h: HubView }) {
+  const [sparkleLabel, setSparkleLabel] = useState("");
   const missing = h.extras.sparkle.filter((s) => !s.stored);
+  const keyLabel = h.extras.sparkle.some((s) => s.label === sparkleLabel) ? sparkleLabel : missing[0]?.label ?? h.extras.sparkle[0]?.label ?? null;
   return (
     <div class="panel">
       <Head title="Optional extras" lead="The hub works without these. Each one runs from this page; the terminal commands do the same." />
-      {h.extras.certificates.length > 0 && <Certificates h={h} />}
-      <Doorbell h={h} />
-      <Linux h={h} />
-      {h.extras.sparkle.length > 0 && (
-        <section class="stack tight">
+      <Certificates key={h.name} h={h} />
+      <Doorbell key={h.name} h={h} />
+      <Linux key={h.name} h={h} />
+      <section class="stack tight">
           <div class="spread">
             <h3 class="section-title">Sparkle keys</h3>
-            <Badge tone={missing.length ? "warn" : "ok"}>{missing.length ? `${missing.length} missing` : "All stored"}</Badge>
+            <Badge tone={missing.length ? "warn" : "ok"}>{missing.length ? `${missing.length} missing` : h.extras.sparkle.length ? "All stored" : "Not configured"}</Badge>
           </div>
           <p class="muted">Each Mac app signs its update feed with a Sparkle key. tapster keeps it in your keychain and in the hub.</p>
-          {missing[0] && <SparkleKey key={missing[0].label} h={h} label={missing[0].label} />}
-          {missing.length > 1 && <p class="muted small">Then: {missing.slice(1).map((s) => s.label).join(", ")}. One key at a time, so your password manager saves each under its own name.</p>}
-          <p class="faint small">
-            No key yet? Make one in a terminal with <code>bunx @doguyilmaz/tapster init --sparkle &lt;label&gt; --new</code>; see the{" "}
-            <a href={`${GUIDE}sparkle/`} target="_blank" rel="noopener noreferrer">
-              Sparkle guide
-            </a>
-            .
-          </p>
+          {h.extras.sparkle.length > 0 && <>
+            <div class="field"><label for="sparkle-label">Read or store a key</label>
+              <select id="sparkle-label" class="input" value={keyLabel!} onChange={(e) => setSparkleLabel((e.currentTarget as HTMLSelectElement).value)}>
+                {h.extras.sparkle.map((s) => <option key={s.label} value={s.label}>{s.label} · {s.stored ? "Stored" : "Missing"}</option>)}
+              </select>
+            </div>
+            <SparkleKey key={`${h.name}:${keyLabel}`} h={h} label={keyLabel!} />
+          </>}
+          <NewSparkleKey key={h.name} h={h} />
+          <a href={`${GUIDE}sparkle/`} target="_blank" rel="noopener noreferrer" class="small">Read the Sparkle guide</a>
         </section>
-      )}
-      {h.extras.certificates.length === 0 && h.apple.needed && (
-        <p class="faint small">
-          To sign an app with another Developer ID certificate, add <code>certificate: &lt;label&gt;</code> to its entry in tapster.yml (Configuration on the Projects page); see the{" "}
-          <a href={`${GUIDE}certificates/`} target="_blank" rel="noopener noreferrer">
-            certificates guide
-          </a>
-          .
-        </p>
-      )}
     </div>
   );
 }

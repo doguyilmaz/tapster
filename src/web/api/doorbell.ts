@@ -12,7 +12,7 @@ import { everyFromFlow } from "../../cli/schedule";
 import { installLink } from "../../cli/hubpr";
 import type { AppStart, BellCloud, BellInstallView, DoorbellDone, DoorbellView } from "../contract";
 import { type Ctx, type Routes, type Session, readJson } from "../server";
-import { hubFrom, lockedEnvironment } from "./access";
+import { hubFrom, keyOperation, lockedEnvironment } from "./access";
 
 const HOLD = 3_600_000;
 const PEM_LIMIT = 16 * 1024;
@@ -119,17 +119,21 @@ async function key(c: Ctx) {
     throw new TapsterError("the form could not be read", "Reload the page and try again.");
   }
   const { gh, hub } = await hubFrom(c, form.get("hub"));
-  const file = form.get("pem");
-  if (!(file instanceof File) || file.size === 0) throw new TapsterError("no .pem file was attached", "Drop the .pem file GitHub downloaded and try again.");
-  if (file.size > PEM_LIMIT) throw new TapsterError("that .pem file is too large", "Drop the .pem file GitHub downloaded for the doorbell App.");
-  const v = await vars(gh, hub);
-  if (doorbellStage(v) !== "resume") throw new TapsterError("the hub has no doorbell App waiting for a key", "Reload the page.");
-  const id = v.variables.find((x) => x.name === "TAPSTER_DOORBELL_APP_ID")!.value;
-  const slug = v.variables.find((x) => x.name === "TAPSTER_DOORBELL_APP_SLUG")!.value;
-  const pem = await file.text();
-  await checkDoorbellKey(id, slug, pem, c.s.deps.fetch);
-  c.s.bells.set(hub, { id, pem, slug, at: Date.now() });
-  return { held: true };
+  return keyOperation(c.s, hub, async () => {
+    await lockedEnvironment(gh, hub);
+    const rotating = form.get("rotate") === "true";
+    const file = form.get("pem");
+    if (!(file instanceof File) || file.size === 0) throw new TapsterError("no .pem file was attached", "Drop the .pem file GitHub downloaded and try again.");
+    if (file.size > PEM_LIMIT) throw new TapsterError("that .pem file is too large", "Drop the .pem file GitHub downloaded for the doorbell App.");
+    const v = await vars(gh, hub);
+    if (doorbellStage(v) !== (rotating ? "done" : "resume")) throw new TapsterError("the hub has no doorbell App waiting for a key", "Reload the page.");
+    const id = v.variables.find((x) => x.name === "TAPSTER_DOORBELL_APP_ID")!.value;
+    const slug = v.variables.find((x) => x.name === "TAPSTER_DOORBELL_APP_SLUG")!.value;
+    const pem = await file.text();
+    await checkDoorbellKey(id, slug, pem, c.s.deps.fetch);
+    c.s.bells.set(hub, { id, pem, slug, at: Date.now() });
+    return { held: true };
+  });
 }
 
 const heldBell = (s: Session, hub: string) => {
@@ -145,23 +149,32 @@ async function installation(c: Ctx): Promise<BellInstallView> {
 }
 
 async function deploy(c: Ctx): Promise<DoorbellDone> {
-  const { hub } = await readJson(c.req, hubBody);
+  const { hub, rotate = false } = await readJson(c.req, z.object({ hub: z.string(), rotate: z.boolean().optional() }).strict());
   const { gh } = await hubFrom(c, hub);
-  const bell = heldBell(c.s, hub);
-  const cloud = heldCloudflare(c.s, hub);
-  if (!cloud) throw NO_TOKEN();
-  if (!cloud.target) throw new TapsterError("no Cloudflare account is picked yet", "Pick the account for the doorbell in step 1.");
-  if (doorbellStage(await vars(gh, hub)) === "done") throw new TapsterError("the hub already has a doorbell", "To give it a new key, run tapster init --rotate doorbell in a clone of the hub.");
-  const installed = onlyHub(hub, await hubInstallation(bell.id, bell.pem, hub, c.s.deps.fetch));
-  await storeBell(hub, bell);
-  const [flow, config] = await Promise.all([readHubFile(gh, hub, FLOW, "main"), readHubFile(gh, hub, "tapster.yml", "main")]);
-  const every = (flow && everyFromFlow(flow)) || 10;
-  const repos = config === null ? [] : doorbellRepos(config, hub.split("/")[0]!);
-  const origin = await deployDoorbell(gh, new Cloudflare(cloud.token, c.s.deps.fetch), cloud.target, { hub, appId: bell.id, pem: bell.pem, installation: installed, every });
-  const rung = await ringProjects(hub, repos, origin);
-  c.s.cloudflare.delete(hub);
-  c.s.bells.delete(hub);
-  return { origin, ...rung };
+  return keyOperation(c.s, hub, async () => {
+    await lockedEnvironment(gh, hub);
+    const bell = heldBell(c.s, hub);
+    const cloud = heldCloudflare(c.s, hub);
+    if (!cloud) throw NO_TOKEN();
+    if (!cloud.target) throw new TapsterError("no Cloudflare account is picked yet", "Pick the account for the doorbell in step 1.");
+    const target = cloud.target;
+    const current = await vars(gh, hub);
+    const stage = doorbellStage(current);
+    if (stage === "done" && !rotate) throw new TapsterError("the hub already has a doorbell", "Choose Replace the doorbell key to redeploy it with a new key.");
+    if (rotate && stage !== "done") throw new TapsterError("the hub has no working doorbell to rotate", "Set up the doorbell first.");
+    if (rotate && target.origin !== current.variables.find((v) => v.name === "TAPSTER_DOORBELL")?.value) throw new TapsterError("this Cloudflare account does not run the existing doorbell", "Use a token for the account at the existing doorbell address. Nothing was changed.");
+    if (rotate && (bell.id !== current.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_ID")?.value || bell.slug !== current.variables.find((v) => v.name === "TAPSTER_DOORBELL_APP_SLUG")?.value)) throw new TapsterError("the doorbell App changed while this page was open", "Reload and choose the replacement key again.");
+    const installed = onlyHub(hub, await hubInstallation(bell.id, bell.pem, hub, c.s.deps.fetch));
+    await storeBell(hub, bell);
+    const [flow, config] = await Promise.all([readHubFile(gh, hub, FLOW, "main"), readHubFile(gh, hub, "tapster.yml", "main")]);
+    const every = (flow && everyFromFlow(flow)) || 10;
+    const repos = config === null ? [] : doorbellRepos(config, hub.split("/")[0]!);
+    const origin = await deployDoorbell(gh, new Cloudflare(cloud.token, c.s.deps.fetch), target, { hub, appId: bell.id, pem: bell.pem, installation: installed, every });
+    const rung = rotate ? { rung: [], missed: [] } : await ringProjects(hub, repos, origin);
+    c.s.cloudflare.delete(hub);
+    c.s.bells.delete(hub);
+    return { origin, ...rung };
+  });
 }
 
 export const doorbellRoutes: Routes = {

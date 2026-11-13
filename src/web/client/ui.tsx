@@ -185,7 +185,7 @@ export function FileDrop(props: { name: string; id?: string; accept: string; lab
           pick(e.dataTransfer?.files ?? null);
         }}
       >
-        <input type="file" name={props.name} accept={props.accept} aria-labelledby={`${id}-label`} onChange={(e) => pick((e.currentTarget as HTMLInputElement).files)} />
+        <input type="file" id={id} name={props.name} accept={props.accept} aria-labelledby={`${id}-label`} onChange={(e) => pick((e.currentTarget as HTMLInputElement).files)} />
         <Icon name={props.file ? "check" : "upload"} />
         <span>
           {props.file ? (

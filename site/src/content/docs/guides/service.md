@@ -69,6 +69,17 @@ If a check fails, the running version stays. The page shows the reason and the c
 binary was already in place, tapster also turns the service off, so the unchecked binary does not start by itself. After
 you update by hand, `tapster service install` turns it on again.
 
+If you upgraded from a terminal, the page detects that a newer version is already installed and offers **Restart
+with …**. It checks the installed binary before restarting and keeps the page's pairing. `tapster upgrade` also
+restarts the service after the package manager finishes. Opening `tapster setup` from a newer installed version
+refreshes an older service before opening its page. The header shows the version serving the interface.
+
+You can also restart it yourself without reinstalling the service or changing its port:
+
+```sh
+tapster service restart
+```
+
 ## Update the hub
 
 The hub keeps running the tapster version its workflow pins until you move it. After an update the page says

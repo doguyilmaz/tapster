@@ -122,6 +122,12 @@ workflow for inactivity, the Worker turns it back on. A workflow you disabled yo
 
 ## Rotate its key
 
+In **Setup → Optional extras**, click **Replace the doorbell key**. Choose a Cloudflare token for the existing
+account, upload a newly generated private key of the doorbell App and click **Replace the key and redeploy**.
+The address stays the same. Revoke the older App keys on GitHub after the redeployment succeeds.
+
+The terminal does the same:
+
 ```sh
 bunx @doguyilmaz/tapster init --rotate doorbell
 ```

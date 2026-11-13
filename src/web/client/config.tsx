@@ -3,7 +3,8 @@ import type { ConfigView, EntryCheck, Problem as ProblemView, ProjectStatus } fr
 import { capFirst } from "../steps";
 import { post } from "./api";
 import { confirm } from "./confirm";
-import { hubName, problemOf, say, statusOf } from "./state";
+import { hub, hubName, problemOf, say, statusOf } from "./state";
+import { CertificateAssignment } from "./certificates";
 import { Busy, DiffBlock, Icon, Note, Out, Problem, ofProject } from "./ui";
 
 type Opened = { pr: string; head: string; entry: string };
@@ -125,6 +126,8 @@ export function Configuration({ s, onStatus }: { s: ProjectStatus; onStatus: (s:
       say("ok", `Merged the update of ${s.name}.`);
     });
   const p = c.pending;
+  const h = hub.value;
+  const certificateProject = h?.packages.find((p) => p.name === s.name && p.repo === s.repo && p.macos);
   return (
     <section class="stack tight config" aria-labelledby={`config-${s.name}`}>
       <div class="spread">
@@ -201,6 +204,7 @@ export function Configuration({ s, onStatus }: { s: ProjectStatus; onStatus: (s:
         </Note>
       )}
       <Problem problem={problem} />
+      {!editing && !p && h && certificateProject && <CertificateAssignment key={`${h.name}:${s.name}:${certificateProject.certificate ?? "default"}`} h={h} project={certificateProject} onDone={() => void refresh()} />}
     </section>
   );
 }

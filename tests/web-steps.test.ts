@@ -19,6 +19,16 @@ const hub = (o: { apple?: Partial<HubView["apple"]>; files?: Partial<HubView["fi
 
 const status = (h: HubView, id: string) => stops(h, null).find((s) => s.id === id)!.status;
 
+test("app-specific certificates do not require the unused hub default certificate", () => {
+  const h = hub({ apple: { needed: null, certificate: null, certificateStored: false, notary: false }, certificates: [{ label: "app", packages: ["pix"], stored: true, team: "ABCDE12345", expires: "2100-01-01", notary: "own", wired: true }] });
+  for (const choice of [null, "apps"] as const) {
+    const list = stops(h, choice);
+    expect(list.find((s) => s.id === "macos")!.status).toEqual(["App-specific certificates"]);
+    for (const id of ["certificate", "notary"]) expect(list.find((s) => s.id === id)!.state).toBe("skipped");
+  }
+  expect(stops(h, "yes").find((s) => s.id === "certificate")!.status).toEqual(["Not stored yet"]);
+});
+
 test("an older pin needs attention only when the hub's code changed", () => {
   const files = (h: HubView) => stops(h, null).find((s) => s.id === "files")!;
   expect(files(hub({ files: { workflow: "older", update: "needed" } })).state).toBe("attention");
