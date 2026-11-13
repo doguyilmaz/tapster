@@ -7,13 +7,16 @@ sidebar:
 
 Run each command with `bunx @doguyilmaz/tapster <command>`. Every command takes `--help`.
 
-## tapster setup
+## tapster
 
 Opens the setup in your browser: choosing the hub, its protection, the GitHub App, the Apple credentials, the hub files,
 the projects on your computer and the hub's health. Under **Optional extras** it also deploys the
 [doorbell](/guides/doorbell/), makes the [apt and dnf](/guides/linux/) key and stores Sparkle keys and the
 [certificates of single apps](/guides/certificates/). It does what `init`,
 `add` and `doctor` do. It needs no clone of the hub. See [Create the hub](/tutorial/hub/).
+
+Run `tapster` if it is installed or `bunx @doguyilmaz/tapster`. Run `tapster --help` (also `-h` or `help`) to see
+commands and options without opening the page.
 
 | Option | What it does |
 | --- | --- |
@@ -24,9 +27,14 @@ the projects on your computer and the hub's health. Under **Optional extras** it
 The page runs on `127.0.0.1` only. The link it opens works once; press Enter in the terminal for a fresh one. It stops
 with Ctrl+C, with **Close** on the page or after two hours without use.
 
-When the [tapster service](/guides/service/) runs, `tapster setup` without `--port` or `--tapster` asks it for a link and
+When the [tapster service](/guides/service/) runs, `tapster` without `--port` or `--tapster` asks it for a link and
 opens its page instead. `tapster setup --service` is what the service itself runs: it opens no browser, prints no link,
 never stops by itself and reads its port from `~/.config/tapster/service.json`.
+
+## tapster setup
+
+An alias for `tapster`, kept for existing commands and scripts. It accepts the same options listed above.
+Use `tapster setup --help` for its help.
 
 ## tapster service
 

@@ -133,7 +133,7 @@ async function install(io: ServiceIo): Promise<void> {
     await must(io, ["systemctl", "--user", "daemon-reload"]);
     await must(io, ["systemctl", "--user", "enable", "--now", UNIT]);
   }
-  io.say(`tapster setup now runs at http://127.0.0.1:${port} and starts when you log in. Open it with tapster setup.`);
+  io.say(`tapster setup now runs at http://127.0.0.1:${port} and starts when you log in. Open it with tapster.`);
 }
 
 // Stops and removes the agent or the unit. The install itself (Homebrew, Bun or npm) stays.
@@ -155,7 +155,7 @@ async function uninstall(io: ServiceIo): Promise<void> {
   const files = serviceFiles(io.home);
   if ((await io.ask(files.sock, "status")) !== null) await io.ask(files.sock, "stop");
   rmSync(files.dir, { recursive: true, force: true });
-  io.say("The tapster service is gone. tapster itself stays installed; tapster setup still works as before.");
+  io.say("The tapster service is gone. tapster itself stays installed; run tapster to open it when you need it.");
 }
 
 async function status(io: ServiceIo): Promise<void> {
@@ -168,7 +168,7 @@ async function status(io: ServiceIo): Promise<void> {
 
 async function restart(io: ServiceIo): Promise<void> {
   const next = await refreshService(serviceFiles(io.home).sock, TAPSTER.version, { ask: io.ask, pause: () => Bun.sleep(500) }, true);
-  io.say(next ? `tapster ${next.version} now runs at http://127.0.0.1:${next.port}. Open it with tapster setup.` : "No running tapster service to restart. Install it with tapster service install.");
+  io.say(next ? `tapster ${next.version} now runs at http://127.0.0.1:${next.port}. Open it with tapster.` : "No running tapster service to restart. Install it with tapster service install.");
 }
 
 async function logs(io: ServiceIo): Promise<void> {

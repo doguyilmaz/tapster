@@ -15,8 +15,11 @@ You need [Bun](https://bun.sh) and the GitHub CLI, signed in with `gh auth login
 Developer account.
 
 ```sh
-bunx @doguyilmaz/tapster setup
+bunx @doguyilmaz/tapster
 ```
+
+If tapster is already installed, run `tapster`. Use `tapster --help` for commands and options.
+`tapster setup` remains available as an alias.
 
 A page opens in your browser, served by your own computer. It walks you through every step and shows what each one
 changes on GitHub:

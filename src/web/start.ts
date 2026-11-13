@@ -42,7 +42,7 @@ export function setupOptions(args: string[]): SetupOptions {
     if (a === "--no-open") o.open = false;
     else if (a === "--port" && next && /^\d{2,5}$/.test(next) && Number(next) >= 1024 && Number(next) <= 65535) o.port = Number(args[++i]);
     else if (a === "--tapster" && next && /^[0-9a-f]{40}$/.test(next)) o.pin = args[++i]!;
-    else throw new TapsterError(`unknown option ${a}`, "Run tapster setup --help for the options.");
+    else throw new TapsterError(`unknown option ${a}`, "Run tapster --help for the options.");
   }
   return o;
 }
