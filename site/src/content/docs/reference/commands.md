@@ -15,7 +15,7 @@ the projects on your computer and the hub's health. Under **Optional extras** it
 [certificates of single apps](/guides/certificates/). It does what `init`,
 `add` and `doctor` do. It needs no clone of the hub. See [Create the hub](/tutorial/hub/).
 
-Run `tapster` if it is installed, or `bunx @doguyilmaz/tapster`. Run `tapster --help` (also `-h` or `help`) to see
+Run `tapster` if it is installed or `bunx @doguyilmaz/tapster`. Run `tapster --help` (also `-h` or `help`) to see
 commands and options without opening the page.
 
 | Option | What it does |
