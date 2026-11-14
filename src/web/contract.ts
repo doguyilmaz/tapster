@@ -113,6 +113,10 @@ export type Unpushed = { sha: string; subject: string; tapster: boolean };
 
 export type CommitResult = { committed: boolean; ahead: number | null; unpushed: Unpushed[] };
 
+export type SyncView =
+  | { state: "changes"; files: string[] }
+  | { state: "synced"; branch: string; from: string | null; stashed: boolean; fetched: boolean; pulled: number; diverged: { ahead: number; behind: number } | null };
+
 export type AddOptionsView = { workflow: string; autoTag: boolean; auto?: "daily" | "push" | "off" | null; certificate?: string; dependabot: boolean; force: boolean };
 
 export type AddView = { lines: string[]; pr: string | null; head: string | null; entry: string | null; installUrl: string; files: string[] };
