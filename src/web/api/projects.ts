@@ -7,7 +7,8 @@ import { readGit } from "../../clone";
 import { TOOLS, runPath } from "../../run";
 import { addOptions, addProject, findApp, prepare, projectName } from "../../cli/add";
 import { binName, hubEntries, hubFacts } from "../../cli/hubpr";
-import type { AddView, CommitResult, DiffView, InspectView, ScanView, Unpushed } from "../contract";
+import type { AddView, CommitResult, DiffView, InspectView, ScanView, SyncView, Unpushed } from "../contract";
+import { syncClone } from "../sync";
 import { defaultRoots, insideHome, oneClonePerRepo, originRepo, projectKind, readSmall, releaseMacos, scanClones } from "../scan";
 import { type Ctx, type Routes, readJson } from "../server";
 import { checkHub, me } from "./hub";
@@ -271,6 +272,19 @@ async function push(c: Ctx) {
   return { pushed: true };
 }
 
+async function sync(c: Ctx): Promise<SyncView> {
+  const body = await readJson(c.req, z.object({ path: z.string(), stash: z.boolean() }).strict());
+  const { gh, login } = await me(c.s);
+  const dir = clonePath(body.path, c.s.deps.home);
+  const repo = cloneRepo(dir, login);
+  const run = (args: string[], timeoutMs?: number) =>
+    git(dir, args, { user: true, timeoutMs }).catch((e) => {
+      if (e instanceof TapsterError) return { code: 1, stdout: "", stderr: e.reason, bytes: Buffer.alloc(0) };
+      throw e;
+    });
+  return syncClone(run, dir, (await gh.getRepo(repo)).default_branch, body.stash);
+}
+
 export const projectRoutes: Routes = {
   "POST /api/projects/scan": scan,
   "POST /api/projects/inspect": inspect,
@@ -279,4 +293,5 @@ export const projectRoutes: Routes = {
   "POST /api/projects/diff": diff,
   "POST /api/projects/commit": commit,
   "POST /api/projects/push": push,
+  "POST /api/projects/sync": sync,
 };

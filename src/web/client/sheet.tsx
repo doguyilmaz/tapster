@@ -9,6 +9,7 @@ import { confirm } from "./confirm";
 import { hub, loadClones, loadHub, problemOf, recall, remember, say, statusCached, statusError, statuses, statusOf, tilde } from "./state";
 import { CertificateChoice, validCertificateLabel } from "./certificates";
 import { KIND, Mark, StatusCard } from "./status";
+import { BranchSync } from "./sync";
 import { Badge, Busy, Cmd, DiffBlock, Icon, Note, Problem, Spinner, useTrap } from "./ui";
 
 export type SheetTarget = { repo: string; path: string | null; others: string[]; listed: boolean; settings?: boolean };
@@ -182,7 +183,7 @@ function Changes({ repo, path, files, ahead, unpushed }: { repo: string; path: s
 
 const ONE_GO = "tapster.oneGo";
 
-function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: InspectView; hubName: string; status: ProjectStatus | null; onAdded: (a: AddView) => void; onOneGo: (o: AddOptionsView) => void; onCancel: (() => void) | null }) {
+function AddForm({ info, hubName, status, onAdded, onOneGo, onSynced, onCancel }: { info: InspectView; hubName: string; status: ProjectStatus | null; onAdded: (a: AddView) => void; onOneGo: (o: AddOptionsView) => void; onSynced: () => void; onCancel: (() => void) | null }) {
   const [workflow, setWorkflow] = useState(info.workflow ?? "release.yml");
   const [autoTag, setAutoTag] = useState(status?.release.autoTag ?? false);
   const [auto, setAuto] = useState<AddOptionsView["auto"]>(info.auto ?? null);
@@ -240,11 +241,7 @@ function AddForm({ info, hubName, status, onAdded, onOneGo, onCancel }: { info: 
         <dt>Hub</dt>
         <dd>{info.inHub ? "Already in the hub" : info.proposed ? "Proposed, waiting for you to merge" : "Not in the hub yet"}</dd>
       </dl>
-      {info.branch !== info.defaultBranch && (
-        <Note tone="warn" title={`This clone is on ${info.branch}, not ${info.defaultBranch}`}>
-          <span>tapster changes the files on {info.branch}. Releases use the workflow on {info.defaultBranch}, so the change counts once it is merged there.</span>
-        </Note>
-      )}
+      <BranchSync info={info} onSynced={onSynced} />
       {info.dirty.length > 0 && (
         <Note tone="warn" title="Uncommitted changes in files tapster edits">
           <span>{info.dirty.join(", ")}. Commit or stash them first, so tapster's changes stay apart from yours.</span>
@@ -564,6 +561,10 @@ export function ProjectSheet({ target, hubName, onClose }: { target: SheetTarget
               onAdded(a);
             }}
             onOneGo={(o) => void oneGo(o)}
+            onSynced={() => {
+              if (path) void inspect(path);
+              void loadClones().catch(() => undefined);
+            }}
             onCancel={status ? () => setEditing(false) : null}
           />
         )
